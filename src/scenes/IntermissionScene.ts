@@ -80,6 +80,8 @@ export class IntermissionScene extends Phaser.Scene {
   private shopRerolls = 0;
   private shopReady = false;
   private spinRays: Phaser.GameObjects.Image[] = [];
+  private toasts: string[] = [];
+  private toastBusy = false;
 
   constructor() {
     super('Intermission');
@@ -95,6 +97,8 @@ export class IntermissionScene extends Phaser.Scene {
     this.shopRerolls = 0;
     this.shopReady = false;
     this.spinRays = [];
+    this.toasts = [];
+    this.toastBusy = false;
 
     warmBackdrop(this, W, H);
     const kb = this.input.keyboard!;
@@ -703,10 +707,33 @@ export class IntermissionScene extends Phaser.Scene {
   // ---------- 小部件 ----------
 
   private toast(text: string): void {
-    const t = displayLabel(this, W / 2, 100, text, 24, COLOR.goldText)
-      .setOrigin(0.5)
-      .setDepth(200);
-    this.tweens.add({ targets: t, alpha: 0, y: 70, delay: 1800, duration: 500, onComplete: () => t.destroy() });
+    this.toasts.push(text);
+    if (!this.toastBusy) this.nextToast();
+  }
+
+  private nextToast(): void {
+    const text = this.toasts.shift();
+    if (!text) {
+      this.toastBusy = false;
+      return;
+    }
+    this.toastBusy = true;
+    const badge = pill(this, 685, 35, `★ ${text}`, 0x282012, COLOR.gold, COLOR.goldText, 16, 16, 34)
+      .setDepth(200)
+      .setScale(0.9)
+      .setAlpha(0);
+    this.tweens.add({ targets: badge, alpha: 1, scale: 1, duration: 160, ease: 'Back.Out' });
+    this.tweens.add({
+      targets: badge,
+      alpha: 0,
+      y: 22,
+      delay: 2200,
+      duration: 360,
+      onComplete: () => {
+        badge.destroy();
+        this.nextToast();
+      },
+    });
   }
 
   private fitImage(x: number, y: number, key: string, size: number): Phaser.GameObjects.Image {
