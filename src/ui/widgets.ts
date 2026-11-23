@@ -30,6 +30,7 @@ export const TAG_STYLE: Record<WeaponTag, { bg: number; border: number; text: st
   甲角: { bg: 0x342014, border: 0xc87a38, text: '#ffca88' },
   尖刺: { bg: 0x381820, border: 0xd05264, text: '#ff9ea8' },
   投掷: { bg: 0x162a3a, border: 0x4ea0d4, text: '#9ad8ff' },
+  枪械: { bg: 0x2a241a, border: 0xd8a848, text: '#ffe296' },
   腺体: { bg: 0x1b3014, border: 0x68be3a, text: '#baf488' },
   共生: { bg: 0x143024, border: 0x40b07a, text: '#96f0c0' },
   火焰: { bg: 0x3c1c0c, border: 0xee7828, text: '#ffae6e' },

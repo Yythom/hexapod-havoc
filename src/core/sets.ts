@@ -28,6 +28,11 @@ export const SETS: Record<WeaponTag, [SetLevel, SetLevel, SetLevel]> = {
     { stats: { range: 50 }, text: '射程 +50' },
     { stats: { range: 75 }, text: '射程 +75' },
   ],
+  枪械: [
+    { stats: { range: 20, ranged: 1 }, text: '射程 +20，远程 +1' },
+    { stats: { range: 40, ranged: 2 }, text: '射程 +40，远程 +2' },
+    { stats: { range: 60, ranged: 4, attackSpeedPct: 0.1 }, text: '射程 +60，远程 +4，攻速 +10%' },
+  ],
   腺体: [
     { stats: { toxin: 2 }, text: '毒素 +2' },
     { stats: { toxin: 4 }, text: '毒素 +4' },

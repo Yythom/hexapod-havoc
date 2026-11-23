@@ -557,6 +557,8 @@ export class WeaponSystem {
 }
 
 function sparkColor(def: WeaponDef): number {
+  if (def.id === 'lasergun') return 0x6cf2ff;
+  if (def.tags.includes('枪械')) return 0xffcf54;
   if (def.kind === 'toxin') return 0xb8ff58;
   if (def.tags.includes('火焰')) return 0xff8a30;
   if (def.onHit?.freeze) return 0xbfefff;
@@ -565,7 +567,9 @@ function sparkColor(def: WeaponDef): number {
 }
 
 function shotSound(def: WeaponDef) {
+  if (def.id === 'lasergun') return 'zap' as const;
   if (def.kind === 'toxin') return 'spray' as const;
   if (def.tags.includes('火焰')) return 'flame' as const;
+  if ((def.projectile?.count ?? 1) >= 4) return 'shootHeavy' as const;
   return def.damage >= 14 ? ('shootHeavy' as const) : ('shoot' as const);
 }

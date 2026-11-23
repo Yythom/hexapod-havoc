@@ -18,6 +18,7 @@ import { ITEM_ICONS } from './itemIcons';
 import { M6_ITEM_ICONS } from './itemIconsM6';
 import { WEAPON_ICONS } from './weaponIcons';
 import { M6_WEAPON_ICONS } from './weaponIconsM6';
+import { GUN_WEAPON_ICONS } from './weaponIconsGuns';
 
 export const TIER_ROMAN = ['I', 'II', 'III', 'IV'] as const;
 
@@ -216,7 +217,7 @@ const drawChest: Draw2D = (ctx) => {
 };
 
 export function generateIcons(scene: Phaser.Scene): void {
-  for (const [key, draw] of Object.entries({ ...WEAPON_ICONS, ...M6_WEAPON_ICONS })) {
+  for (const [key, draw] of Object.entries({ ...WEAPON_ICONS, ...M6_WEAPON_ICONS, ...GUN_WEAPON_ICONS })) {
     for (let tier = 0; tier <= 3; tier++) {
       bakeWeaponVariant(scene, weaponTex(key, tier, false), draw, SPRITE_RES, tier, 0);
       bakeWeaponVariant(scene, weaponTex(key, tier, true), draw, 4, tier, 2);
@@ -341,6 +342,72 @@ export function generateIcons(scene: Phaser.Scene): void {
       cCircle(ctx, 10, 10, 5.8, g, '#665e8a', 1.4);
       cLine(ctx, [5.5, 7.6, 14.5, 12.2], '#8e8eb4', 1);
       cLine(ctx, [6, 13, 14, 6.8], '#8e8eb4', 1);
+    },
+    SPRITE_RES,
+  );
+
+  // ---------- 枪械弹道（纯平赛璐璐粗黑漫画轮廓） ----------
+  bake2D(
+    scene,
+    'bullet',
+    16,
+    8,
+    (ctx) => {
+      cPoly(ctx, [1, 2.2, 10.5, 1.8, 15, 4, 10.5, 6.2, 1, 5.8], '#050507');
+      cRoundRect(ctx, 2, 2.6, 8.2, 2.8, 1, '#f0a624');
+      cPoly(ctx, [9.8, 2.4, 14.2, 4, 9.8, 5.6], '#fff29c');
+    },
+    SPRITE_RES,
+  );
+  bake2D(
+    scene,
+    'pellet',
+    11,
+    11,
+    (ctx) => {
+      cCircle(ctx, 5.5, 5.5, 4.4, '#ff7828', '#050507', 1.6);
+      cCircle(ctx, 4.6, 4.4, 1.8, '#ffe690');
+    },
+    SPRITE_RES,
+  );
+  bake2D(
+    scene,
+    'heavybullet',
+    22,
+    10,
+    (ctx) => {
+      cPoly(ctx, [1, 2.4, 14.5, 1.8, 21, 5, 14.5, 8.2, 1, 7.6], '#050507');
+      cRoundRect(ctx, 2, 3, 12.2, 4, 1.2, '#e27c24');
+      cPoly(ctx, [13.8, 2.6, 19.8, 5, 13.8, 7.4], '#fff4ae');
+      cLine(ctx, [3.2, 4.1, 13.2, 4.1], '#ffffff', 0.9);
+    },
+    SPRITE_RES,
+  );
+  bake2D(
+    scene,
+    'laserbolt',
+    24,
+    9,
+    (ctx) => {
+      cRoundRect(ctx, 1, 1.6, 22, 5.8, 2.9, '#1ce0ff', '#050507', 1.4);
+      cRoundRect(ctx, 3.2, 3.0, 17.6, 3.0, 1.5, '#ffffff');
+    },
+    SPRITE_RES,
+  );
+  bake2D(
+    scene,
+    'rocketproj',
+    24,
+    14,
+    (ctx) => {
+      // 尾焰
+      cPoly(ctx, [0.5, 7, 5.5, 3.8, 5.5, 10.2], '#ff8e24', '#050507', 1.2);
+      // 弹翼
+      cPoly(ctx, [5, 2.2, 10, 4.8, 10, 9.2, 5, 11.8], '#464d5a', '#050507', 1.2);
+      // 弹体 + 红弹头
+      cRoundRect(ctx, 6.2, 4.2, 10.2, 5.6, 1.6, '#b0b8c8', '#050507', 1.4);
+      cPoly(ctx, [15.4, 4.0, 22.8, 7, 15.4, 10.0], '#e8382c', '#050507', 1.4);
+      cLine(ctx, [7.8, 5.4, 15, 5.4], '#ffffff', 1.0);
     },
     SPRITE_RES,
   );

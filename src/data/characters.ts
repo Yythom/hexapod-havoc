@@ -73,9 +73,9 @@ const LIST: CharacterDef[] = [
     shell: 'beetle-stag',
     stats: {},
     perks: { freeReroll: true },
-    pros: ['每次进商店，第一次刷新免费', '初始武器三选一'],
+    pros: ['每次进商店，第一次刷新免费', '初始武器四选一'],
     cons: [],
-    startWeapons: ['mandible', 'slingshot', 'acid'],
+    startWeapons: ['mandible', 'slingshot', 'acid', 'pistol'],
     unlock: null,
   },
   {
