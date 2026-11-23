@@ -16,7 +16,7 @@ const PAD = 6;
 
 export function ensureDamageFont(scene: Phaser.Scene): void {
   if (scene.cache.bitmapFont.exists(DAMAGE_FONT)) return;
-  const font = `900 ${DAMAGE_FONT_SIZE}px ${NUM_FONT}`;
+  const font = `bold ${DAMAGE_FONT_SIZE}px ${NUM_FONT}`;
   const measure = document.createElement('canvas').getContext('2d')!;
   measure.font = font;
   const widths = [...GLYPHS].map((ch) => Math.ceil(measure.measureText(ch).width));

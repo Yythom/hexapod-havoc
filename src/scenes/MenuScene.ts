@@ -176,8 +176,8 @@ export class MenuScene extends Phaser.Scene {
     const titleObj = this.add
       .text(LX - 4, 218, '六足战虫', {
         fontFamily: DISPLAY_FONT,
-        fontSize: '94px',
-        fontStyle: '900',
+        fontSize: '98px',
+        fontStyle: 'bold',
         color: '#f4f3ee',
         stroke: '#050507',
         strokeThickness: 18,

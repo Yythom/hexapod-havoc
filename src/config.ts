@@ -9,11 +9,11 @@ export const WORLD_HEIGHT = 1400;
 export const WORLD_MARGIN = 56;
 
 export const FONT_FAMILY =
-  '"Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  '"ZCOOL KuaiLe", "Lilita One", "Noto Sans SC", "PingFang SC", sans-serif';
 export const DISPLAY_FONT =
-  '"Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  '"Lilita One", "ZCOOL KuaiLe", "Noto Sans SC", "PingFang SC", sans-serif';
 export const NUM_FONT =
-  '"Rubik", "Noto Sans SC", "PingFang SC", "DIN Alternate", sans-serif';
+  '"Lilita One", "ZCOOL KuaiLe", "DIN Alternate", "Impact", sans-serif';
 
 /** 触屏为主的设备（手机、平板） */
 export const IS_COARSE_POINTER =

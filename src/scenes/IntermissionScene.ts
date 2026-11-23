@@ -524,7 +524,7 @@ export class IntermissionScene extends Phaser.Scene {
       if (n > 1) {
         root.add(
           this.add
-            .text(cx + 24, cy + 25, `×${n}`, { fontFamily: NUM_FONT, fontSize: '14px', fontStyle: '900', color: '#ffffff', stroke: '#050507', strokeThickness: 4 })
+            .text(cx + 24, cy + 25, `×${n}`, { fontFamily: NUM_FONT, fontSize: '14px', fontStyle: 'bold', color: '#ffffff', stroke: '#050507', strokeThickness: 4 })
             .setOrigin(1, 1),
         );
       }

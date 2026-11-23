@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH } from '../config';
+import { DISPLAY_FONT, GAME_HEIGHT, GAME_WIDTH } from '../config';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { WAVES } from '../data/waves';
@@ -73,9 +73,9 @@ export class ResultScene extends Phaser.Scene {
     }
     this.add
       .text(W / 2, 108, r.win ? '守住了树桩！' : '被虫潮淹没了…', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '58px',
-        fontStyle: '900',
+        fontFamily: DISPLAY_FONT,
+        fontSize: '60px',
+        fontStyle: 'bold',
         color: r.win ? '#ffd44c' : '#ff5d57',
         stroke: '#050507',
         strokeThickness: 14,

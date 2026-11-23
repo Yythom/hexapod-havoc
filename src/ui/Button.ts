@@ -329,7 +329,7 @@ export function createButton(
     .text(0, 0, label, {
       fontFamily: DISPLAY_FONT,
       fontSize: fontPx(opts.fontSize ?? 26),
-      fontStyle: primary || opts.variant === 'emerald' ? '900' : '700',
+      fontStyle: 'bold',
       color: colors.text,
     })
     .setOrigin(0.5);

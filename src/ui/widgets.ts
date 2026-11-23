@@ -72,7 +72,7 @@ export function label(
   return scene.add.text(x, y, str, {
     fontFamily: FONT_FAMILY,
     fontSize: fontPx(size),
-    fontStyle: bold ? '700' : '500',
+    fontStyle: bold ? 'bold' : 'normal',
     color,
     align: 'center',
     wordWrap: wrapWidth > 0 ? { width: wrapWidth, useAdvancedWrap: true } : undefined,
@@ -91,7 +91,7 @@ export function cardTitle(
   return scene.add.text(x, y, str, {
     fontFamily: DISPLAY_FONT,
     fontSize: fontPx(size),
-    fontStyle: '700',
+    fontStyle: 'bold',
     color,
     shadow: { offsetX: 1, offsetY: 2, color: '#050507', blur: 0, fill: true, stroke: false },
   });
@@ -111,7 +111,7 @@ export function displayLabel(
   return scene.add.text(x, y, str, {
     fontFamily: DISPLAY_FONT,
     fontSize: fontPx(size),
-    fontStyle: '900',
+    fontStyle: 'bold',
     color,
     stroke,
     strokeThickness: thickness,
@@ -132,7 +132,7 @@ export function numLabel(
   return scene.add.text(x, y, str, {
     fontFamily: NUM_FONT,
     fontSize: fontPx(size),
-    fontStyle: '900',
+    fontStyle: 'bold',
     color,
     stroke,
     strokeThickness: Math.max(4, Math.round(size * 0.18)),
