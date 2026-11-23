@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { DEPTH, WORLD_HEIGHT, WORLD_WIDTH } from '../config';
+import { MAX_SCREEN_RANGE } from '../core/combat';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Effects } from './Effects';
 import type { HitResolver, HitSource } from './HitResolver';
@@ -63,7 +64,7 @@ const APHID_HP = 10;
 const APHID_SPEED = 210;
 const APHID_RADIUS = 8;
 const RESPAWN_TIME = 5;
-const SEEK_RANGE = 420;
+const SEEK_RANGE = MAX_SCREEN_RANGE;
 /** 飞蛾：绕身半径、角速度、碰撞半径 */
 const MOTH_ORBIT = 70;
 const MOTH_SPIN = 3;

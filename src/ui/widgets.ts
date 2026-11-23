@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { DISPLAY_FONT, FONT_FAMILY, NUM_FONT, fontPx } from '../config';
-import { growthBonus, weaponDamage } from '../core/combat';
+import { effectiveRange, growthBonus, weaponDamage } from '../core/combat';
 import type { OwnedWeapon } from '../core/RunState';
 import { attackInterval, BASE_STATS, formatStat, formatStatDelta, STAT_KEYS, STAT_META, type Stats } from '../core/stats';
 import { MOD_LABEL, type ItemDef, type Mods } from '../data/items';
@@ -358,7 +358,7 @@ export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mo
   const interval = isDevice
     ? (def.cooldown * TIERS[tier].cooldown) / (def.device!.type === 'turret' ? Math.max(0.2, 1 + mods.turretSpeedPct) : 1)
     : attackInterval(def.cooldown * TIERS[tier].cooldown, stats);
-  const range = def.range + (def.kind === 'melee' ? stats.range * 0.5 : def.summon || isDevice ? 0 : stats.range);
+  const range = effectiveRange(def, stats);
   const dmgLabel =
     def.summon?.type === 'web' ? `每秒伤害 ${Math.round(dmg)}` : def.summon ? `每只伤害 ${Math.round(dmg)}` : def.beam ? `每次伤害 ${Math.round(dmg)}` : `伤害 ${Math.round(dmg)}`;
   let timing: string;

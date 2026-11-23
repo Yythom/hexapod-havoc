@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { sfx } from '../audio/sfx';
 import { DEPTH } from '../config';
-import { rollDamage, weaponDamage } from '../core/combat';
+import { effectiveRange, MAX_SCREEN_RANGE, rollDamage, weaponDamage } from '../core/combat';
 import type { OwnedWeapon } from '../core/RunState';
 import { attackInterval, type Stats } from '../core/stats';
 import type { Mods } from '../data/items';
@@ -244,7 +244,7 @@ export class WeaponSystem {
   }
 
   private rangeOf(def: WeaponDef, stats: Stats): number {
-    return def.range + (def.kind === 'melee' ? stats.range * 0.5 : def.summon || def.device ? 0 : stats.range);
+    return effectiveRange(def, stats);
   }
 
   /** 攻击间隔：吃攻速；蜂蜜罐低血时再快 30% */
@@ -278,7 +278,7 @@ export class WeaponSystem {
         y,
         angle: s.aim + offset + (Math.random() * 2 - 1) * proj.spread,
         speed: proj.speed,
-        maxDist: lob ? Math.min(range, Math.hypot(target.x - x, target.y - y)) : solid ? range : range + 60,
+        maxDist: lob ? Math.min(range, Math.hypot(target.x - x, target.y - y)) : Math.min(MAX_SCREEN_RANGE, solid ? range : range + 15),
         damage,
         crit,
         radius: proj.radius,

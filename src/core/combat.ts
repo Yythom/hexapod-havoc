@@ -1,7 +1,17 @@
+import { CAMERA_ZOOM, GAME_HEIGHT } from '../config';
 import type { Mods } from '../data/items';
 import { TIERS, type WeaponDef } from '../data/weapons';
 import type { OwnedWeapon } from './RunState';
 import type { Stats } from './stats';
+
+/** 武器极限射程上限：保证上下左右任意方向都不超过屏幕可见边界（扣掉角色腿尖挂点偏移） */
+export const MAX_SCREEN_RANGE = Math.floor(GAME_HEIGHT / (2 * CAMERA_ZOOM)) - 38;
+
+/** 武器在当前属性下的实际射程（任何加成都不超过屏幕边界上限） */
+export function effectiveRange(def: WeaponDef, stats: Stats): number {
+  const bonus = def.kind === 'melee' ? stats.range * 0.5 : def.summon || def.device ? 0 : stats.range;
+  return Math.max(40, Math.min(MAX_SCREEN_RANGE, def.range + bonus));
+}
 
 /** 成长型武器已经长出来的固定伤害 */
 export function growthBonus(def: WeaponDef, owned: OwnedWeapon | null | undefined): number {
