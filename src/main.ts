@@ -1,6 +1,8 @@
-import '@fontsource/lilita-one/latin.css';
-import '@fontsource/zcool-kuaile/chinese-simplified.css';
-import '@fontsource/zcool-kuaile/latin.css';
+import '@fontsource/noto-sans-sc/500.css';
+import '@fontsource/noto-sans-sc/700.css';
+import '@fontsource/noto-sans-sc/900.css';
+import '@fontsource/rubik/latin-700.css';
+import '@fontsource/rubik/latin-900.css';
 import Phaser from 'phaser';
 import { sfx } from './audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from './config';
@@ -29,8 +31,11 @@ async function preloadFonts(): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts?.load) return;
   await Promise.race([
     Promise.all([
-      document.fonts.load('400 48px "Lilita One"', '0123456789HEXAPODLV'),
-      document.fonts.load('400 48px "ZCOOL KuaiLe"', '六足战虫开始战斗'),
+      document.fonts.load('500 24px "Noto Sans SC"', '六足战虫商店属性伤害射程'),
+      document.fonts.load('700 32px "Noto Sans SC"', '六足战虫开始战斗商店属性'),
+      document.fonts.load('900 64px "Noto Sans SC"', '六足战虫开始战斗守住树桩第波'),
+      document.fonts.load('700 32px "Rubik"', '0123456789+-LV.%'),
+      document.fonts.load('900 48px "Rubik"', '0123456789+-LV.%'),
     ]),
     new Promise<void>((resolve) => setTimeout(resolve, 2500)),
   ]);

@@ -74,8 +74,8 @@ export class ResultScene extends Phaser.Scene {
     this.add
       .text(W / 2, 108, r.win ? '守住了树桩！' : '被虫潮淹没了…', {
         fontFamily: FONT_FAMILY,
-        fontSize: '60px',
-        fontStyle: 'bold',
+        fontSize: '58px',
+        fontStyle: '900',
         color: r.win ? '#ffd44c' : '#ff5d57',
         stroke: '#050507',
         strokeThickness: 14,

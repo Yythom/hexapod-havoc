@@ -21,7 +21,7 @@ function style(size: number, color = '#f2f1ec', num = false): Phaser.Types.GameO
   return {
     fontFamily: num ? NUM_FONT : FONT_FAMILY,
     fontSize: `${size}px`,
-    fontStyle: 'bold',
+    fontStyle: num ? '900' : '700',
     color,
     stroke: '#050507',
     strokeThickness: Math.max(4, Math.round(size / 5.5)),
