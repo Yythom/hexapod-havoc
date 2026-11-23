@@ -1,12 +1,13 @@
-import { ITEMS } from '../data/items';
-import { SHOP_WEAPONS, TIERS } from '../data/weapons';
+import { ITEMS, type ItemDef } from '../data/items';
+import { SHOP_WEAPONS, TIERS, type WeaponDef, type WeaponKind, type WeaponTag } from '../data/weapons';
 import { rollTier } from './progression';
 import type { RunState } from './RunState';
 
-/** 商店规则，见 DESIGN.md 2.4 ~ 2.7 */
+/** 商店规则：含流派关联加权与无用道具过滤 */
 
 export const OFFER_COUNT = 4;
-const WEAPON_OFFER_CHANCE = 0.35;
+const WEAPON_OFFER_CHANCE = 0.36;
+const WEAPON_OFFER_CHANCE_FILLING = 0.5;
 const SELL_RATIO = 0.35;
 const MAX_TIER = TIERS.length - 1;
 
@@ -15,6 +16,98 @@ export interface Offer {
   id: string;
   tier: number;
   locked: boolean;
+}
+
+interface BuildProfile {
+  weaponIds: Set<string>;
+  kinds: Set<WeaponKind>;
+  tags: Set<WeaponTag>;
+  hasMelee: boolean;
+  hasRanged: boolean;
+  hasToxin: boolean;
+  hasSummon: boolean;
+  hasTurret: boolean;
+  hasMine: boolean;
+  hasDevice: boolean;
+  hasBurn: boolean;
+  hasFreeze: boolean;
+  hasChain: boolean;
+  hasBounce: boolean;
+}
+
+function pickWeighted<T>(items: T[], weightOf: (item: T) => number): T {
+  let total = 0;
+  const weights = items.map((it) => {
+    const w = Math.max(0.01, weightOf(it));
+    total += w;
+    return w;
+  });
+  let r = Math.random() * total;
+  for (let i = 0; i < items.length; i++) {
+    r -= weights[i];
+    if (r < 0) return items[i];
+  }
+  return items[items.length - 1];
+}
+
+function buildProfile(run: RunState): BuildProfile {
+  const c = run.character;
+  const weaponIds = new Set<string>();
+  const kinds = new Set<WeaponKind>();
+  const tags = new Set<WeaponTag>(c.favorTags ?? []);
+  let hasMelee = (c.stats.melee ?? 0) > 0;
+  let hasRanged = (c.stats.ranged ?? 0) > 0 && (c.mods?.rangedDamagePct ?? 0) >= 0;
+  let hasToxin = (c.stats.toxin ?? 0) > 0 || !!c.perks.hurtCloud || (run.items.widowsilk ?? 0) > 0;
+  let hasSummon = !!c.perks.workers;
+  let hasTurret = false;
+  let hasMine = false;
+  let hasBurn = false;
+  let hasFreeze = false;
+  let hasChain = false;
+  let hasBounce = false;
+
+  for (const ow of run.weapons) {
+    const w = SHOP_WEAPONS.find((d) => d.id === ow.id);
+    if (!w) continue;
+    weaponIds.add(w.id);
+    kinds.add(w.kind);
+    for (const t of w.tags) tags.add(t);
+    if (w.kind === 'melee' || w.scaling.melee) hasMelee = true;
+    if ((w.kind === 'ranged' || w.scaling.ranged) && (c.mods?.rangedDamagePct ?? 0) >= 0) hasRanged = true;
+    if (w.kind === 'toxin' || w.scaling.toxin || w.projectile?.poison) hasToxin = true;
+    if (w.kind === 'summon') hasSummon = true;
+    if (w.device?.type === 'turret') hasTurret = true;
+    if (w.device?.type === 'mine') hasMine = true;
+    if (w.onHit?.burn || w.tags.includes('火焰')) hasBurn = true;
+    if (w.onHit?.freeze) hasFreeze = true;
+    if (w.chain || w.tags.includes('电')) hasChain = true;
+    if (w.projectile?.returning || w.projectile?.bounce) hasBounce = true;
+  }
+
+  if (run.weapons.length === 0 && c.allowedKinds) {
+    for (const k of c.allowedKinds) kinds.add(k);
+    if (c.allowedKinds.includes('melee')) hasMelee = true;
+    if (c.allowedKinds.includes('ranged') && (c.mods?.rangedDamagePct ?? 0) >= 0) hasRanged = true;
+    if (c.allowedKinds.includes('toxin')) hasToxin = true;
+    if (c.allowedKinds.includes('summon')) hasSummon = true;
+  }
+
+  return {
+    weaponIds,
+    kinds,
+    tags,
+    hasMelee,
+    hasRanged,
+    hasToxin,
+    hasSummon,
+    hasTurret,
+    hasMine,
+    hasDevice: hasTurret || hasMine,
+    hasBurn,
+    hasFreeze,
+    hasChain,
+    hasBounce,
+  };
 }
 
 /** 价格随波次上涨：每过一波 +15% 基础价 */
@@ -48,12 +141,99 @@ export function rerollCost(wave: number, times: number): number {
   return 1 + Math.ceil(wave / 2) + times;
 }
 
-/** 这个角色能不能拿到这件道具（不能装武器的角色不出加武器槽的道具） */
+/** 严格过滤当前角色完全用不上的死道具（例如蚁后不出武器向机械件、蚊子不出普通回血件等） */
 function itemAllowed(id: string, run: RunState): boolean {
   const d = ITEMS[id];
   if (d.unique && run.items[d.id]) return false;
-  if (run.weaponSlots === 0 && d.mods?.weaponSlots) return false;
+  const perks = run.character.perks;
+  const m = d.mods;
+  if (run.weaponSlots === 0) {
+    if (
+      m?.weaponSlots ||
+      m?.bounces ||
+      m?.meleeKnockbackPct ||
+      m?.rangedDamagePct ||
+      m?.nonDeviceDamagePct ||
+      m?.meleeCritBonus ||
+      m?.burnDamagePct ||
+      m?.burnSpreadPct ||
+      m?.burnVulnPct ||
+      m?.freezeDuration ||
+      m?.frozenCrit ||
+      m?.chainJumps ||
+      m?.chainNoFalloff ||
+      m?.chainBolt ||
+      m?.deployCap ||
+      m?.turretSpeedPct ||
+      m?.mineRadiusPct ||
+      (d.stats.melee ?? 0) > 0 ||
+      (d.stats.ranged ?? 0) > 0 ||
+      (d.stats.engineering ?? 0) > 0
+    ) {
+      return false;
+    }
+  }
+  if (perks.lifestealOnly) {
+    if ((d.stats.regen ?? 0) > 0 || m?.healingPct || d.trigger === 'honeycomb' || d.trigger === 'honeypotion' || d.trigger === 'fairyring') {
+      return false;
+    }
+  }
+  if (perks.noDodge && (d.stats.dodge ?? 0) > 0 && (d.stats.armor ?? 0) <= 0) {
+    return false;
+  }
+  if (perks.touchPickup && (d.stats.pickupPct ?? 0) > 0) {
+    return false;
+  }
+  const allowed = run.character.allowedKinds;
+  if (allowed && !allowed.includes('ranged') && !allowed.includes('toxin') && (d.stats.ranged ?? 0) > 0 && (d.stats.melee ?? 0) <= 0) {
+    return false;
+  }
   return true;
+}
+
+/** 道具与当前构筑的相关度权重：对口专精件高权重，不搭边的冷门机制大幅降权避免污染卡池 */
+function itemWeight(d: ItemDef, run: RunState, prof: BuildProfile): number {
+  const m = d.mods;
+  const s = d.stats;
+  const perks = run.character.perks;
+
+  // 强机制绑定类道具（没有对应武器时不应该高频占格子）
+  if (m?.burnDamagePct || m?.burnSpreadPct || m?.burnVulnPct) return prof.hasBurn ? 2.6 : 0.08;
+  if (m?.freezeDuration || m?.frozenCrit) return prof.hasFreeze ? 2.6 : 0.08;
+  if (m?.chainJumps || m?.chainNoFalloff || m?.chainBolt) return prof.hasChain ? 2.6 : 0.08;
+  if (m?.turretSpeedPct) return prof.hasTurret ? 2.8 : 0.06;
+  if (m?.mineRadiusPct) return prof.hasMine ? 2.8 : 0.06;
+  if (m?.deployCap) return prof.hasDevice ? 2.6 : 0.08;
+  if ((s.engineering ?? 0) > 0) return prof.hasDevice ? 2.4 : 0.1;
+  if (m?.bounces) return prof.hasBounce ? 2.6 : 0.08;
+  if (m?.summonCount) return prof.hasSummon ? 2.8 : 0.1;
+
+  // 输出属性流派道具
+  if ((s.melee ?? 0) > 0 && !(s.ranged ?? 0)) return prof.hasMelee ? 2.2 : 0.18;
+  if ((s.ranged ?? 0) > 0 && !(s.melee ?? 0)) return prof.hasRanged ? 2.2 : 0.18;
+  if ((s.toxin ?? 0) > 0 || d.trigger === 'widowsilk' || d.trigger === 'stinkgland') return prof.hasToxin ? 2.3 : 0.22;
+
+  // 角色核心特色加权
+  let w = 1.0;
+  if (perks.speedToDamage && (s.speedPct ?? 0) > 0) w *= 2.4;
+  if (perks.thorns && (s.armor ?? 0) > 0) w *= 2.3;
+  if (perks.lifestealOnly && (s.lifesteal ?? 0) > 0) w *= 2.8;
+  if (perks.interest && (d.id === 'treehole' || (s.luck ?? 0) > 0)) w *= 2.0;
+  if (run.weapons.length >= run.weaponSlots && d.id === 'seventhleg') w *= 1.6;
+  return w;
+}
+
+/** 武器与当前构筑的相关度权重：优先出同名可合成、同标签凑套装、同类型匹配角色定位的武器 */
+function weaponWeight(d: WeaponDef, run: RunState, prof: BuildProfile): number {
+  let w = 0.7;
+  if (prof.weaponIds.has(d.id)) w = 3.8;
+  else if (d.tags.some((t) => prof.tags.has(t))) w = 2.8;
+  else if (prof.kinds.has(d.kind)) w = 1.8;
+
+  if ((run.character.mods?.rangedDamagePct ?? 0) < 0 && d.kind === 'ranged') w *= 0.2;
+  if ((run.character.mods?.nonDeviceDamagePct ?? 0) < 0 && !d.device) w *= 0.25;
+  if (run.character.favorTags?.some((t) => d.tags.includes(t))) w *= 1.5;
+  return w;
 }
 
 /** 这个角色能买的武器 */
@@ -63,34 +243,52 @@ export function weaponPool(run: RunState) {
   return SHOP_WEAPONS.filter((d) => !kinds || kinds.includes(d.kind));
 }
 
-/** 按品质挑一件道具；该品质没有就往低品质找。唯一道具已拥有则跳过。 */
-function rollItem(tier: number, run: RunState): string | null {
+/** 按品质和构筑加权挑一件道具；该品质没有就往低品质找。同一次刷新尽量不重复。 */
+function rollItem(tier: number, run: RunState, prof: BuildProfile, avoidIds?: Set<string>): string | null {
   for (let t = tier; t >= 0; t--) {
-    const pool = Object.values(ITEMS).filter((d) => d.rarity === t && itemAllowed(d.id, run));
-    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)].id;
+    let pool = Object.values(ITEMS).filter((d) => d.rarity === t && itemAllowed(d.id, run));
+    if (avoidIds && pool.length > 1) {
+      const fresh = pool.filter((d) => !avoidIds.has(d.id));
+      if (fresh.length > 0) pool = fresh;
+    }
+    if (pool.length > 0) return pickWeighted(pool, (d) => itemWeight(d, run, prof)).id;
   }
   return null;
 }
 
-function rollOffer(run: RunState): Offer {
+function rollOffer(run: RunState, prof: BuildProfile, forceWeapon: boolean, avoidItems: Set<string>): Offer {
   const tier = rollTier(run.wave, run.stats.luck);
-  let pool = weaponPool(run);
-  // 白蚁等专精角色：一半概率只出对口标签的武器
-  const fav = run.character.favorTags;
-  if (fav && Math.random() < 0.5) {
-    const f = pool.filter((d) => d.tags.some((t) => fav.includes(t)));
-    if (f.length > 0) pool = f;
+  const pool = weaponPool(run);
+  const wChance = run.weapons.length < run.weaponSlots ? WEAPON_OFFER_CHANCE_FILLING : WEAPON_OFFER_CHANCE;
+  const pickWeapon = pool.length > 0 && (forceWeapon || Math.random() < wChance);
+  if (!pickWeapon) {
+    const itemId = rollItem(tier, run, prof, avoidItems);
+    if (itemId) {
+      avoidItems.add(itemId);
+      return { kind: 'item', id: itemId, tier: ITEMS[itemId].rarity, locked: false };
+    }
   }
-  const itemId = pool.length > 0 && Math.random() < WEAPON_OFFER_CHANCE ? null : rollItem(tier, run);
-  if (itemId) return { kind: 'item', id: itemId, tier: ITEMS[itemId].rarity, locked: false };
-  return { kind: 'weapon', id: pool[Math.floor(Math.random() * pool.length)].id, tier, locked: false };
+  const w = pickWeighted(pool, (d) => weaponWeight(d, run, prof));
+  return { kind: 'weapon', id: w.id, tier, locked: false };
 }
 
 /** 进商店或刷新：锁定的商品保留，其余（包括已买走的空位）重新随机 */
 export function refreshOffers(run: RunState): void {
+  const prof = buildProfile(run);
+  const avoidItems = new Set<string>();
+  for (const o of run.offers) {
+    if (o && o.locked && o.kind === 'item') avoidItems.add(o.id);
+  }
+  const hasLockedWeapon = run.offers.some((o) => o && o.locked && o.kind === 'weapon');
+  const needWeaponSlot = run.weaponSlots > 0 && run.weapons.length < run.weaponSlots && run.wave <= 4 && !hasLockedWeapon;
+  let forced = false;
   for (let i = 0; i < OFFER_COUNT; i++) {
     const o = run.offers[i];
-    if (!o || !o.locked) run.offers[i] = rollOffer(run);
+    if (!o || !o.locked) {
+      const forceW = needWeaponSlot && !forced;
+      if (forceW) forced = true;
+      run.offers[i] = rollOffer(run, prof, forceW, avoidItems);
+    }
   }
 }
 
@@ -166,7 +364,8 @@ export function sellWeapon(run: RunState, i: number): number {
 }
 
 export function rollChestItem(run: RunState): string {
-  return rollItem(rollTier(run.wave, run.stats.luck), run) ?? Object.keys(ITEMS)[0];
+  const prof = buildProfile(run);
+  return rollItem(rollTier(run.wave, run.stats.luck), run, prof) ?? Object.keys(ITEMS)[0];
 }
 
 export function chestSellValue(id: string, wave: number): number {

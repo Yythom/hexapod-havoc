@@ -133,7 +133,7 @@ export class GameScene extends Phaser.Scene {
     this.fx = new Effects(this);
     this.tel = new Telegraphs(this);
     this.enemies = new EnemyManager(this, this.fx, this.tel);
-    this.resolver = new HitResolver(this.enemies);
+    this.resolver = new HitResolver(this.enemies, this.fx);
     this.shots = new EnemyShots(this);
     this.hazards = new Hazards(this);
     this.summons = new Summons(this, this.fx, this.resolver);

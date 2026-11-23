@@ -2,6 +2,7 @@ import { critMultiplier } from '../core/combat';
 import type { OwnedWeapon } from '../core/RunState';
 import type { Mods } from '../data/items';
 import type { WeaponDef } from '../data/weapons';
+import type { Effects } from './Effects';
 import { BURN_RATIO, type Enemy, type EnemyManager } from './EnemyManager';
 
 /** 一次攻击来自哪把武器：命中效果、成长、击杀统计都靠它 */
@@ -29,7 +30,10 @@ export interface CombatHost {
 export class HitResolver {
   host!: CombatHost;
 
-  constructor(private readonly enemies: EnemyManager) {}
+  constructor(
+    private readonly enemies: EnemyManager,
+    private readonly fx?: Effects,
+  ) {}
 
   hit(e: Enemy, damage: number, crit: boolean, dirX: number, dirY: number, knockback: number, src: HitSource | null): boolean {
     if (!e.active) return false;
@@ -44,11 +48,22 @@ export class HitResolver {
     const y = e.y;
     const fx = src.def.onHit;
     const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback);
+    if (crit) this.fx?.star(x, y, 14, 0xffe258);
     if (fx) {
       if (!killed) {
-        if (fx.burn) this.enemies.applyBurn(e, damage * BURN_RATIO * (1 + mods.burnDamagePct));
-        if (fx.freeze) this.enemies.applyFreeze(e, fx.freeze);
-        if (fx.vulnerable) this.enemies.applyVulnerable(e);
+        if (fx.burn) {
+          this.enemies.applyBurn(e, damage * BURN_RATIO * (1 + mods.burnDamagePct));
+          this.fx?.burst(x, y, 0xff7828, 4, 115, 0.72);
+        }
+        if (fx.freeze) {
+          this.enemies.applyFreeze(e, fx.freeze);
+          this.fx?.ring(x, y, 24, 0x7ce8ff);
+          this.fx?.star(x, y, 13, 0x9cf2ff, 0);
+        }
+        if (fx.vulnerable) {
+          this.enemies.applyVulnerable(e);
+          this.fx?.star(x, y, 14, 0xeb68ff, Math.PI / 4);
+        }
       }
       if (fx.heal && Math.random() < fx.heal) this.host.heal(1);
       if (killed && fx.nectarOnKill && Math.random() < fx.nectarOnKill) this.host.dropBonusNectar(x, y, 1);

@@ -232,11 +232,11 @@ export function generateIcons(scene: Phaser.Scene): void {
     scene,
     'needle',
     18,
-    6,
+    7,
     (ctx) => {
-      cLine(ctx, [1, 3, 14.5, 3], '#2c541e', 2.6);
-      cLine(ctx, [1.5, 3, 14, 3], '#6eb446', 1.4);
-      cLine(ctx, [12, 3, 17, 3], '#e0ffb0', 1.4);
+      cLine(ctx, [1, 3.5, 15, 3.5], '#050507', 3.4);
+      cLine(ctx, [1.5, 3.5, 14.5, 3.5], '#7ce838', 1.8);
+      cLine(ctx, [11.5, 3.5, 17, 3.5], '#ecff9a', 1.7);
     },
     SPRITE_RES,
   );
@@ -257,15 +257,18 @@ export function generateIcons(scene: Phaser.Scene): void {
   bake2D(
     scene,
     'fluffseed',
-    14,
-    14,
+    16,
+    16,
     (ctx) => {
-      cSoftEllipse(ctx, 7, 7, 6.6, 6.6, 'rgba(255,255,248,0.5)', 'rgba(255,255,248,0)');
+      cSoftEllipse(ctx, 8, 8, 7.4, 7.4, 'rgba(255,232,120,0.48)', 'rgba(255,232,120,0)');
       for (let k = 0; k < 8; k++) {
         const a = (k / 8) * Math.PI * 2;
-        cLine(ctx, [7, 7, 7 + Math.cos(a) * 5.6, 7 + Math.sin(a) * 5.6], '#ffffff', 1.1);
+        const tx = 8 + Math.cos(a) * 6.0;
+        const ty = 8 + Math.sin(a) * 6.0;
+        cLine(ctx, [8, 8, tx, ty], '#1c180c', 2.0);
+        cLine(ctx, [8, 8, tx, ty], '#fff6c8', 1.1);
       }
-      cCircle(ctx, 7, 7, 2.0, '#e6d496', '#6a5628', 0.8);
+      cCircle(ctx, 8, 8, 2.5, '#ffd444', '#050507', 1.1);
     },
     SPRITE_RES,
   );
@@ -275,8 +278,8 @@ export function generateIcons(scene: Phaser.Scene): void {
     18,
     12,
     (ctx) => {
-      cSoftEllipse(ctx, 11, 6, 7, 5.5, 'rgba(130,224,255,0.45)', 'rgba(130,224,255,0)');
-      const g = cShellGrad(ctx, 10, 4.5, 6, '#ffffff', '#7ad8ff', '#1c629a');
+      cSoftEllipse(ctx, 11, 6, 7.5, 5.8, 'rgba(56,216,255,0.58)', 'rgba(56,216,255,0)');
+      const g = cShellGrad(ctx, 10, 4.5, 6, '#ffffff', '#38d0ff', '#0b68b8');
       ctx.beginPath();
       ctx.moveTo(1, 6);
       ctx.quadraticCurveTo(8, 1, 11.8, 1.6);
@@ -285,10 +288,10 @@ export function generateIcons(scene: Phaser.Scene): void {
       ctx.closePath();
       ctx.fillStyle = g;
       ctx.fill();
-      ctx.strokeStyle = '#15446e';
-      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = '#07284a';
+      ctx.lineWidth = 1.5;
       ctx.stroke();
-      cCircle(ctx, 12.6, 4.4, 1.3, '#ffffff');
+      cCircle(ctx, 12.6, 4.4, 1.4, '#ffffff');
     },
     SPRITE_RES,
   );
@@ -298,10 +301,10 @@ export function generateIcons(scene: Phaser.Scene): void {
     18,
     18,
     (ctx) => {
-      cSoftEllipse(ctx, 9, 9, 8.6, 8.6, 'rgba(175,255,64,0.52)', 'rgba(175,255,64,0)');
-      const g = cShellGrad(ctx, 7.6, 7.4, 5.5, '#f6ffc8', '#a6f038', '#468414');
-      cCircle(ctx, 9, 9, 4.8, g, '#24460a', 1.2);
-      cCircle(ctx, 7.3, 7.3, 1.3, '#ffffff');
+      cSoftEllipse(ctx, 9, 9, 8.6, 8.6, 'rgba(175,255,64,0.58)', 'rgba(175,255,64,0)');
+      const g = cShellGrad(ctx, 7.6, 7.4, 5.5, '#f6ffc8', '#9cf428', '#3c8808');
+      cCircle(ctx, 9, 9, 4.8, g, '#143004', 1.4);
+      cCircle(ctx, 7.3, 7.3, 1.4, '#ffffff');
     },
     SPRITE_RES,
   );
@@ -311,10 +314,10 @@ export function generateIcons(scene: Phaser.Scene): void {
     20,
     20,
     (ctx) => {
-      cSoftEllipse(ctx, 10, 10, 9.6, 9.6, 'rgba(210,120,200,0.45)', 'rgba(210,120,200,0)');
-      const g = cShellGrad(ctx, 8.5, 8, 6.8, '#f0a6dc', '#a44488', '#48123c');
-      cCircle(ctx, 10, 10, 6, g, '#320c28', 1.4);
-      for (const [x, y] of [[7.8, 7.8], [12.2, 8.8], [9.8, 12.6]]) cCircle(ctx, x, y, 1.3, '#fce2f6');
+      cSoftEllipse(ctx, 10, 10, 9.6, 9.6, 'rgba(236,88,220,0.58)', 'rgba(236,88,220,0)');
+      const g = cShellGrad(ctx, 8.5, 8, 6.8, '#ffc2f8', '#d838b8', '#681058');
+      cCircle(ctx, 10, 10, 6.1, g, '#1e0418', 1.6);
+      for (const [x, y] of [[7.8, 7.8], [12.2, 8.8], [9.8, 12.6]]) cCircle(ctx, x, y, 1.4, '#fff0fc');
     },
     SPRITE_RES,
   );
@@ -330,67 +333,73 @@ export function generateIcons(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
-  // 跳蛛吐的丝弹（敌方，亮冰白带紫红警示环，战斗中极易躲避）
+  // 敌方弹幕（高饱和炽红警示弹 + 粗黑轮廓 + 亮白热核，在暗地与虫群中极醒目）
   bake2D(
     scene,
     'silk',
-    20,
-    20,
+    22,
+    22,
     (ctx) => {
-      cSoftEllipse(ctx, 10, 10, 9.5, 9.5, 'rgba(255,140,160,0.38)', 'rgba(255,140,160,0)');
-      const g = cShellGrad(ctx, 8.5, 8.5, 6.2, '#ffffff', '#e6e8fa', '#989ec0');
-      cCircle(ctx, 10, 10, 5.8, g, '#665e8a', 1.4);
-      cLine(ctx, [5.5, 7.6, 14.5, 12.2], '#8e8eb4', 1);
-      cLine(ctx, [6, 13, 14, 6.8], '#8e8eb4', 1);
+      cSoftEllipse(ctx, 11, 11, 10.6, 10.6, 'rgba(255,36,72,0.65)', 'rgba(255,36,72,0)');
+      const g = cShellGrad(ctx, 9.6, 9.4, 6.8, '#ff90a8', '#ff2046', '#a80624');
+      cCircle(ctx, 11, 11, 6.2, g, '#050507', 1.8);
+      cCircle(ctx, 10.4, 10.4, 2.5, '#fff4f6');
+      cLine(ctx, [7.2, 8.2, 14.8, 13.8], 'rgba(255,230,236,0.75)', 1.1);
+      cLine(ctx, [7.6, 14.2, 14.4, 7.8], 'rgba(255,230,236,0.75)', 1.1);
     },
     SPRITE_RES,
   );
 
-  // ---------- 枪械弹道（纯平赛璐璐粗黑漫画轮廓） ----------
+  // ---------- 枪械弹道（高饱和强对比赛璐璐粗黑轮廓） ----------
   bake2D(
     scene,
     'bullet',
-    16,
-    8,
+    18,
+    10,
     (ctx) => {
-      cPoly(ctx, [1, 2.2, 10.5, 1.8, 15, 4, 10.5, 6.2, 1, 5.8], '#050507');
-      cRoundRect(ctx, 2, 2.6, 8.2, 2.8, 1, '#f0a624');
-      cPoly(ctx, [9.8, 2.4, 14.2, 4, 9.8, 5.6], '#fff29c');
+      cSoftEllipse(ctx, 10, 5, 8.5, 4.6, 'rgba(255,204,48,0.48)', 'rgba(255,204,48,0)');
+      cPoly(ctx, [1.2, 2.2, 11.4, 1.8, 17, 5, 11.4, 8.2, 1.2, 7.8], '#050507');
+      cRoundRect(ctx, 2.3, 2.9, 9.0, 4.2, 1.4, '#ff9e18');
+      cPoly(ctx, [10.6, 2.6, 15.8, 5, 10.6, 7.4], '#fff698');
+      cLine(ctx, [3.2, 4.1, 10.4, 4.1], '#ffe87a', 1.0);
     },
     SPRITE_RES,
   );
   bake2D(
     scene,
     'pellet',
-    11,
-    11,
+    13,
+    13,
     (ctx) => {
-      cCircle(ctx, 5.5, 5.5, 4.4, '#ff7828', '#050507', 1.6);
-      cCircle(ctx, 4.6, 4.4, 1.8, '#ffe690');
+      cSoftEllipse(ctx, 6.5, 6.5, 6.2, 6.2, 'rgba(255,112,24,0.52)', 'rgba(255,112,24,0)');
+      cCircle(ctx, 6.5, 6.5, 4.6, '#ff6414', '#050507', 1.8);
+      cCircle(ctx, 5.5, 5.4, 2.0, '#fff29c');
     },
     SPRITE_RES,
   );
   bake2D(
     scene,
     'heavybullet',
-    22,
-    10,
+    24,
+    12,
     (ctx) => {
-      cPoly(ctx, [1, 2.4, 14.5, 1.8, 21, 5, 14.5, 8.2, 1, 7.6], '#050507');
-      cRoundRect(ctx, 2, 3, 12.2, 4, 1.2, '#e27c24');
-      cPoly(ctx, [13.8, 2.6, 19.8, 5, 13.8, 7.4], '#fff4ae');
-      cLine(ctx, [3.2, 4.1, 13.2, 4.1], '#ffffff', 0.9);
+      cSoftEllipse(ctx, 13, 6, 11, 5.5, 'rgba(255,168,36,0.5)', 'rgba(255,168,36,0)');
+      cPoly(ctx, [1.2, 2.4, 15.4, 1.8, 22.8, 6, 15.4, 10.2, 1.2, 9.6], '#050507');
+      cRoundRect(ctx, 2.4, 3.2, 12.8, 5.6, 1.5, '#ff8614');
+      cPoly(ctx, [14.6, 2.8, 21.4, 6, 14.6, 9.2], '#fff7a8');
+      cLine(ctx, [3.6, 4.6, 14.2, 4.6], '#ffffff', 1.1);
     },
     SPRITE_RES,
   );
   bake2D(
     scene,
     'laserbolt',
-    24,
-    9,
+    26,
+    12,
     (ctx) => {
-      cRoundRect(ctx, 1, 1.6, 22, 5.8, 2.9, '#1ce0ff', '#050507', 1.4);
-      cRoundRect(ctx, 3.2, 3.0, 17.6, 3.0, 1.5, '#ffffff');
+      cSoftEllipse(ctx, 13, 6, 12.5, 5.6, 'rgba(28,232,255,0.62)', 'rgba(28,232,255,0)');
+      cRoundRect(ctx, 1.6, 2.4, 22.8, 7.2, 3.6, '#00e2ff', '#050507', 1.6);
+      cRoundRect(ctx, 4.0, 4.0, 18.0, 4.0, 2.0, '#ffffff');
     },
     SPRITE_RES,
   );

@@ -4,7 +4,7 @@ import { BeetleView } from './BeetleView';
 
 export class Player {
   readonly view: BeetleView;
-  readonly radius = 15;
+  readonly radius = 12;
   /** 剩余无敌时间（秒） */
   invuln = 0;
   /** 被丝弹减速的剩余时间 */
@@ -14,6 +14,7 @@ export class Player {
 
   constructor(scene: Phaser.Scene, x: number, y: number, shell: string) {
     this.view = new BeetleView(scene, x, y, shell);
+    this.view.setScale(0.78);
     this.view.setDepth(DEPTH.player);
   }
 

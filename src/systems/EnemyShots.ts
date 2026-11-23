@@ -12,7 +12,7 @@ interface Shot {
   damage: number;
 }
 
-const SHOT_RADIUS = 8;
+const SHOT_RADIUS = 5.5;
 const SHOT_LIFE = 2.6;
 
 /** 敌人发射的子弹（跳蛛的丝弹），只和玩家碰撞 */

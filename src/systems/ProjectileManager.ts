@@ -155,6 +155,15 @@ export class ProjectileManager {
       if (p.x < 0 || p.y < 0 || p.x > WORLD_WIDTH || p.y > WORLD_HEIGHT) dead = true;
       p.sprite.setPosition(p.x, p.y);
       if (p.spin !== 0) p.sprite.rotation += dt * p.spin;
+      if (p.texture === 'rocketproj' && Math.random() < dt * 36) {
+        this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0xff8a28, 1, 90, 0.85);
+      } else if (p.texture === 'laserbolt' && Math.random() < dt * 32) {
+        this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0x38f2ff, 1, 75, 0.75);
+      } else if (p.texture === 'leafblade' && Math.random() < dt * 24) {
+        this.fx.burst(p.x, p.y, 0x9cff58, 1, 45, 0.55);
+      } else if (p.texture === 'dungball' && Math.random() < dt * 16) {
+        this.fx.burst(p.x, p.y, 0xa8824c, 1, 38, 0.65, false);
+      }
       const k = Math.min(1, p.traveled / p.maxDist);
       if (p.cloud) {
         // 抛射物飞行时有个上下的弧度感
@@ -231,14 +240,30 @@ export class ProjectileManager {
   }
 
   private strike(p: Projectile, e: Enemy, enemies: EnemyManager): void {
-    if (p.poison) enemies.applyPoison(e, p.poison.stacks, p.poison.perStack, p.poison.duration);
+    const ang = Math.atan2(p.dirY, p.dirX);
+    if (p.poison) {
+      enemies.applyPoison(e, p.poison.stacks, p.poison.perStack, p.poison.duration);
+      this.fx.burst(p.x, p.y, 0x9cf428, 3, 105, 0.65);
+    }
+    if (p.texture === 'laserbolt') {
+      this.fx.ring(p.x, p.y, 18, 0x38f2ff);
+      this.fx.star(p.x, p.y, 14, 0x38f2ff, ang);
+    } else if (p.texture === 'honeyblob') {
+      this.fx.burst(p.x, p.y, 0xffd040, 4, 120, 0.75);
+    } else if (p.texture === 'bullet' || p.texture === 'heavybullet' || p.texture === 'pellet') {
+      this.fx.streaks(p.x, p.y, ang, 0xffe270, p.texture === 'heavybullet' ? 3 : 2, 160, 0.65);
+    } else if (p.texture === 'leafblade') {
+      this.fx.star(p.x, p.y, 13, 0x9cff58, ang);
+    }
     this.resolver.hit(e, p.damage, p.crit, p.dirX, p.dirY, p.knockback, p.src ?? null);
   }
 
   private explode(p: Projectile, enemies: EnemyManager): void {
     sfx.play('explode');
-    this.fx.ring(p.x, p.y, p.explode, 0xffc070);
-    this.fx.burst(p.x, p.y, 0xc08040, 10, 200, 1);
+    const rocket = p.texture === 'rocketproj';
+    this.fx.ring(p.x, p.y, p.explode, rocket ? 0xff7030 : 0xffc070);
+    if (rocket) this.fx.ring(p.x, p.y, p.explode * 0.55, 0xffe484);
+    this.fx.burst(p.x, p.y, rocket ? 0xff8a28 : 0xc08040, rocket ? 16 : 10, rocket ? 240 : 200, rocket ? 1.2 : 1);
     for (const e of enemies.grid.query(p.x, p.y, p.explode + MAX_ENEMY_RADIUS, this.aoeBuf).slice()) {
       const dx = e.x - p.x;
       const dy = e.y - p.y;

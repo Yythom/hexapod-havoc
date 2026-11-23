@@ -317,7 +317,15 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
     const nofall = mods.chainNoFalloff > 0;
     parts.push(`链式闪电，在怪之间跳 ${def.chain.jumps + mods.chainJumps} 次${nofall ? '，伤害不衰减' : `，每跳伤害 −${Math.round(def.chain.falloff * 100)}%`}`);
   }
-  if (def.melee?.style === 'sweep') parts.push('扇形横扫');
+  const meleeLabel: Record<string, string> = {
+    sweep: '扇形横扫',
+    snap: '钳颚撕咬',
+    bash: '盾击震荡',
+    charge: '重角突刺',
+    flurry: '高速连刺',
+    pierce: '破甲穿刺',
+  };
+  if (def.melee && meleeLabel[def.melee.style]) parts.push(meleeLabel[def.melee.style]);
   if (def.critMultiplier !== 2) parts.push(`暴击 ×${def.critMultiplier}`);
   if (def.summon?.type === 'aphid') parts.push(`召唤 ${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只蚜虫`);
   if (def.summon?.type === 'moth') parts.push(`${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只飞蛾绕身旋转，碰到怪造成伤害`);

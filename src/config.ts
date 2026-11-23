@@ -39,8 +39,8 @@ export function fontPx(size: number): string {
   return `${Math.round(size * FONT_BOOST)}px`;
 }
 
-/** 战斗镜头缩放：放大一点让角色和怪物更容易看清 */
-export const CAMERA_ZOOM = 1.2;
+/** 战斗镜头缩放：视野更开阔，方便观察周围弹幕与走位 */
+export const CAMERA_ZOOM = 1.05;
 
 /** 同屏怪物上限 */
 export const MAX_ENEMIES = IS_COARSE_POINTER ? 150 : 250;

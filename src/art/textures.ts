@@ -421,7 +421,7 @@ function shadow(scene: Phaser.Scene): void {
   );
 }
 
-/** 粒子用的柔和发光圆点 */
+/** 粒子与特效贴图：发光圆点、四角星芒、速度线火花 */
 function dot(scene: Phaser.Scene): void {
   bake2D(scene, 'dot', 14, 14, (ctx) => {
     const g = ctx.createRadialGradient(7, 7, 1, 7, 7, 7);
@@ -430,6 +430,40 @@ function dot(scene: Phaser.Scene): void {
     g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 14, 14);
+  });
+  bake2D(scene, 'fx-flare', 32, 32, (ctx) => {
+    const g = ctx.createRadialGradient(16, 16, 1, 16, 16, 15);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 32);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      const r = i % 2 === 0 ? 15 : 3.2;
+      const x = 16 + Math.cos(a) * r;
+      const y = 16 + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  });
+  bake2D(scene, 'fx-streak', 24, 10, (ctx) => {
+    const g = ctx.createLinearGradient(0, 5, 24, 5);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.55, 'rgba(255,255,255,0.9)');
+    g.addColorStop(1, 'rgba(255,255,255,1)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, 5);
+    ctx.lineTo(14, 1.5);
+    ctx.lineTo(24, 5);
+    ctx.lineTo(14, 8.5);
+    ctx.closePath();
+    ctx.fill();
   });
 }
 

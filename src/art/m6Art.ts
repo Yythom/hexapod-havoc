@@ -248,15 +248,16 @@ function projectiles(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
-  // 弹跳石子：扁扁的灰石片
+  // 弹跳石子：高对比亮灰金石片
   bake2D(
     scene,
     'pebble',
-    14,
-    14,
+    16,
+    16,
     (ctx) => {
-      cEllipse(ctx, 7, 7, 5.8, 4.8, cShellGrad(ctx, 6, 5.5, 6, '#e8e4d8', '#9a968a', '#4e4a40'), '#2e2c26', 1.3);
-      cSoftEllipse(ctx, 5.6, 5.2, 2.6, 1.3, 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0)');
+      cSoftEllipse(ctx, 8, 8, 7.2, 6.2, 'rgba(255,236,180,0.38)', 'rgba(255,236,180,0)');
+      cEllipse(ctx, 8, 8, 6.0, 5.0, cShellGrad(ctx, 6.8, 6.2, 6.4, '#fffdf4', '#b8b4a4', '#585246'), '#050507', 1.6);
+      cSoftEllipse(ctx, 6.4, 6.0, 2.8, 1.4, 'rgba(255,255,255,0.8)', 'rgba(255,255,255,0)');
     },
     SPRITE_RES,
   );
@@ -273,16 +274,16 @@ function projectiles(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
-  // 霜露弹：冰蓝色的尖冰晶
+  // 霜露弹：高饱和冰蓝尖晶
   bake2D(
     scene,
     'frostshot',
-    18,
-    10,
+    20,
+    12,
     (ctx) => {
-      cSoftEllipse(ctx, 9, 5, 8.5, 4.8, 'rgba(160,220,255,0.45)', 'rgba(160,220,255,0)');
-      cPoly(ctx, [1.5, 5, 7, 1.5, 16.5, 5, 7, 8.5], cShellGrad(ctx, 8, 3.5, 8, '#ffffff', '#9ae0ff', '#3a8ac8'), '#1e5a8a', 1.1);
-      cLine(ctx, [3, 5, 15, 5], 'rgba(255,255,255,0.85)', 0.9);
+      cSoftEllipse(ctx, 10, 6, 9.2, 5.4, 'rgba(64,208,255,0.6)', 'rgba(64,208,255,0)');
+      cPoly(ctx, [1.8, 6, 7.8, 2, 18.2, 6, 7.8, 10], cShellGrad(ctx, 9, 4.2, 8.6, '#ffffff', '#44d0ff', '#1064b8'), '#07284a', 1.4);
+      cLine(ctx, [3.6, 6, 16.5, 6], 'rgba(255,255,255,0.92)', 1.1);
     },
     SPRITE_RES,
   );
@@ -293,20 +294,21 @@ function projectiles(scene: Phaser.Scene): void {
     16,
     16,
     (ctx) => {
-      cSoftEllipse(ctx, 8, 8, 7.8, 7.8, 'rgba(255,200,60,0.4)', 'rgba(255,200,60,0)');
-      cCircle(ctx, 8, 8, 5.4, cShellGrad(ctx, 6.8, 6.6, 5.6, '#fff0a0', '#f0b020', '#9a5a08'), '#6a3a04', 1.3);
-      cSoftEllipse(ctx, 6.4, 6.2, 2.2, 1.4, 'rgba(255,255,255,0.85)', 'rgba(255,255,255,0)');
+      cSoftEllipse(ctx, 8, 8, 7.8, 7.8, 'rgba(255,200,60,0.52)', 'rgba(255,200,60,0)');
+      cCircle(ctx, 8, 8, 5.5, cShellGrad(ctx, 6.8, 6.6, 5.6, '#fff4a8', '#ffb818', '#a05804'), '#321a02', 1.5);
+      cSoftEllipse(ctx, 6.4, 6.2, 2.2, 1.4, 'rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
     },
     SPRITE_RES,
   );
-  // 炮台子弹：小土丸
+  // 炮台子弹：高对比炽橙土丸
   bake2D(
     scene,
     'turretshot',
-    12,
-    8,
+    14,
+    10,
     (ctx) => {
-      cEllipse(ctx, 6, 4, 4.8, 3, cShellGrad(ctx, 5, 3, 4.6, '#ffe8a8', '#c8904a', '#6a4418'), '#3a2208', 1.1);
+      cSoftEllipse(ctx, 7, 5, 6.4, 4.4, 'rgba(255,188,68,0.45)', 'rgba(255,188,68,0)');
+      cEllipse(ctx, 7, 5, 5.2, 3.4, cShellGrad(ctx, 5.8, 3.8, 5.0, '#fff2b0', '#f0a236', '#8a480c'), '#050507', 1.4);
     },
     SPRITE_RES,
   );

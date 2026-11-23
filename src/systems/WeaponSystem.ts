@@ -196,18 +196,7 @@ export class WeaponSystem {
         } else if (s.def.melee) {
           const dist = Math.hypot(target.x - tip.x, target.y - tip.y);
           this.startSwing(s, dist, range, interval);
-          if (s.def.melee.style === 'sweep') {
-            this.fx?.slash(tip.x, tip.y, s.reach * 0.85, s.aim, s.def.melee.arc ?? 1, s.crit ? 0xffdf68 : 0xd8f8a8);
-          } else {
-            this.fx?.thrust(
-              tip.x,
-              tip.y,
-              tip.x + Math.cos(s.aim) * s.reach,
-              tip.y + Math.sin(s.aim) * s.reach,
-              s.crit ? 0xffdf68 : 0xffe4b8,
-              s.def.melee.hitRadius * 0.45,
-            );
-          }
+          this.emitMeleeFx(s, tip.x, tip.y);
           this.onAttack?.();
           sfx.play('melee');
         } else if (s.def.beam) {
@@ -219,7 +208,7 @@ export class WeaponSystem {
           kick = 0.1;
         } else {
           this.fire(s, tip.x, tip.y, range, target);
-          this.fx?.spark(tip.x, tip.y, sparkColor(s.def), s.def.damage >= 18 ? 5 : 3);
+          this.emitShotFx(s, tip.x, tip.y);
           this.onAttack?.();
           sfx.play(shotSound(s.def));
           kick = 0.1;
@@ -338,6 +327,8 @@ export class WeaponSystem {
       const d = Math.hypot(cx - fromX, cy - fromY) || 1;
       const amount = Math.max(1, Math.round(dmg));
       this.resolver.hit(cur, amount, first.crit, (cx - fromX) / d, (cy - fromY) / d, s.def.knockback, s.src);
+      this.fx?.star(cx, cy, 15, 0x8ce2ff);
+      this.fx?.streaks(cx, cy, Math.atan2(cy - fromY, cx - fromX), 0x8ce2ff, 3, 180, 0.7);
       // 避雷针：每跳一次有概率再劈一道落雷
       if (mods.chainBolt > 0 && Math.random() < mods.chainBolt) {
         this.fx?.bolt(cx, cy);
@@ -489,15 +480,91 @@ export class WeaponSystem {
 
   private startSwing(s: Slot, dist: number, range: number, interval: number): void {
     const { damage, crit } = this.roll(s.def, s.tier, s.owned);
-    const sweep = s.def.melee!.style === 'sweep';
+    const style = s.def.melee!.style;
+    const sweep = style === 'sweep';
     s.damage = damage;
     s.crit = crit;
-    s.reach = sweep ? range : Phaser.Math.Clamp(dist, 24, range);
-    s.swingTotal = Math.min(sweep ? SWEEP_TIME : SWING_TIME, interval * 0.8);
+    s.reach = sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range);
+    s.swingTotal = Math.min(sweep ? SWEEP_TIME : style === 'flurry' ? SWING_TIME * 0.65 : SWING_TIME, interval * 0.8);
     s.swing = s.swingTotal;
     s.lastExt = 0;
     s.lastAng = s.aim - (s.def.melee!.arc ?? 0);
     s.hits.length = 0;
+  }
+
+  private emitMeleeFx(s: Slot, tx: number, ty: number): void {
+    const fx = this.fx;
+    if (!fx) return;
+    const melee = s.def.melee!;
+    const critCol = 0xffdf68;
+    const dx = Math.cos(s.aim);
+    const dy = Math.sin(s.aim);
+    switch (melee.style) {
+      case 'sweep': {
+        const col = s.crit ? critCol : s.def.id === 'scarab' ? 0xffd848 : 0xa0ff58;
+        fx.slash(tx, ty, s.reach * 0.85, s.aim, melee.arc ?? 1, col);
+        if (s.def.id === 'scarab') fx.burst(tx + dx * s.reach * 0.6, ty + dy * s.reach * 0.6, 0xffdf58, 6, 150, 0.75);
+        break;
+      }
+      case 'snap': {
+        const col = s.crit ? critCol : s.def.id === 'scarred' ? 0xff5c38 : 0xffc858;
+        fx.chomp(tx, ty, s.aim, s.reach * 0.88, col);
+        if (s.def.id === 'scarred') fx.ring(tx + dx * s.reach * 0.5, ty + dy * s.reach * 0.5, 34, 0xff6e40);
+        break;
+      }
+      case 'bash': {
+        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.95, s.crit ? critCol : 0x72d8ff);
+        break;
+      }
+      case 'charge': {
+        const col = s.crit ? critCol : 0xffe49a;
+        const ex = tx + dx * s.reach;
+        const ey = ty + dy * s.reach;
+        fx.sonicThrust(tx, ty, ex, ey, col, melee.hitRadius * 0.72, 2);
+        break;
+      }
+      case 'flurry': {
+        const col = s.crit ? critCol : 0xb8ff58;
+        for (const off of [-0.18, -0.05, 0.06, 0.18]) {
+          const a = s.aim + off;
+          const r = s.reach * (Math.abs(off) < 0.08 ? 1.02 : 0.84);
+          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 6.5);
+        }
+        fx.streaks(tx + dx * s.reach * 0.7, ty + dy * s.reach * 0.7, s.aim, col, 4, 210, 0.75);
+        break;
+      }
+      case 'pierce': {
+        const col = s.crit ? critCol : 0xeb68ff;
+        const ex = tx + dx * s.reach;
+        const ey = ty + dy * s.reach;
+        fx.thrust(tx, ty, ex, ey, col, melee.hitRadius * 0.65);
+        fx.star(ex, ey, 18, col, s.aim + Math.PI / 4);
+        fx.streaks(ex, ey, s.aim, col, 4, 180, 0.8);
+        break;
+      }
+      default: {
+        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, melee.hitRadius * 0.45);
+      }
+    }
+  }
+
+  private emitShotFx(s: Slot, tx: number, ty: number): void {
+    const fx = this.fx;
+    if (!fx) return;
+    const col = sparkColor(s.def);
+    if (s.def.id === 'lasergun') {
+      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 26, 5);
+      fx.ring(tx, ty, 14, 0x38f2ff);
+    } else if (s.def.tags.includes('枪械')) {
+      const heavy = (s.def.projectile?.count ?? 1) >= 4 || s.def.damage >= 16;
+      fx.muzzle(tx, ty, s.aim, col, heavy ? 24 : 15, heavy ? 6 : 3);
+    } else if (s.def.tags.includes('火焰')) {
+      fx.muzzle(tx, ty, s.aim, 0xff7824, 20, 4);
+    } else if (s.def.onHit?.freeze) {
+      fx.muzzle(tx, ty, s.aim, 0x7ce8ff, 16, 4);
+    } else {
+      fx.spark(tx, ty, col, s.def.damage >= 18 ? 5 : 3);
+    }
   }
 
   private updateSwing(s: Slot, slot: number, tipX: number, tipY: number, dt: number, mods: Mods): void {
@@ -521,6 +588,20 @@ export class WeaponSystem {
         for (const f of [0.45, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb);
       }
       s.lastAng = ang;
+    } else if (melee.style === 'bash') {
+      // 盾击震荡波：短距猛推并在前方弧面震开敌人
+      const out = t < SWING_OUT ? t / SWING_OUT : 1 - (t - SWING_OUT) / (1 - SWING_OUT);
+      const ext = s.reach * 0.68 * Phaser.Math.Easing.Quadratic.Out(out);
+      view.setWeaponExtend(slot, ext / view.scaleX);
+      view.setWeaponAim(slot, s.aim);
+      if (ext > s.lastExt) {
+        const arc = melee.arc ?? 0.85;
+        for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
+          const a = s.aim + aOff;
+          this.strikeAt(s, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb);
+        }
+      }
+      s.lastExt = Math.max(s.lastExt, ext);
     } else {
       const out = t < SWING_OUT ? t / SWING_OUT : 1 - (t - SWING_OUT) / (1 - SWING_OUT);
       const ext = s.reach * Phaser.Math.Easing.Quadratic.Out(out);

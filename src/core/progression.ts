@@ -5,19 +5,20 @@ export function xpToNext(level: number): number {
   return 10 + 6 * level + level * level;
 }
 
-/** 商品/升级/宝箱的品质权重表（DESIGN.md 2.7） */
+/** 商品/升级/宝箱的品质权重表（第 2~3 波即可稳定见到精良蓝色，第 4~6 波出稀有紫色） */
 const TIER_TABLE: { maxWave: number; weights: [number, number, number, number] }[] = [
-  { maxWave: 3, weights: [100, 0, 0, 0] },
-  { maxWave: 7, weights: [80, 20, 0, 0] },
-  { maxWave: 11, weights: [60, 30, 10, 0] },
-  { maxWave: 15, weights: [45, 33, 18, 4] },
-  { maxWave: Infinity, weights: [35, 35, 22, 8] },
+  { maxWave: 1, weights: [90, 10, 0, 0] },
+  { maxWave: 3, weights: [72, 28, 0, 0] },
+  { maxWave: 6, weights: [50, 38, 12, 0] },
+  { maxWave: 9, weights: [36, 40, 20, 4] },
+  { maxWave: 13, weights: [26, 38, 27, 9] },
+  { maxWave: Infinity, weights: [18, 36, 32, 14] },
 ];
 
-/** 每 10 点幸运，精良及以上的权重 × 1.05 */
+/** 每 10 点幸运，精良及以上的权重 × 1.08 */
 export function tierWeights(wave: number, luck: number): number[] {
   const row = TIER_TABLE.find((r) => wave <= r.maxWave)!;
-  const f = Math.pow(1.05, luck / 10);
+  const f = Math.pow(1.08, luck / 10);
   return row.weights.map((w, i) => (i === 0 ? w : w * f));
 }
 

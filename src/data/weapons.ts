@@ -40,12 +40,14 @@ export interface ProjectileSpec {
   fade?: boolean;
 }
 
+export type MeleeStyle = 'thrust' | 'sweep' | 'snap' | 'bash' | 'charge' | 'flurry' | 'pierce';
+
 export interface MeleeSpec {
   /** 武器头的命中半径 */
   hitRadius: number;
-  /** thrust 直刺；sweep 扇形横扫 */
-  style: 'thrust' | 'sweep';
-  /** 横扫的单侧角度（弧度） */
+  /** thrust 直刺；sweep 扇形横扫；snap 钳颚夹击；bash 盾击震荡波；charge 重角冲刺；flurry 高速连刺；pierce 破甲穿刺 */
+  style: MeleeStyle;
+  /** 横扫或扇形震荡波的单侧角度（弧度） */
   arc?: number;
 }
 
@@ -140,7 +142,7 @@ const LIST: WeaponDef[] = [
     critMultiplier: 2,
     knockback: 260,
     icon: 'w-mandible',
-    melee: { hitRadius: 18, style: 'thrust' },
+    melee: { hitRadius: 20, style: 'snap' },
   },
   {
     id: 'horn',
@@ -154,7 +156,7 @@ const LIST: WeaponDef[] = [
     critMultiplier: 2,
     knockback: 520,
     icon: 'w-horn',
-    melee: { hitRadius: 22, style: 'thrust' },
+    melee: { hitRadius: 22, style: 'charge' },
   },
   {
     id: 'legspike',
@@ -168,7 +170,7 @@ const LIST: WeaponDef[] = [
     critMultiplier: 2.5,
     knockback: 80,
     icon: 'w-legspike',
-    melee: { hitRadius: 14, style: 'thrust' },
+    melee: { hitRadius: 14, style: 'flurry' },
   },
   {
     id: 'scythe',
@@ -182,7 +184,7 @@ const LIST: WeaponDef[] = [
     critMultiplier: 2,
     knockback: 200,
     icon: 'w-scythe',
-    melee: { hitRadius: 20, style: 'sweep', arc: 1.0 },
+    melee: { hitRadius: 20, style: 'sweep', arc: 1.05 },
   },
   {
     id: 'shellshield',
@@ -191,12 +193,12 @@ const LIST: WeaponDef[] = [
     tags: ['甲角'],
     damage: 7,
     cooldown: 0.9,
-    range: 120,
+    range: 125,
     scaling: { melee: 0.5, armor: 1 },
     critMultiplier: 2,
-    knockback: 300,
+    knockback: 340,
     icon: 'w-shellshield',
-    melee: { hitRadius: 22, style: 'thrust' },
+    melee: { hitRadius: 26, style: 'bash', arc: 0.85 },
   },
   {
     id: 'slingshot',
@@ -495,7 +497,7 @@ const LIST: WeaponDef[] = [
     critMultiplier: 2,
     knockback: 120,
     icon: 'w-armorbreak',
-    melee: { hitRadius: 15, style: 'thrust' },
+    melee: { hitRadius: 15, style: 'pierce' },
     onHit: { vulnerable: true },
   },
   {
@@ -521,12 +523,12 @@ const LIST: WeaponDef[] = [
     tags: ['甲角'],
     damage: 9,
     cooldown: 1.1,
-    range: 140,
+    range: 145,
     scaling: { melee: 0.9 },
     critMultiplier: 2,
     knockback: 240,
     icon: 'w-scarab',
-    melee: { hitRadius: 18, style: 'thrust' },
+    melee: { hitRadius: 19, style: 'sweep', arc: 0.85 },
     onHit: { nectarOnKill: 0.25 },
   },
   // ---------- M6：成长型 ----------
@@ -537,12 +539,12 @@ const LIST: WeaponDef[] = [
     tags: ['甲角'],
     damage: 8,
     cooldown: 1.0,
-    range: 140,
+    range: 145,
     scaling: { melee: 1 },
     critMultiplier: 2,
     knockback: 260,
     icon: 'w-scarred',
-    melee: { hitRadius: 18, style: 'thrust' },
+    melee: { hitRadius: 21, style: 'snap' },
     growth: { kills: 40 },
   },
   // ---------- 土豆兄弟枪械系列 ----------
