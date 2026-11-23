@@ -520,10 +520,10 @@ function uiBadges(scene: Phaser.Scene): void {
       cPoly(ctx, [41, 46, 45, 43.5, 45, 48.5], '#e04238', '#3c120e', 1);
       cCircle(ctx, 41, 46, 1.5, '#ffd24a');
     },
-    2,
+    SPRITE_RES,
   );
 
-  // 天气难度图标（晴天 / 阴天 / 小雨 / 暴雨 / 雷暴）32×32 @ 2x
+  // 天气难度图标（晴天 / 阴天 / 小雨 / 暴雨 / 雷暴）
   // 0: 晴天
   bake2D(
     scene,
@@ -539,7 +539,7 @@ function uiBadges(scene: Phaser.Scene): void {
       const g = cShellGrad(ctx, 14, 14, 7.5, '#fff5b8', '#ffca38', '#e28416');
       cCircle(ctx, 16, 16, 7, g, '#7a3c06', 1.4);
     },
-    2,
+    SPRITE_RES,
   );
   // 1: 阴天
   bake2D(
@@ -566,7 +566,7 @@ function uiBadges(scene: Phaser.Scene): void {
       drawCloud(19, 13, 0.85, '#b8c4d0', '#8696a6');
       drawCloud(14, 19, 1.0, '#eef4fa', '#b6c4d2');
     },
-    2,
+    SPRITE_RES,
   );
   // 2: 小雨
   bake2D(
@@ -592,7 +592,7 @@ function uiBadges(scene: Phaser.Scene): void {
         cLine(ctx, [x, y, x - 1.5, y + 4.5], '#6cc6ff', 2.2);
       }
     },
-    2,
+    SPRITE_RES,
   );
   // 3: 暴雨
   bake2D(
@@ -618,7 +618,7 @@ function uiBadges(scene: Phaser.Scene): void {
         cLine(ctx, [x, y, x - 2.6, y + 7], '#58b4ff', 2.2);
       }
     },
-    2,
+    SPRITE_RES,
   );
   // 4: 雷暴
   bake2D(
@@ -643,7 +643,7 @@ function uiBadges(scene: Phaser.Scene): void {
       ctx.stroke();
       cPoly(ctx, [17.5, 13.5, 12.2, 22, 16.5, 22, 13.5, 29.5, 21.8, 19.5, 17.4, 19.5, 20.4, 13.5], '#ffe858', '#6a4406', 1.2);
     },
-    2,
+    SPRITE_RES,
   );
 
   // 通用 UI 小图标 28×28 @ 2x
@@ -668,7 +668,7 @@ function uiBadges(scene: Phaser.Scene): void {
       ctx.stroke();
       cEllipse(ctx, 9.2, 9.5, 2.2, 1.3, 'rgba(255,255,255,0.65)', undefined, 0, -0.5);
     },
-    2,
+    SPRITE_RES,
   );
 
   bake2D(
@@ -694,7 +694,7 @@ function uiBadges(scene: Phaser.Scene): void {
       ctx.stroke();
       cLine(ctx, [14, 6.2, 14, 21.5], 'rgba(255,255,255,0.45)', 1.2);
     },
-    2,
+    SPRITE_RES,
   );
 
   bake2D(
@@ -715,7 +715,7 @@ function uiBadges(scene: Phaser.Scene): void {
       cCircle(ctx, 14, 17, 1.8, '#3a240e');
       cLine(ctx, [14, 17.5, 14, 20.8], '#3a240e', 1.8);
     },
-    2,
+    SPRITE_RES,
   );
 
   bake2D(
@@ -739,7 +739,7 @@ function uiBadges(scene: Phaser.Scene): void {
       cCircle(ctx, 0, 0, 3.2, '#3b3326', '#3a2816', 1.2);
       ctx.restore();
     },
-    2,
+    SPRITE_RES,
   );
 
   bake2D(
@@ -756,7 +756,7 @@ function uiBadges(scene: Phaser.Scene): void {
       cRoundRect(ctx, 4, 20.5, 20, 3.2, 1.4, '#d99824', '#4a2606', 1.2);
       cCircle(ctx, 14, 17, 1.6, '#ff5a4a');
     },
-    2,
+    SPRITE_RES,
   );
 }
 

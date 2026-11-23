@@ -56,6 +56,8 @@ export interface FireOptions {
   grow?: number;
   /** 喷火：逐渐变大、变淡 */
   fade?: boolean;
+  /** 复眼棱镜：命中后向两侧分裂 2 颗小弹 */
+  split?: boolean;
 }
 
 interface Projectile extends FireOptions {
@@ -207,6 +209,7 @@ export class ProjectileManager {
       }
       this.strike(p, e, enemies);
       p.hits.push(e);
+      if (p.split) this.spawnSplits(p, e);
       if (p.bouncesLeft > 0) return !this.bounce(p, e, enemies);
       if (p.pierce <= 0) return true;
       p.pierce--;
@@ -237,6 +240,35 @@ export class ProjectileManager {
     p.maxDist = b.range + 60;
     if (p.spin === 0) p.sprite.setRotation(a);
     return true;
+  }
+
+  private spawnSplits(p: Projectile, hitEnemy: Enemy): void {
+    const baseA = Math.atan2(p.dirY, p.dirX);
+    const dmg = Math.max(1, Math.round(p.damage * 0.4));
+    for (const off of [-0.45, 0.45]) {
+      const a = baseA + off;
+      this.fire({
+        texture: 'sparkbolt',
+        x: hitEnemy.x + Math.cos(a) * 8,
+        y: hitEnemy.y + Math.sin(a) * 8,
+        angle: a,
+        speed: Math.min(760, Math.max(480, p.speed * 0.85)),
+        maxDist: 165,
+        damage: dmg,
+        crit: false,
+        radius: 5,
+        knockback: p.knockback * 0.4,
+        pierce: 0,
+        spin: 0,
+        explode: 0,
+        poison: null,
+        cloud: null,
+        src: p.src ?? null,
+        split: false,
+      });
+      // 跳过刚命中的那只怪，避免贴脸立刻撞同一只
+      this.list[this.list.length - 1].hits.push(hitEnemy);
+    }
   }
 
   private strike(p: Projectile, e: Enemy, enemies: EnemyManager): void {

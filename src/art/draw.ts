@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { IS_COARSE_POINTER } from '../config';
 
 /** 贴图绘制用的小工具：支持 Phaser Graphics 和更细腻的 Canvas 2D（渐变、阴影、贝塞尔曲线） */
 
@@ -7,8 +8,8 @@ export type DrawFn = (g: G) => void;
 export type Ctx = CanvasRenderingContext2D;
 export type Draw2D = (ctx: Ctx) => void;
 
-/** 世界内精灵贴图的超采样倍率，保证镜头放大和高清屏下边缘锐利 */
-export const SPRITE_RES = 2;
+/** 世界内精灵贴图的超采样倍率（桌面端 3x 适配 2K/4K 大屏，移动端 2x 兼顾内存与帧率） */
+export const SPRITE_RES = IS_COARSE_POINTER ? 2 : 3;
 
 export function ellipse(cx: number, cy: number, rx: number, ry: number, rot = 0, seg = 24): Phaser.Math.Vector2[] {
   const pts: Phaser.Math.Vector2[] = [];

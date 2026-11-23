@@ -32,6 +32,8 @@ export class SpawnSystem {
   private intervalMult = 1;
   /** 本波还没刷出的精英/Boss */
   private specials: { id: string; at: number }[] = [];
+  private treeTimer = 4;
+  private lootbugAt = Infinity;
   private readonly pending: Pending[] = [];
   private readonly moundPool: Phaser.GameObjects.Image[] = [];
 
@@ -41,12 +43,14 @@ export class SpawnSystem {
     private readonly fx: Effects,
   ) {}
 
-  startWave(def: WaveDef, waveNo: number, difficulty: DifficultyDef): void {
+  startWave(def: WaveDef, waveNo: number, difficulty: DifficultyDef, spawnRatePct = 0): void {
     this.clear();
     this.wave = def;
     this.waveNo = waveNo;
-    this.intervalMult = difficulty.spawnInterval;
+    this.intervalMult = difficulty.spawnInterval / Math.max(0.5, 1 + spawnRatePct);
     this.timers = def.rules.map(() => 0);
+    this.treeTimer = 3.5;
+    this.lootbugAt = waveNo >= 2 && !def.boss ? Phaser.Math.FloatBetween(8, 18) : Infinity;
     this.specials = [];
     if (def.boss) this.specials.push({ id: def.boss, at: 1 });
     for (const e of def.elites ?? []) for (let k = 0; k < e.count; k++) this.specials.push({ id: e.enemy, at: e.at + k * 0.8 });
@@ -76,6 +80,26 @@ export class SpawnSystem {
         const t = def.boss ? 1.6 : 1.2;
         const mound = this.acquireMound().setPosition(x, y).setScale((def.boss ? 1.5 : 1) / SPRITE_RES);
         this.pending.push({ def, x, y, t, total: t, mound });
+      }
+      // 蜜树：每隔几秒在场内长一棵（最多 3 棵）
+      this.treeTimer -= dt;
+      if (this.treeTimer <= 0) {
+        this.treeTimer = 7.5;
+        let trees = 0;
+        for (const e of this.enemies.active) if (e.def.id === 'tree') trees++;
+        if (trees < 3 && this.enemies.count < MAX_ENEMIES) {
+          const [tx, ty] = this.pickCenter(px, py, 140, 360);
+          this.enemies.spawn(ENEMIES.tree, tx, ty, this.waveNo);
+          this.fx.burst(tx, ty, 0x62c048, 6, 90, 0.8);
+        }
+      }
+      // 宝藏虫：第 2 波起每波出没一次
+      if (elapsed >= this.lootbugAt) {
+        this.lootbugAt = Infinity;
+        const [lx, ly] = this.pickCenter(px, py, 200, 340);
+        const lb = this.enemies.spawn(ENEMIES.lootbug, lx, ly, this.waveNo);
+        this.fx.ring(lb.x, lb.y, 42, 0xffd038);
+        this.fx.number(lb.x, lb.y - 24, '宝藏虫！', 'crit');
       }
     }
 
@@ -120,11 +144,11 @@ export class SpawnSystem {
     }
   }
 
-  private pickCenter(px: number, py: number): [number, number] {
+  private pickCenter(px: number, py: number, minD = MIN_DIST, maxD = MAX_DIST): [number, number] {
     const m = WORLD_MARGIN + GROUP_SPREAD;
     for (let tries = 0; tries < 16; tries++) {
       const a = Math.random() * Math.PI * 2;
-      const r = Phaser.Math.Between(MIN_DIST, MAX_DIST);
+      const r = Phaser.Math.Between(minD, maxD);
       const x = px + Math.cos(a) * r;
       const y = py + Math.sin(a) * r;
       if (x > m && x < WORLD_WIDTH - m && y > m && y < WORLD_HEIGHT - m) return [x, y];
@@ -133,7 +157,7 @@ export class SpawnSystem {
     for (;;) {
       const x = Phaser.Math.Between(m, WORLD_WIDTH - m);
       const y = Phaser.Math.Between(m, WORLD_HEIGHT - m);
-      if (Math.hypot(x - px, y - py) >= MIN_DIST) return [x, y];
+      if (Math.hypot(x - px, y - py) >= minD) return [x, y];
     }
   }
 

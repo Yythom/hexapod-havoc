@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
-import { weaponTex } from '../art/icons';
+import { UI_WEAPON_RES, weaponTex } from '../art/icons';
 
 type P = readonly [number, number];
 
@@ -151,22 +151,24 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.hasSlow = slow;
   }
 
-  setWeapon(slot: number, texture: string | null, tier = 0): void {
+  setWeapon(slot: number, texture: string | null, tier = 0, hiRes = false): void {
     let sprite = this.weaponSprites[slot];
-    this.weaponScale[slot] = (1 + 0.12 * tier) / SPRITE_RES;
+    const texScale = hiRes ? UI_WEAPON_RES : SPRITE_RES;
+    this.weaponScale[slot] = (1 + 0.12 * tier) / texScale;
     this.weaponExtend[slot] = 0;
     if (!texture) {
       sprite?.setVisible(false);
       return;
     }
+    const key = weaponTex(texture, tier, hiRes);
     if (!sprite) {
-      sprite = this.scene.add.image(0, 0, weaponTex(texture, tier, false));
+      sprite = this.scene.add.image(0, 0, key);
       this.weaponSprites[slot] = sprite;
       this.add(sprite);
       // 保持状态光环在最顶层
       this.bringToTop(this.aura);
     }
-    sprite.setTexture(weaponTex(texture, tier, false)).setVisible(true);
+    sprite.setTexture(key).setVisible(true);
     this.placeWeapon(slot);
   }
 

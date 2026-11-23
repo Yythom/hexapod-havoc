@@ -202,4 +202,123 @@ export const M6_ITEM_ICONS: Record<string, DrawFn> = {
     }
     circle(g, 0x9ad070, 24, 24, 3);
   },
+  // 爆裂腺体：鼓胀橙红毒囊
+  powdergland: (g) => {
+    circle(g, 0x3a0c06, 24, 26, 15);
+    circle(g, 0xe84824, 24, 26, 13);
+    circle(g, 0xff9a3a, 21, 22, 7.5);
+    circle(g, 0xffe484, 19, 20, 3);
+    flame(g, 24, 14, 0.72);
+  },
+  // 复眼棱镜：六边蓝紫复眼晶体
+  splitprism: (g) => {
+    fillPoly(g, 0x1a1238, [24, 6, 40, 15, 40, 33, 24, 42, 8, 33, 8, 15]);
+    fillPoly(g, 0x56c8ff, [24, 9, 37, 16.5, 24, 24, 11, 16.5]);
+    fillPoly(g, 0xa868ff, [24, 24, 37, 16.5, 37, 31.5, 24, 39]);
+    fillPoly(g, 0x7a96ff, [24, 24, 11, 16.5, 11, 31.5, 24, 39]);
+    circle(g, 0xffffff, 24, 22, 3.2);
+  },
+  // 暴击火花：金色星芒火团
+  critbolt: (g) => {
+    fillPoly(g, 0x4a2804, [24, 4, 29, 18, 44, 24, 29, 30, 24, 44, 19, 30, 4, 24, 19, 18]);
+    fillPoly(g, 0xffc828, [24, 7, 28, 19, 41, 24, 28, 29, 24, 41, 20, 29, 7, 24, 20, 19]);
+    circle(g, 0xffffff, 24, 24, 4.2);
+  },
+  // 采蜜连弩：木质小弩 + 金蜜箭
+  nectargun: (g) => {
+    line(g, 3.2, 0x5a3412, [10, 34, 34, 12]);
+    line(g, 3.4, 0x9a5c22, [12, 16, 32, 36]);
+    line(g, 1.4, 0xffe4a0, [13, 17, 15, 33, 31, 35]);
+    fillPoly(g, 0xffc828, [30, 10, 41, 7, 38, 18]);
+  },
+  // 嗜血狂颚：沾血红黑大颚
+  bloodrage: (g) => {
+    for (const s of [-1, 1]) {
+      fillPoly(g, 0x260606, [24 + s * 14, 38, 24 + s * 16, 18, 24 + s * 5, 8, 24 + s * 8, 26]);
+      fillPoly(g, 0xe02828, [24 + s * 12, 35, 24 + s * 13.5, 19, 24 + s * 6, 11, 24 + s * 8, 25]);
+    }
+    circle(g, 0xff8080, 24, 24, 3.5);
+  },
+  // 玻璃翼膜：透明青白薄翅
+  glasswing: (g) => {
+    fillEllipse(g, 0x204868, 17, 23, 11, 17, -0.35, 0.7);
+    fillEllipse(g, 0x9ae8ff, 17, 23, 9, 15, -0.35, 0.65);
+    fillEllipse(g, 0x204868, 31, 23, 11, 17, 0.35, 0.7);
+    fillEllipse(g, 0x9ae8ff, 31, 23, 9, 15, 0.35, 0.65);
+    line(g, 2, 0xffffff, [12, 14, 20, 22]);
+    line(g, 2, 0xffffff, [36, 14, 28, 22]);
+  },
+  // 重甲壁垒：厚重青钢甲盾
+  ironmantle: (g) => {
+    fillPoly(g, 0x10141c, [9, 10, 39, 10, 36, 31, 24, 42, 12, 31]);
+    fillPoly(g, 0x5c6e88, [12, 13, 36, 13, 33.5, 29.5, 24, 39, 14.5, 29.5]);
+    line(g, 2.2, 0xb8d4f0, [16, 16, 32, 16]);
+    circle(g, 0xffc848, 24, 25, 4);
+  },
+  // 引虫香囊：发光绿紫诱虫香包
+  swarmlure: (g) => {
+    fillEllipse(g, 0x2a1438, 24, 28, 13, 13);
+    fillEllipse(g, 0x8e3cb0, 24, 28, 11, 11);
+    fillPoly(g, 0xd8a840, [19, 16, 29, 16, 26, 11, 22, 11]);
+    circle(g, 0xb8ff58, 20, 27, 2.4);
+    circle(g, 0xb8ff58, 28, 29, 2.0);
+    circle(g, 0xb8ff58, 24, 22, 1.8);
+  },
+  // 溢出蜂晶：金光六角蜜晶
+  overhealcore: (g) => {
+    fillPoly(g, 0x5a3204, [24, 6, 39, 15, 39, 33, 24, 42, 9, 33, 9, 15]);
+    fillPoly(g, 0xffb824, [24, 9, 36, 16.5, 36, 31.5, 24, 39, 12, 31.5, 12, 16.5]);
+    fillPoly(g, 0xfff4a8, [24, 13, 31, 18, 24, 24, 17, 18]);
+  },
+  // 独行甲刃：孤月弯刀
+  lonewolf: (g) => {
+    fillPoly(g, 0x18141c, [10, 38, 18, 22, 36, 8, 30, 28, 14, 40]);
+    fillPoly(g, 0xd8e2f0, [12, 36, 20, 23, 34, 10, 28, 26]);
+    line(g, 2.4, 0xff5a38, [10, 38, 16, 32]);
+  },
+  // 复合炮心：蓝金机械炮核
+  turretprism: (g) => {
+    circle(g, 0x1a2232, 24, 24, 15);
+    circle(g, 0x3b6ca8, 24, 24, 12);
+    circle(g, 0x74e8ff, 24, 24, 6.5);
+    circle(g, 0xffffff, 22, 22, 2.5);
+  },
+  // 吸血毒牙：一对弯牙滴红珠
+  vampfang: (g) => {
+    for (const x of [16, 32]) {
+      fillPoly(g, 0x20080a, [x - 5, 10, x + 5, 10, x, 34]);
+      fillPoly(g, 0xf8f0e4, [x - 3, 12, x + 3, 12, x, 30]);
+      circle(g, 0xe82038, x, 36, 3.2);
+    }
+  },
+  // 跳弹翅鞘：带折线弹道的金翅
+  ricochetwing: (g) => {
+    fillEllipse(g, 0x3a2008, 22, 26, 14, 10, -0.4);
+    fillEllipse(g, 0xe8a434, 22, 26, 12, 8, -0.4);
+    line(g, 2.4, 0xfff088, [8, 36, 22, 16, 38, 26, 42, 10]);
+  },
+  // 丰收祭坛：金穗石台
+  harvestaltar: (g) => {
+    fillPoly(g, 0x2a241c, [10, 38, 38, 38, 34, 24, 14, 24]);
+    fillPoly(g, 0x82786a, [12, 36, 36, 36, 33, 26, 15, 26]);
+    for (const x of [18, 24, 30]) {
+      line(g, 2.2, 0xf0b832, [x, 26, x, 10]);
+      circle(g, 0xffe478, x, 11, 2.4);
+    }
+  },
+  // 巨虫血清：紫金强化针管
+  giantscarab: (g) => {
+    fillPoly(g, 0x1c0e2c, [14, 34, 28, 12, 36, 20, 22, 42]);
+    fillPoly(g, 0xb858f0, [16, 33, 28, 15, 33, 20, 21, 38]);
+    line(g, 2.4, 0xd8e0e8, [32, 16, 40, 8]);
+    circle(g, 0xffd44c, 24, 26, 3);
+  },
+  // 引力心核：磁力发光心核
+  magnetheart: (g) => {
+    circle(g, 0x1a1e38, 24, 24, 15);
+    circle(g, 0x3a64c8, 24, 24, 12.5);
+    circle(g, 0xff5a6a, 24, 24, 6.5);
+    line(g, 1.8, 0x9ce8ff, [7, 24, 12, 24]);
+    line(g, 1.8, 0x9ce8ff, [36, 24, 41, 24]);
+  },
 };

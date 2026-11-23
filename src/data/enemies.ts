@@ -1,4 +1,4 @@
-export type EnemyBehavior = 'chase' | 'swarm' | 'charger' | 'ranged' | 'bomber' | 'summoner' | 'elite' | 'boss';
+export type EnemyBehavior = 'chase' | 'swarm' | 'charger' | 'ranged' | 'bomber' | 'summoner' | 'elite' | 'boss' | 'tree' | 'lootbug';
 
 export interface EnemyDef {
   id: string;
@@ -151,6 +151,32 @@ const LIST: EnemyDef[] = [
     scale: 0.36,
     behavior: 'chase',
     damageGrowth: 0.1,
+  },
+  {
+    id: 'tree',
+    name: '蜜树',
+    hp: 14,
+    damage: 0,
+    speed: 0,
+    nectar: [3, 5],
+    radius: 18,
+    texture: 'tree',
+    behavior: 'tree',
+    knockbackResist: 1,
+    hpGrowth: 0.35,
+  },
+  {
+    id: 'lootbug',
+    name: '宝藏虫',
+    hp: 26,
+    damage: 0,
+    speed: 195,
+    nectar: [8, 12],
+    radius: 15,
+    texture: 'lootbug',
+    behavior: 'lootbug',
+    knockbackResist: 0.45,
+    hpGrowth: 0.45,
   },
 ];
 

@@ -238,8 +238,8 @@ export class EnemyManager {
       let vx = vx0 * slow;
       let vy = vy0 * slow;
 
-      // 互相推开，避免叠成一坨（Boss 不被推）
-      if (!e.def.boss) {
+      // 互相推开，避免叠成一坨（Boss 和蜜树不被推）
+      if (!e.def.boss && e.def.behavior !== 'tree') {
         let sx = 0;
         let sy = 0;
         for (const o of grid.query(e.x, e.y, e.radius + MAX_ENEMY_RADIUS, this.buf)) {
@@ -269,7 +269,7 @@ export class EnemyManager {
 
       e.x = Phaser.Math.Clamp(e.x + vx * dt, EDGE, WORLD_WIDTH - EDGE);
       e.y = Phaser.Math.Clamp(e.y + vy * dt, EDGE, WORLD_HEIGHT - EDGE);
-      if (!frozen) {
+      if (!frozen && e.def.behavior !== 'tree') {
         const face = Math.hypot(vx0, vy0) > 1 ? Math.atan2(vy0, vx0) : Math.atan2(this.host.py - e.y, this.host.px - e.x);
         e.heading = Phaser.Math.Angle.RotateTo(e.heading, face, (e.def.boss ? 3 : 8) * dt);
       }
@@ -393,13 +393,23 @@ export class EnemyManager {
   // ---------- 内部 ----------
 
   private die(e: Enemy, drops: boolean): void {
-    const big = e.def.boss ? 4 : e.def.elite ? 2 : 1;
+    const isTree = e.def.behavior === 'tree';
+    const isLoot = e.def.behavior === 'lootbug';
+    const big = e.def.boss ? 4 : e.def.elite || isLoot ? 2 : 1;
     sfx.play(big > 1 ? 'killBig' : 'kill');
-    this.fx.burst(e.x, e.y, 0x4a2030, 7 * big, 150 * Math.sqrt(big), 0.9 * big);
-    this.fx.burst(e.x, e.y, 0xb0d060, 4 * big, 110, 0.6 * big);
+    if (isTree) {
+      this.fx.burst(e.x, e.y, 0x62c048, 9, 140, 0.9);
+      this.fx.burst(e.x, e.y, 0x8a582c, 6, 110, 0.8);
+    } else {
+      this.fx.burst(e.x, e.y, isLoot ? 0xffd038 : 0x4a2030, 7 * big, 150 * Math.sqrt(big), 0.9 * big);
+      this.fx.burst(e.x, e.y, isLoot ? 0xffffff : 0xb0d060, 4 * big, 110, 0.6 * big);
+    }
     this.release(e);
     if (!drops) return;
-    if (e.burnTime > 0) this.spreadBurn(e);
+    if (e.burnTime > 0) {
+      this.spreadBurn(e);
+      if (this.host.mods.burnExplode > 0 && !isTree) this.explodeBurn(e);
+    }
     const split = e.def.splitInto;
     if (split) {
       for (let k = 0; k < split.count; k++) {
@@ -408,6 +418,22 @@ export class EnemyManager {
       }
     }
     this.onKilled?.(e);
+  }
+
+  /** 火焰 6 件套：灼烧怪死后火焰爆炸 */
+  private explodeBurn(src: Enemy): void {
+    const r = 74;
+    const dmg = Math.max(8, Math.round(src.burnDps * 1.8 * (1 + this.host.mods.burnDamagePct)));
+    this.fx.ring(src.x, src.y, r, 0xff7028);
+    this.fx.burst(src.x, src.y, 0xff9a3a, 10, 190, 1);
+    for (const o of this.grid.query(src.x, src.y, r + MAX_ENEMY_RADIUS, this.buf).slice()) {
+      if (!o.active || o === src) continue;
+      const dx = o.x - src.x;
+      const dy = o.y - src.y;
+      const rr = r + o.radius;
+      if (dx * dx + dy * dy > rr * rr) continue;
+      this.hit(o, dmg, false, dx / (Math.hypot(dx, dy) || 1), dy / (Math.hypot(dx, dy) || 1), 110, 'burn');
+    }
   }
 
   /** 被灼烧的怪死亡时，火焰传给附近最近的一只怪 */
@@ -525,8 +551,9 @@ export class EnemyManager {
   private draw(e: Enemy, dt: number): void {
     const s = e.sprite;
     s.setPosition(e.x, e.y);
-    const wob = e.frozen > 0 ? 0 : e.def.boss ? 0.03 : 0.14;
-    s.setRotation(e.heading + Math.sin(e.age * 16 + e.wobble) * wob);
+    const isTree = e.def.behavior === 'tree';
+    const wob = e.frozen > 0 || isTree ? 0 : e.def.boss ? 0.03 : 0.14;
+    s.setRotation(isTree ? 0 : e.heading + Math.sin(e.age * 16 + e.wobble) * wob);
     let scale = e.baseScale;
     if (e.age < SPAWN_POP) scale *= Phaser.Math.Easing.Back.Out(e.age / SPAWN_POP);
     if (e.def.behavior === 'bomber' && e.state === 1) scale *= 1 + (1 - e.timer) * 0.6;
@@ -554,6 +581,17 @@ export class EnemyManager {
     }
     e.label?.setPosition(e.x, e.y - e.radius - 16);
     if (e.frozen > 0) this.drawIce(e);
+    if (e.def.behavior === 'lootbug' || (isTree && e.hp < e.maxHp)) {
+      const g = this.iceG;
+      const bw = 28;
+      const bh = 4;
+      const bx = e.x - bw / 2;
+      const by = e.y - e.radius - 10;
+      g.fillStyle(0x050507, 0.85);
+      g.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+      g.fillStyle(isTree ? 0x62d858 : 0xffd038, 1);
+      g.fillRect(bx, by, Math.max(2, bw * Math.max(0, e.hp / e.maxHp)), bh);
+    }
   }
 
   /** 冻住时罩一层半透明冰壳，边上几根冰棱 */
@@ -678,6 +716,27 @@ export class EnemyManager {
 
       case 'boss':
         return this.behaveBoss(e, dt, ux, uy, ang, d);
+
+      case 'tree':
+        return [0, 0];
+
+      case 'lootbug': {
+        // 限时逃跑：远离玩家并稍微避开地图边缘，11 秒没打死就钻回地下
+        if (e.age > 11) {
+          this.fx.burst(e.x, e.y, 0xffd038, 8, 120, 0.8);
+          this.release(e);
+          return [0, 0];
+        }
+        if (Math.random() < dt * 12) this.fx.burst(e.x, e.y, 0xffe478, 1, 45, 0.55);
+        let fx = -ux;
+        let fy = -uy;
+        if (e.x < 180) fx += 0.9;
+        else if (e.x > WORLD_WIDTH - 180) fx -= 0.9;
+        if (e.y < 180) fy += 0.9;
+        else if (e.y > WORLD_HEIGHT - 180) fy -= 0.9;
+        const fl = Math.hypot(fx, fy) || 1;
+        return [(fx / fl) * e.speed, (fy / fl) * e.speed];
+      }
     }
   }
 

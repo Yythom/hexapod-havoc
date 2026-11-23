@@ -118,7 +118,7 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(8);
     for (let i = 0; i < SLOT_COUNT; i++) {
       const [tex, tier] = SHOWCASE[i];
-      this.beetle.setWeapon(i, tex, tier);
+      this.beetle.setWeapon(i, tex, tier, true);
       this.beetle.setWeaponAim(i, this.beetle.rotation + this.beetle.tipLocalAngle(i));
     }
 

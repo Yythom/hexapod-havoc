@@ -8,6 +8,7 @@ import { CHARACTER_ORDER, CHARACTERS, unlockText } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { ZERO_MODS, type Mods } from '../data/items';
 import { weaponTex } from '../art/icons';
+import { SPRITE_RES } from '../art/draw';
 import { KIND_LABEL, TIERS, WEAPONS } from '../data/weapons';
 import { BeetleView } from '../entities/BeetleView';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
@@ -16,6 +17,7 @@ import { setupUICamera } from '../ui/camera';
 import {
   COLOR,
   TAG_STYLE,
+  cardTitle,
   displayLabel,
   divider,
   label,
@@ -154,11 +156,19 @@ export class CharacterSelectScene extends Phaser.Scene {
     card.add(g);
 
     const beetle = new BeetleView(this, 0, -10, c.shell).setScale(1.05).setRotation(-Math.PI / 2);
-    if (!unlocked) beetle.setAlpha(0.25);
+    if (!unlocked) beetle.setAlpha(0.4);
     card.add(beetle);
     this.beetles.push(beetle);
 
-    if (!unlocked) card.add(this.add.image(0, -10, 'ui-lock').setDisplaySize(28, 28).setAlpha(0.92));
+    if (!unlocked) {
+      const lb = this.add.graphics();
+      lb.fillStyle(0x101116, 0.94);
+      lb.fillCircle(lx + CARD_W - 16, ly + 16, 11);
+      lb.lineStyle(1.6, COLOR.border, 0.85);
+      lb.strokeCircle(lx + CARD_W - 16, ly + 16, 11);
+      card.add(lb);
+      card.add(this.add.image(lx + CARD_W - 16, ly + 16, 'ui-lock').setDisplaySize(14, 14).setAlpha(0.9));
+    }
 
     const name = label(this, 0, ly + CARD_H - 18, c.name, 14, unlocked ? (selected ? '#ffffff' : COLOR.text) : COLOR.dim, true).setOrigin(0.5);
     if (name.width > CARD_W - 12) name.setScale((CARD_W - 12) / name.width);
@@ -197,14 +207,14 @@ export class CharacterSelectScene extends Phaser.Scene {
     const c = CHARACTERS[this.character];
     const unlocked = isUnlocked(this.character);
     const h = 514;
-    root.add(panel(this, RIGHT_X, CARD_Y, RIGHT_W, h, COLOR.border, COLOR.panel, 2, COLOR.gold));
+    root.add(panel(this, RIGHT_X, CARD_Y, RIGHT_W, h, COLOR.border, COLOR.panel, 2, COLOR.gold, 78));
 
     const cx = RIGHT_X + RIGHT_W / 2;
     const lx = RIGHT_X + 18;
     const wrapW = RIGHT_W - 36;
 
-    root.add(displayLabel(this, cx, CARD_Y + 29, c.name, 23, COLOR.goldText).setOrigin(0.5));
-    root.add(pill(this, cx, CARD_Y + 59, c.role, COLOR.panelDeep, COLOR.border, COLOR.dim, 13, 12, 22));
+    root.add(cardTitle(this, cx, CARD_Y + 26, c.name, 23, COLOR.goldText).setOrigin(0.5));
+    root.add(pill(this, cx, CARD_Y + 56, c.role, COLOR.panelDeep, COLOR.border, COLOR.dim, 13, 12, 22));
     root.add(divider(this, lx, CARD_Y + 80, wrapW));
 
     let y = CARD_Y + 94;
@@ -216,7 +226,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       y += txt.height + 5;
     }
 
-    y += 8;
+    y += 10;
     root.add(label(this, lx, y, '角色限制', 16, COLOR.goldText, true).setOrigin(0, 0));
     y += 24;
     if (c.cons.length) {
@@ -231,20 +241,29 @@ export class CharacterSelectScene extends Phaser.Scene {
       y += none.height + 5;
     }
 
-    const wy = Math.max(CARD_Y + h - 196, y + 6);
-    root.add(divider(this, lx, wy, wrapW));
+    const wy = Math.min(CARD_Y + h - 226, Math.max(CARD_Y + 278, y + 14));
     if (!unlocked) {
       const box = this.add.graphics();
       box.fillStyle(0x281414, 0.95);
-      box.fillRoundedRect(lx, wy + 16, wrapW, 92, 6);
+      box.fillRoundedRect(RIGHT_X + 12, wy + 8, RIGHT_W - 24, CARD_Y + h - wy - 20, 6);
       box.lineStyle(2, 0xc8403c, 0.9);
-      box.strokeRoundedRect(lx, wy + 16, wrapW, 92, 6);
+      box.strokeRoundedRect(RIGHT_X + 12, wy + 8, RIGHT_W - 24, CARD_Y + h - wy - 20, 6);
       root.add(box);
-      root.add(this.add.image(lx + 24, wy + 38, 'ui-lock').setDisplaySize(22, 22));
-      root.add(label(this, lx + 42, wy + 28, '解锁条件', 15, '#ff8e86', true).setOrigin(0, 0));
-      root.add(label(this, lx + 14, wy + 56, nbsp(unlockText(c.unlock!)), 15, COLOR.text, false, wrapW - 28).setOrigin(0, 0).setAlign('left'));
+      root.add(this.add.image(lx + 18, wy + 34, 'ui-lock').setDisplaySize(22, 22));
+      root.add(label(this, lx + 36, wy + 24, '解锁条件', 15, '#ff8e86', true).setOrigin(0, 0));
+      root.add(label(this, lx + 10, wy + 54, nbsp(unlockText(c.unlock!)), 15, COLOR.text, false, wrapW - 20).setOrigin(0, 0).setAlign('left'));
       return;
     }
+
+    // 底部初始武器/随从预览内嵌暗框（消除中间空白断层）
+    const subBox = this.add.graphics();
+    const subH = CARD_Y + h - wy - 12;
+    subBox.fillStyle(COLOR.panelDeep, 0.92);
+    subBox.fillRoundedRect(RIGHT_X + 12, wy, RIGHT_W - 24, subH, 6);
+    subBox.lineStyle(1.5, COLOR.borderSoft, 0.9);
+    subBox.strokeRoundedRect(RIGHT_X + 12, wy, RIGHT_W - 24, subH, 6);
+    root.add(subBox);
+
     const previewStats = { ...BASE_STATS, ...c.stats };
     const previewMods = { ...ZERO_MODS, ...c.mods };
     for (const [k, v] of Object.entries(c.stats)) previewStats[k as keyof typeof previewStats] = BASE_STATS[k as keyof typeof BASE_STATS] + (v as number);
@@ -253,7 +272,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       return;
     }
     const wDef = WEAPONS[this.weapon];
-    root.add(label(this, lx, wy + 12, '初始武器预览', 15, COLOR.goldText, true).setOrigin(0, 0));
+    root.add(label(this, lx, wy + 12, '初始武器预览', 14, COLOR.goldText, true).setOrigin(0, 0));
 
     const iconCx = lx + 34;
     const iconCy = wy + 68;
@@ -274,9 +293,9 @@ export class CharacterSelectScene extends Phaser.Scene {
     }
 
     const wLines = weaponLines(wDef, 0, previewStats, previewMods);
-    let ly = wy + 114;
+    let ly = wy + 116;
     for (const l of wLines) {
-      const t = label(this, lx + 2, ly, l.text, 13, l.color, false, wrapW - 4).setOrigin(0, 0).setAlign('left');
+      const t = label(this, lx + 2, ly, l.text, 13, l.color, false, wrapW - 8).setOrigin(0, 0).setAlign('left');
       root.add(t);
       ly += t.height + 3;
     }
@@ -290,7 +309,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const iconCx = lx + 34;
     const iconCy = wy + 68;
     root.add(slotBox(this, iconCx, iconCy, 62, TIERS[0].color));
-    root.add(this.add.image(iconCx, iconCy, 'workerant').setScale(1.1));
+    root.add(this.add.image(iconCx, iconCy, 'workerant').setScale(2.2 / SPRITE_RES));
     root.add(label(this, lx + 76, wy + 40, '工蚁', 19, COLOR.text, true).setOrigin(0, 0));
     root.add(label(this, lx + 76, wy + 65, '召唤物', 13, COLOR.dim).setOrigin(0, 0));
     const dmg = Math.round(weaponDamage(def, 0, stats, mods) * (1 + mods.summonDamagePct));
@@ -332,7 +351,7 @@ export class CharacterSelectScene extends Phaser.Scene {
             height: 50,
             fontSize: 20,
             primary: i === this.difficulty,
-            shape: 'slant',
+            shape: 'bevel',
             accentColor: WEATHER_ACCENT[i],
             disabled: locked,
             leftIcon: locked ? 'ui-lock' : `weather-${i}`,
@@ -373,7 +392,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       const cx = CARD_X0 + 52;
       const cy = 604;
       root.add(slotBox(this, cx, cy, 86, COLOR.border, false));
-      root.add(this.add.image(cx, cy, 'workerant').setScale(1.6));
+      root.add(this.add.image(cx, cy, 'workerant').setScale(3.2 / SPRITE_RES));
       root.add(label(this, cx + 66, cy - 12, '不能装武器，商店也不出武器', 17, COLOR.text).setOrigin(0, 0.5));
       root.add(label(this, cx + 66, cy + 16, '靠越来越多的工蚁随从作战', 15, COLOR.dim).setOrigin(0, 0.5));
       return;

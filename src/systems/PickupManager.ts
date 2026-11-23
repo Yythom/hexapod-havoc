@@ -56,11 +56,12 @@ export class PickupManager {
   }
 
   /** vacuum 为 true 时全图掉落物都飞向玩家（波次结束） */
-  update(dt: number, who: Collector, pickupRange: number, vacuum: boolean): void {
+  update(dt: number, who: Collector, pickupRange: number, vacuum: boolean, fastPull = false): void {
     this.gotNectar = 0;
     this.gotChests = 0;
     this.gotHeals = 0;
     const friction = Math.exp(-6 * dt);
+    const pullMult = fastPull ? 2 : 1;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const d = this.list[i];
       d.age += dt;
@@ -80,7 +81,7 @@ export class PickupManager {
           continue;
         }
         d.pullTime += dt;
-        const sp = Math.min(1100, 260 + d.pullTime * 1500);
+        const sp = Math.min(1100 * pullMult, (260 + d.pullTime * 1500) * pullMult);
         const k = Math.min(dist, sp * dt) / (dist || 1);
         d.x += dx * k;
         d.y += dy * k;

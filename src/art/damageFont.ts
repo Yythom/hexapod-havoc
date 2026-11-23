@@ -7,12 +7,12 @@ import { NUM_FONT } from '../config';
  * 字形是白色描深色边，用 tint 上色。
  */
 export const DAMAGE_FONT = 'dmgfont';
-/** 字形绘制的字号，显示时按需要缩放 */
-export const DAMAGE_FONT_SIZE = 48;
+/** 字形绘制的字号，显示时按需要缩放（72px 高清烘焙适配 2K/4K） */
+export const DAMAGE_FONT_SIZE = 72;
 
 const GLYPHS = '0123456789+-';
-const STROKE = 8;
-const PAD = 4;
+const STROKE = 11;
+const PAD = 6;
 
 export function ensureDamageFont(scene: Phaser.Scene): void {
   if (scene.cache.bitmapFont.exists(DAMAGE_FONT)) return;

@@ -33,6 +33,7 @@ interface BuildProfile {
   hasFreeze: boolean;
   hasChain: boolean;
   hasBounce: boolean;
+  hasProjectiles: boolean;
 }
 
 function pickWeighted<T>(items: T[], weightOf: (item: T) => number): T {
@@ -65,6 +66,7 @@ function buildProfile(run: RunState): BuildProfile {
   let hasFreeze = false;
   let hasChain = false;
   let hasBounce = false;
+  let hasProjectiles = false;
 
   for (const ow of run.weapons) {
     const w = SHOP_WEAPONS.find((d) => d.id === ow.id);
@@ -82,6 +84,7 @@ function buildProfile(run: RunState): BuildProfile {
     if (w.onHit?.freeze) hasFreeze = true;
     if (w.chain || w.tags.includes('电')) hasChain = true;
     if (w.projectile?.returning || w.projectile?.bounce) hasBounce = true;
+    if (w.projectile && !w.projectile.lob && !w.projectile.returning && !w.projectile.roll) hasProjectiles = true;
   }
 
   if (run.weapons.length === 0 && c.allowedKinds) {
@@ -107,6 +110,7 @@ function buildProfile(run: RunState): BuildProfile {
     hasFreeze,
     hasChain,
     hasBounce,
+    hasProjectiles,
   };
 }
 
@@ -166,6 +170,10 @@ function itemAllowed(id: string, run: RunState): boolean {
       m?.deployCap ||
       m?.turretSpeedPct ||
       m?.mineRadiusPct ||
+      m?.turretPrism ||
+      m?.splitShots ||
+      m?.gunRicochet ||
+      m?.loneWolf ||
       (d.stats.melee ?? 0) > 0 ||
       (d.stats.ranged ?? 0) > 0 ||
       (d.stats.engineering ?? 0) > 0
@@ -174,7 +182,7 @@ function itemAllowed(id: string, run: RunState): boolean {
     }
   }
   if (perks.lifestealOnly) {
-    if ((d.stats.regen ?? 0) > 0 || m?.healingPct || d.trigger === 'honeycomb' || d.trigger === 'honeypotion' || d.trigger === 'fairyring') {
+    if ((d.stats.regen ?? 0) > 0 || m?.healingPct || m?.overhealShock || d.trigger === 'honeycomb' || d.trigger === 'honeypotion' || d.trigger === 'fairyring') {
       return false;
     }
   }
@@ -201,12 +209,14 @@ function itemWeight(d: ItemDef, run: RunState, prof: BuildProfile): number {
   if (m?.burnDamagePct || m?.burnSpreadPct || m?.burnVulnPct) return prof.hasBurn ? 2.6 : 0.08;
   if (m?.freezeDuration || m?.frozenCrit) return prof.hasFreeze ? 2.6 : 0.08;
   if (m?.chainJumps || m?.chainNoFalloff || m?.chainBolt) return prof.hasChain ? 2.6 : 0.08;
-  if (m?.turretSpeedPct) return prof.hasTurret ? 2.8 : 0.06;
+  if (m?.turretSpeedPct || m?.turretPrism) return prof.hasTurret ? 2.8 : 0.06;
   if (m?.mineRadiusPct) return prof.hasMine ? 2.8 : 0.06;
   if (m?.deployCap) return prof.hasDevice ? 2.6 : 0.08;
   if ((s.engineering ?? 0) > 0) return prof.hasDevice ? 2.4 : 0.1;
   if (m?.bounces) return prof.hasBounce ? 2.6 : 0.08;
+  if (m?.splitShots || m?.gunRicochet) return prof.hasProjectiles ? 2.6 : 0.08;
   if (m?.summonCount) return prof.hasSummon ? 2.8 : 0.1;
+  if (m?.loneWolf) return run.weapons.length < run.weaponSlots ? 1.8 : 0.2;
 
   // 输出属性流派道具
   if ((s.melee ?? 0) > 0 && !(s.ranged ?? 0)) return prof.hasMelee ? 2.2 : 0.18;

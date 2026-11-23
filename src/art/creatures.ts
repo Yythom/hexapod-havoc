@@ -290,4 +290,55 @@ export function generateCreatures(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
+
+  // 蜜树桩（战场资源树，打掉必掉果子 + 概率宝箱）48×48
+  bake2D(
+    scene,
+    'tree',
+    48,
+    48,
+    (ctx) => {
+      cContactShadow(ctx, 24, 32, 20, 13, 0.44);
+      // 树根与粗木桩底座
+      cCelCircle(ctx, 24, 27, 13.5, '#8a582c', '#4a2c12', '#c88c4e', OUT, 2.6);
+      // 翠绿树冠三簇
+      cCelCircle(ctx, 16, 20, 10.5, '#4da638', '#245c18', '#8ae068', OUT, 2.5);
+      cCelCircle(ctx, 32, 20, 10.5, '#4da638', '#245c18', '#8ae068', OUT, 2.5);
+      cCelCircle(ctx, 24, 16, 12.5, '#62c048', '#2d6e1e', '#a4f47c', OUT, 2.6);
+      // 挂在树冠上的发光金蜜果
+      for (const [fx, fy] of [
+        [17, 19],
+        [29, 15],
+        [25, 25],
+      ]) {
+        cCircle(ctx, fx, fy, 3.6, '#ffcf38', OUT, 1.5);
+        cCircle(ctx, fx - 0.9, fy - 0.9, 1.2, '#ffffff');
+      }
+    },
+    SPRITE_RES,
+  );
+
+  // 黄金盗宝虫（限时逃跑，打掉掉宝箱和一堆花蜜）40×34
+  bake2D(
+    scene,
+    'lootbug',
+    40,
+    34,
+    (ctx) => {
+      cContactShadow(ctx, 20, 19, 15, 11, 0.4);
+      legs(ctx, '#8a5608', 1.6, 17, [
+        [23, 18, 25, 25, 29, 28],
+        [17, 18, 17, 26, 13, 29],
+        [11, 17, 8, 24, 4, 26],
+      ]);
+      // 背上的鼓胀宝箱袋
+      cCelEllipse(ctx, 13, 17, 10.5, 9.2, '#ffd038', '#b8700c', '#fff4a0', OUT, 2.5);
+      cLine(ctx, [11, 9, 11, 25], '#7a3c06', 2.2);
+      // 金甲头部与惊慌大眼
+      cCelCircle(ctx, 27, 17, 7.2, '#f0a824', '#985608', '#ffe478', OUT, 2.4);
+      cComicEye(ctx, 30, 13.5, 2.5, '#ffffff', '#050507', 0.2, OUT);
+      cComicEye(ctx, 30, 20.5, 2.5, '#ffffff', '#050507', -0.2, OUT);
+    },
+    SPRITE_RES,
+  );
 }

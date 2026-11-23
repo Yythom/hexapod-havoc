@@ -21,6 +21,8 @@ export interface CombatHost {
   dropBonusNectar(x: number, y: number, n: number): void;
   /** 武器击杀了一只怪（近战击杀统计） */
   onWeaponKill(def: WeaponDef): void;
+  /** 暴击触发额外火花弹（暴击火花道具） */
+  onCritSpark?(x: number, y: number, count: number): void;
 }
 
 /**
@@ -29,6 +31,8 @@ export interface CombatHost {
  */
 export class HitResolver {
   host!: CombatHost;
+
+  private readonly aoeBuf: Enemy[] = [];
 
   constructor(
     private readonly enemies: EnemyManager,
@@ -48,7 +52,24 @@ export class HitResolver {
     const y = e.y;
     const fx = src.def.onHit;
     const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback);
-    if (crit) this.fx?.star(x, y, 14, 0xffe258);
+    if (crit) {
+      this.fx?.star(x, y, 14, 0xffe258);
+      if (mods.critNova > 0) {
+        const nr = 58;
+        const ndmg = Math.max(1, Math.round(damage * 0.5));
+        this.fx?.ring(x, y, nr, 0xc8ff68);
+        for (const o of this.enemies.grid.query(x, y, nr + 40, this.aoeBuf).slice()) {
+          if (!o.active || o === e) continue;
+          const dx = o.x - x;
+          const dy = o.y - y;
+          const rr = nr + o.radius;
+          if (dx * dx + dy * dy > rr * rr) continue;
+          const d = Math.hypot(dx, dy) || 1;
+          this.enemies.hit(o, ndmg, false, dx / d, dy / d, 90);
+        }
+      }
+      if (mods.critSpark > 0) this.host.onCritSpark?.(x, y, mods.critSpark);
+    }
     if (fx) {
       if (!killed) {
         if (fx.burn) {

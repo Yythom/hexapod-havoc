@@ -263,12 +263,49 @@ export class WeaponSystem {
     const proj = s.def.projectile;
     if (!proj) return;
     const { stats, mods } = this.ctx;
-    const count = proj.count ?? 1;
-    const arc = proj.arc ?? 0;
+    const tier = s.tier;
+    const baseCount = proj.count ?? 1;
+    let count = baseCount;
+    let arc = proj.arc ?? 0;
+    let pierce = proj.pierce;
+    let explode = proj.explode ?? 0;
+    const straight = !proj.lob && !proj.returning && !proj.roll;
+
+    // 武器升阶质变：精良/稀有/传说分别增加弹数、穿透、爆炸范围或弹跳
+    if (baseCount > 1) {
+      count += (tier >= 1 ? 1 : 0) + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 2 : 0);
+      arc = arc * (1 + 0.12 * tier);
+    } else if (explode > 0) {
+      explode = Math.round(explode * (1 + 0.18 * tier));
+      if (tier >= 3) {
+        count = 2;
+        arc = 0.18;
+      }
+    } else if (straight && !proj.lob) {
+      if (tier >= 1) pierce += 1;
+      if (tier >= 2) {
+        count = 2;
+        arc = 0.14;
+      }
+      if (tier >= 3) {
+        count = 3;
+        arc = 0.22;
+        pierce += 1;
+      }
+    }
+
+    const ricochet = straight && mods.gunRicochet > 0 ? mods.gunRicochet : 0;
+    pierce += ricochet;
+    const bounce = proj.bounce
+      ? { ...proj.bounce, times: proj.bounce.times + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 1 : 0) + mods.bounces + ricochet }
+      : ricochet > 0
+        ? { times: ricochet, range: 140, falloff: 0.25 }
+        : null;
+
     const poisonDuration = POISON_DURATION + mods.poisonDuration;
     const perStack = poisonPerStack(stats, mods);
     for (let k = 0; k < count; k++) {
-      const { damage, crit } = this.roll(s.def, s.tier, s.owned);
+      const { damage, crit } = this.roll(s.def, tier, s.owned);
       const offset = count > 1 ? -arc / 2 + (arc * k) / (count - 1) : 0;
       const lob = proj.lob;
       const solid = proj.returning || proj.roll;
@@ -283,26 +320,34 @@ export class WeaponSystem {
         crit,
         radius: proj.radius,
         knockback: s.def.knockback,
-        pierce: proj.pierce,
+        pierce,
         spin: proj.spin,
-        explode: proj.explode ?? 0,
+        explode,
         poison: proj.poison ? { stacks: proj.poison, perStack, duration: poisonDuration } : null,
-        cloud: lob ? { radius: lob.cloudRadius, time: lob.cloudTime, damage: damage * 0.5, perStack, duration: poisonDuration } : null,
+        cloud: lob ? { radius: lob.cloudRadius * (1 + 0.12 * tier), time: lob.cloudTime, damage: damage * 0.5, perStack, duration: poisonDuration } : null,
         src: s.src,
-        trips: proj.returning ? 1 + mods.bounces : 0,
-        bounce: proj.bounce ? { ...proj.bounce, times: proj.bounce.times + mods.bounces } : null,
+        trips: proj.returning ? 1 + (tier >= 2 ? 1 : 0) + mods.bounces : 0,
+        bounce,
         grow: proj.roll?.grow ?? 0,
         fade: !!proj.fade,
+        split: straight && mods.splitShots > 0,
       });
     }
   }
 
-  /** 光束：直接结算到最近的怪 */
+  /** 光束：直接结算到最近的怪（稀有/传说额外分叉照射旁边目标） */
   private fireBeam(s: Slot, x: number, y: number, target: Enemy): void {
-    const { damage, crit } = this.roll(s.def, s.tier, s.owned);
-    this.fx?.beam(x, y, target.x, target.y, crit ? 0xffe880 : 0xffb040, s.cd + 0.05);
-    const d = Math.hypot(target.x - x, target.y - y) || 1;
-    this.resolver.hit(target, damage, crit, (target.x - x) / d, (target.y - y) / d, s.def.knockback, s.src);
+    const extra = s.tier >= 3 ? 2 : s.tier >= 2 ? 1 : 0;
+    const hit: Enemy[] = [];
+    let cur: Enemy | null = target;
+    for (let k = 0; k <= extra && cur; k++) {
+      const { damage, crit } = this.roll(s.def, s.tier, s.owned);
+      this.fx?.beam(x, y, cur.x, cur.y, crit ? 0xffe880 : 0xffb040, s.cd + 0.05);
+      const d = Math.hypot(cur.x - x, cur.y - y) || 1;
+      this.resolver.hit(cur, k === 0 ? damage : Math.max(1, Math.round(damage * 0.7)), crit, (cur.x - x) / d, (cur.y - y) / d, s.def.knockback, s.src);
+      hit.push(cur);
+      cur = extra > 0 ? this.nearestExcept(cur.x, cur.y, 160, hit) : null;
+    }
     sfx.play('beam');
   }
 
@@ -310,7 +355,7 @@ export class WeaponSystem {
   private fireChain(s: Slot, x: number, y: number, target: Enemy): void {
     const spec = s.def.chain!;
     const mods = this.ctx.mods;
-    const jumps = spec.jumps + mods.chainJumps;
+    const jumps = spec.jumps + s.tier + mods.chainJumps;
     const falloff = mods.chainNoFalloff > 0 ? 0 : spec.falloff;
     const first = this.roll(s.def, s.tier, s.owned);
     let dmg = first.damage;
@@ -378,7 +423,7 @@ export class WeaponSystem {
       if (s.placeCd > 0) return;
       s.placeCd = spec.placeEvery ?? 5;
     }
-    const max = spec.max + this.ctx.mods.deployCap;
+    const max = spec.max + Math.floor(s.tier / 2) + this.ctx.mods.deployCap;
     const mine = this.devices.filter((d) => d.slot === i);
     if (mine.length >= max) this.removeDevice(this.devices.indexOf(mine[0]));
     const p = this.player;
@@ -421,26 +466,34 @@ export class WeaponSystem {
       const { damage, crit } = this.roll(d.def, d.tier, null);
       const mx = d.x + Math.cos(a) * 14;
       const my = d.y + Math.sin(a) * 14;
+      const prismRoll = mods.turretPrism > 0 ? Math.random() : 1;
+      const isLaser = prismRoll < 0.18;
+      const isFrost = prismRoll >= 0.18 && prismRoll < 0.35;
       this.projectiles.fire({
-        texture: 'turretshot',
+        texture: isLaser ? 'laserbolt' : isFrost ? 'frostshot' : 'turretshot',
         x: mx,
         y: my,
         angle: a,
-        speed: TURRET_SHOT_SPEED,
-        maxDist: d.def.range + 40,
+        speed: isLaser ? 1020 : TURRET_SHOT_SPEED,
+        maxDist: Math.min(MAX_SCREEN_RANGE, d.def.range + 40),
         damage,
         crit,
-        radius: 5,
+        radius: isLaser || isFrost ? 6 : 5,
         knockback: d.def.knockback,
-        pierce: 0,
+        pierce: isLaser ? 2 : d.tier >= 2 ? 1 : 0,
         spin: 0,
         explode: 0,
         poison: null,
         cloud: null,
-        src: d.src,
+        src: isFrost
+          ? {
+              def: { ...d.def, onHit: { ...d.def.onHit, freeze: 1 } },
+              owned: null,
+            }
+          : d.src,
       });
-      this.fx?.spark(mx, my, 0xffd890, 2);
-      sfx.play('shoot');
+      this.fx?.spark(mx, my, isLaser ? 0x38f2ff : isFrost ? 0x7ce8ff : 0xffd890, 2);
+      sfx.play(isLaser ? 'zap' : 'shoot');
     }
   }
 
@@ -484,12 +537,34 @@ export class WeaponSystem {
     const sweep = style === 'sweep';
     s.damage = damage;
     s.crit = crit;
-    s.reach = sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range);
+    s.reach = Math.min(MAX_SCREEN_RANGE, (sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range)) * (1 + 0.06 * s.tier));
     s.swingTotal = Math.min(sweep ? SWEEP_TIME : style === 'flurry' ? SWING_TIME * 0.65 : SWING_TIME, interval * 0.8);
     s.swing = s.swingTotal;
     s.lastExt = 0;
     s.lastAng = s.aim - (s.def.melee!.arc ?? 0);
     s.hits.length = 0;
+    // 稀有/传说近战进化：挥击时向前发出一道穿透剑气波
+    if (s.tier >= 2) {
+      const tip = this.player.view.tipWorld(this.slots.indexOf(s), this.tip);
+      this.projectiles.fire({
+        texture: 'slashwave',
+        x: tip.x,
+        y: tip.y,
+        angle: s.aim,
+        speed: 560,
+        maxDist: Math.min(MAX_SCREEN_RANGE, s.reach + 95),
+        damage: Math.max(1, Math.round(s.damage * (s.tier >= 3 ? 0.75 : 0.5))),
+        crit: s.crit,
+        radius: 13,
+        knockback: s.def.knockback * 0.5,
+        pierce: s.tier >= 3 ? 4 : 2,
+        spin: 0,
+        explode: 0,
+        poison: null,
+        cloud: null,
+        src: s.src,
+      });
+    }
   }
 
   private emitMeleeFx(s: Slot, tx: number, ty: number): void {
@@ -573,7 +648,7 @@ export class WeaponSystem {
     const kb = s.def.knockback * (1 + mods.meleeKnockbackPct);
     s.swing = Math.max(0, s.swing - dt);
     const t = 1 - s.swing / s.swingTotal;
-    const hitR = melee.hitRadius;
+    const hitR = melee.hitRadius * (1 + 0.14 * s.tier);
 
     if (melee.style === 'sweep') {
       // 扇形横扫：伸出去，从一侧扫到另一侧

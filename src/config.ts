@@ -20,13 +20,20 @@ export const IS_COARSE_POINTER =
   typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 
 /**
- * 高清渲染倍率：画布按设备像素密度放大，文字和线条更清晰。
- * 手机最多 1.5 倍（兼顾性能），电脑最多 2 倍。所有场景的镜头都按这个倍率放大，
- * 所以布局坐标仍然是 1280×720 的逻辑坐标。
+ * 高清渲染倍率：按显示器物理分辨率与 DPR 自动匹配（桌面端至少 2 倍 2560×1440，
+ * 4K / 大屏最高升至 3 倍 3840×2160；移动端最高 1.75 倍兼顾性能）。
+ * 所有场景镜头同步按此倍率缩放，布局仍保持 1280×720 逻辑坐标。
  */
 export const RENDER_SCALE = (() => {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const k = Math.min(IS_COARSE_POINTER ? 1.5 : 2, Math.max(1, dpr));
+  if (typeof window === 'undefined') return 2;
+  const dpr = window.devicePixelRatio || 1;
+  const vw = Math.max(window.innerWidth || 0, window.screen?.availWidth || 0, GAME_WIDTH);
+  const vh = Math.max(window.innerHeight || 0, window.screen?.availHeight || 0, GAME_HEIGHT);
+  const fitScale = Math.min(vw / GAME_WIDTH, vh / GAME_HEIGHT);
+  const physicalScale = dpr * fitScale;
+  const minScale = IS_COARSE_POINTER ? 1 : 2;
+  const maxScale = IS_COARSE_POINTER ? 1.75 : 3;
+  const k = Math.min(maxScale, Math.max(minScale, physicalScale));
   return Math.round(k * 4) / 4;
 })();
 

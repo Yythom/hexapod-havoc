@@ -146,6 +146,11 @@ export class RunState {
     if (perks.lateBloom && this.wave <= perks.lateBloom.waves) m.weaponDamagePct += perks.lateBloom.pct;
     if (perks.noDodge) s.dodge = 0;
     if (perks.lifestealOnly) s.regen = 0;
+    if (m.loneWolf > 0 && this.weaponSlotsBase > 0) {
+      const empty = Math.max(0, this.weaponSlots - this.weapons.length);
+      s.damagePct += empty * 0.3 * m.loneWolf;
+      s.attackSpeedPct += empty * 0.12 * m.loneWolf;
+    }
     s.maxHp *= Math.max(0.1, 1 + m.maxHpPct);
     this.stats = s;
     this.mods = m;

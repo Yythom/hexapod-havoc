@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { IS_COARSE_POINTER } from '../config';
 import {
   SPRITE_RES,
   bake2D,
@@ -21,6 +22,8 @@ import { M6_WEAPON_ICONS } from './weaponIconsM6';
 import { GUN_WEAPON_ICONS } from './weaponIconsGuns';
 
 export const TIER_ROMAN = ['I', 'II', 'III', 'IV'] as const;
+/** 界面大图武器贴图倍率（桌面端 5x 供商店槽与主菜单巨型展示无锯齿） */
+export const UI_WEAPON_RES = IS_COARSE_POINTER ? 3 : 5;
 
 /** 按武器品质返回对应的进化贴图 key（0 普通 / 1 精良 / 2 稀有 / 3 传说） */
 export function weaponTex(icon: string, tier = 0, ui = false): string {
@@ -220,12 +223,12 @@ export function generateIcons(scene: Phaser.Scene): void {
   for (const [key, draw] of Object.entries({ ...WEAPON_ICONS, ...M6_WEAPON_ICONS, ...GUN_WEAPON_ICONS })) {
     for (let tier = 0; tier <= 3; tier++) {
       bakeWeaponVariant(scene, weaponTex(key, tier, false), draw, SPRITE_RES, tier, 0);
-      bakeWeaponVariant(scene, weaponTex(key, tier, true), draw, 4, tier, 2);
+      bakeWeaponVariant(scene, weaponTex(key, tier, true), draw, UI_WEAPON_RES, tier, 2);
     }
   }
-  for (const [id, draw] of Object.entries({ ...ITEM_ICONS, ...M6_ITEM_ICONS })) bakeShadedItem(scene, `i-${id}`, 48, 48, draw, 2);
+  for (const [id, draw] of Object.entries({ ...ITEM_ICONS, ...M6_ITEM_ICONS })) bakeShadedItem(scene, `i-${id}`, 48, 48, draw, SPRITE_RES);
   bake2D(scene, 'chest', 28, 24, drawChest, SPRITE_RES);
-  bake2D(scene, 'chest@ui', 28, 24, drawChest, 4);
+  bake2D(scene, 'chest@ui', 28, 24, drawChest, UI_WEAPON_RES);
 
   // ---------- 子弹（全部 2x 超采样） ----------
   bake2D(
@@ -417,6 +420,47 @@ export function generateIcons(scene: Phaser.Scene): void {
       cRoundRect(ctx, 6.2, 4.2, 10.2, 5.6, 1.6, '#b0b8c8', '#050507', 1.4);
       cPoly(ctx, [15.4, 4.0, 22.8, 7, 15.4, 10.0], '#e8382c', '#050507', 1.4);
       cLine(ctx, [7.8, 5.4, 15, 5.4], '#ffffff', 1.0);
+    },
+    SPRITE_RES,
+  );
+
+  // 进化近战剑气波 & 暴击/采蜜追踪火花弹
+  bake2D(
+    scene,
+    'slashwave',
+    18,
+    28,
+    (ctx) => {
+      cSoftEllipse(ctx, 10, 14, 8, 13, 'rgba(130,240,255,0.48)', 'rgba(130,240,255,0)');
+      ctx.beginPath();
+      ctx.moveTo(4, 2);
+      ctx.quadraticCurveTo(18, 14, 4, 26);
+      ctx.quadraticCurveTo(11, 14, 4, 2);
+      ctx.closePath();
+      ctx.fillStyle = '#8ef8ff';
+      ctx.fill();
+      ctx.strokeStyle = '#050507';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(7, 6);
+      ctx.quadraticCurveTo(15, 14, 7, 22);
+      ctx.quadraticCurveTo(11, 14, 7, 6);
+      ctx.closePath();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    },
+    SPRITE_RES,
+  );
+  bake2D(
+    scene,
+    'sparkbolt',
+    16,
+    12,
+    (ctx) => {
+      cSoftEllipse(ctx, 8, 6, 7.5, 5.5, 'rgba(255,216,72,0.58)', 'rgba(255,216,72,0)');
+      cPoly(ctx, [1.5, 6, 8, 2, 14.5, 6, 8, 10], '#ffd838', '#050507', 1.4);
+      cCircle(ctx, 8.5, 6, 2.0, '#ffffff');
     },
     SPRITE_RES,
   );

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
 import { CAMERA_ZOOM, DEPTH, RENDER_SCALE, WORLD_HEIGHT, WORLD_WIDTH } from '../config';
 import { bus, EVT, listen } from '../core/bus';
+import { MAX_SCREEN_RANGE } from '../core/combat';
 import { touchMove } from '../core/input';
 import { RunState, type RunSetup } from '../core/RunState';
 import { loadSave, recordRun } from '../core/save';
@@ -98,6 +99,11 @@ export class GameScene extends Phaser.Scene {
   private idleTime = 0;
   /** 蜂巢药剂本波已经回复了多久 */
   private potionTime = 0;
+  private ramCd = 0;
+  private overhealCd = 0;
+  private nectarShotCount = 0;
+  private corpseDepth = 0;
+  private moving = false;
   /** 本局新解锁的角色 */
   private unlocked: string[] = [];
   private readonly contactBuf: Enemy[] = [];
@@ -125,6 +131,11 @@ export class GameScene extends Phaser.Scene {
     this.attackCount = 0;
     this.idleTime = 0;
     this.potionTime = 0;
+    this.ramCd = 0;
+    this.overhealCd = 0;
+    this.nectarShotCount = 0;
+    this.corpseDepth = 0;
+    this.moving = false;
     touchMove.x = touchMove.y = 0;
     this.run = new RunState(setup);
     this.registry.set('run', this.run);
@@ -185,6 +196,7 @@ export class GameScene extends Phaser.Scene {
       onWeaponKill: (def) => {
         if (def.kind === 'melee') this.run.meleeKills++;
       },
+      onCritSpark: (x, y, count) => this.fireSeekingSparks(x, y, count, 10 + 0.5 * this.run.stats.ranged),
     };
 
     const cam = this.cameras.main;
@@ -213,7 +225,10 @@ export class GameScene extends Phaser.Scene {
 
     const stats = run.stats;
     const [ix, iy] = this.readInput();
+    this.moving = Math.hypot(ix, iy) > 0.1;
     this.idleTime = Math.hypot(ix, iy) > 0.05 ? 0 : this.idleTime + dt;
+    this.ramCd = Math.max(0, this.ramCd - dt);
+    this.overhealCd = Math.max(0, this.overhealCd - dt);
     this.player.update(dt, ix, iy, moveSpeed(stats), run.shield > 0);
     this.enemies.update(dt);
     this.projectiles.update(dt, this.enemies, this.player.x, this.player.y);
@@ -223,8 +238,17 @@ export class GameScene extends Phaser.Scene {
     if (run.phase === 'combat') {
       this.elapsed += dt;
       this.spawner.update(dt, this.elapsed, this.player.x, this.player.y);
+      const missingTenths = Math.floor(Math.max(0, 1 - run.hp / run.maxHp) * 10);
+      const combatStats =
+        run.mods.bloodRage > 0 && missingTenths > 0
+          ? {
+              ...stats,
+              damagePct: stats.damagePct + missingTenths * 0.08 * run.mods.bloodRage,
+              attackSpeedPct: stats.attackSpeedPct + missingTenths * 0.06 * run.mods.bloodRage,
+            }
+          : stats;
       this.weapons.update(dt, {
-        stats,
+        stats: combatStats,
         mods: run.mods,
         damageMult: this.damageMult(),
         hpRatio: run.hp / run.maxHp,
@@ -244,13 +268,26 @@ export class GameScene extends Phaser.Scene {
     }
 
     const touch = run.character.perks.touchPickup;
-    this.pickups.update(dt, this.player, touch ? this.player.radius + TOUCH_PICKUP : pickupRange(stats), run.phase === 'cleanup');
+    this.pickups.update(
+      dt,
+      this.player,
+      touch ? this.player.radius + TOUCH_PICKUP : pickupRange(stats),
+      run.phase === 'cleanup',
+      run.mods.magnetSpeed > 0,
+    );
     if (this.pickups.gotNectar > 0) {
       // 蜣螂：亲自捡到的花蜜按倍率算，小数部分按概率进位（波次结束自动收走的不算）
       const mult = touch && run.phase === 'combat' ? touch.mult : 1;
       const raw = this.pickups.gotNectar * mult;
       this.addNectar(Math.floor(raw) + (Math.random() < raw - Math.floor(raw) ? 1 : 0));
       sfx.play('nectar');
+      if (run.mods.nectarShot > 0 && run.phase === 'combat') {
+        this.nectarShotCount += this.pickups.gotNectar;
+        while (this.nectarShotCount >= 3) {
+          this.nectarShotCount -= 3;
+          this.fireSeekingSparks(this.player.x, this.player.y, 1, 12 + 0.8 * stats.harvest);
+        }
+      }
     }
     if (this.pickups.gotChests > 0) this.addChests(this.pickups.gotChests);
     if (this.pickups.gotHeals > 0 && run.phase === 'combat') this.heal(HEAL_AMOUNT * this.pickups.gotHeals);
@@ -319,25 +356,40 @@ export class GameScene extends Phaser.Scene {
     this.player.slowTime = 0;
     this.player.hasteTime = 0;
     this.weapons.sync(run.weapons, run.weaponSlots);
-    this.spawner.startWave(def, n, run.difficulty);
+    this.spawner.startWave(def, n, run.difficulty, run.mods.spawnRatePct);
     bus.emit(EVT.WAVE_START, n);
     sfx.play('waveStart');
   }
 
   private checkContact(): void {
     const p = this.player;
-    if (p.invuln > 0) return;
+    const run = this.run;
+    const canRam = this.moving && run.mods.ramDamage > 0 && this.ramCd <= 0;
+    if (p.invuln > 0 && !canRam) return;
     let dmg = 0;
     const touching = this.touching;
     touching.length = 0;
-    for (const e of this.enemies.grid.query(p.x, p.y, p.radius + MAX_ENEMY_RADIUS, this.contactBuf)) {
+    const ramHits: Enemy[] = [];
+    for (const e of this.enemies.grid.query(p.x, p.y, p.radius + MAX_ENEMY_RADIUS + 8, this.contactBuf)) {
       if (e.age < SPAWN_POP + 0.1 || e.frozen > 0) continue;
-      const rr = p.radius + e.radius * 0.9;
       const dx = e.x - p.x;
       const dy = e.y - p.y;
+      if (canRam && dx * dx + dy * dy <= (p.radius + e.radius + 8) ** 2) ramHits.push(e);
+      if (e.damage <= 0 || p.invuln > 0) continue;
+      const rr = p.radius + e.radius * 0.9;
       if (dx * dx + dy * dy <= rr * rr) {
         dmg = Math.max(dmg, e.damage);
         touching.push(e);
+      }
+    }
+    if (canRam && ramHits.length > 0) {
+      this.ramCd = 0.35;
+      const rdmg = Math.max(1, Math.round((15 + 2 * run.stats.armor) * run.mods.ramDamage * (1 + run.stats.damagePct)));
+      this.fx.ring(p.x, p.y, p.radius + 32, 0x72d8ff);
+      for (const e of ramHits) {
+        if (!e.active) continue;
+        const d = Math.hypot(e.x - p.x, e.y - p.y) || 1;
+        this.enemies.hit(e, rdmg, false, (e.x - p.x) / d, (e.y - p.y) / d, 260);
       }
     }
     if (dmg <= 0) return;
@@ -409,19 +461,97 @@ export class GameScene extends Phaser.Scene {
     const run = this.run;
     if (kind === 'other' && run.character.perks.lifestealOnly) return;
     const before = run.hp;
-    run.hp = Math.min(run.maxHp, run.hp + n * (1 + run.mods.healingPct));
+    const amount = n * (1 + run.mods.healingPct);
+    run.hp = Math.min(run.maxHp, run.hp + amount);
     const gained = run.hp - before;
     if (gained > 0) {
-      if (kind === 'lifesteal') run.lifestealHealed += gained;
+      if (kind === 'lifesteal') {
+        run.lifestealHealed += gained;
+        if (run.mods.vampBite > 0) this.triggerVampBite();
+      }
       this.fx.number(this.player.x, this.player.y - 28, `+${Math.max(1, Math.round(gained))}`, 'heal');
       if (n >= 2) sfx.play('heal');
+    }
+    if (run.mods.overhealShock > 0 && before + amount >= run.maxHp && this.overhealCd <= 0) {
+      this.triggerOverhealShock();
+    }
+  }
+
+  private triggerOverhealShock(): void {
+    this.overhealCd = 0.25;
+    const run = this.run;
+    const p = this.player;
+    const r = 110;
+    const dmg = Math.max(1, Math.round((18 + 2 * run.stats.regen) * (1 + run.stats.damagePct)));
+    this.fx.ring(p.x, p.y, r, 0xffd44c);
+    this.fx.burst(p.x, p.y, 0xffe478, 8, 180, 0.9);
+    for (const e of this.enemies.grid.query(p.x, p.y, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+      if (!e.active) continue;
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      if (dx * dx + dy * dy > (r + e.radius) ** 2) continue;
+      const d = Math.hypot(dx, dy) || 1;
+      this.enemies.hit(e, dmg, false, dx / d, dy / d, 180);
+    }
+  }
+
+  private triggerVampBite(): void {
+    const t = this.enemies.nearest(this.player.x, this.player.y, 260);
+    if (!t) return;
+    const dmg = Math.max(1, Math.round(10 * (1 + this.run.stats.damagePct)));
+    this.fx.beam(this.player.x, this.player.y, t.x, t.y, 0xff3858, 0.14);
+    this.enemies.hit(t, dmg, false, 0, 0, 60);
+  }
+
+  private fireSeekingSparks(x: number, y: number, count: number, baseDamage: number): void {
+    const dmg = Math.max(1, Math.round(baseDamage * (1 + this.run.stats.damagePct)));
+    for (let k = 0; k < count; k++) {
+      const target = this.enemies.nearest(x, y, MAX_SCREEN_RANGE);
+      const ang = target ? Math.atan2(target.y - y, target.x - x) + (k - (count - 1) / 2) * 0.22 : Math.random() * Math.PI * 2;
+      this.projectiles.fire({
+        texture: 'sparkbolt',
+        x,
+        y,
+        angle: ang,
+        speed: 780,
+        maxDist: MAX_SCREEN_RANGE,
+        damage: dmg,
+        crit: false,
+        radius: 6,
+        knockback: 80,
+        pierce: 0,
+        spin: 0,
+        explode: 0,
+        poison: null,
+        cloud: null,
+        src: null,
+      });
     }
   }
 
   private onEnemyKilled(e: Enemy): void {
     const run = this.run;
-    run.kills++;
     const def = e.def;
+    if (def.id === 'tree') {
+      this.pickups.dropHeal(e.x, e.y, 'fruit');
+      const [min, max] = def.nectar;
+      this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
+      const chestChance = Math.min(0.85, 0.35 * (1 + Math.max(0, run.stats.luck) / 150) * (1 + run.mods.chestBonus));
+      if (Math.random() < chestChance) this.pickups.dropChest(e.x, e.y);
+      return;
+    }
+    if (def.id === 'lootbug') {
+      run.kills++;
+      this.pickups.dropChest(e.x, e.y);
+      this.pickups.dropHeal(e.x, e.y, 'fruit');
+      const [min, max] = def.nectar;
+      this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
+      this.fx.ring(e.x, e.y, 64, 0xffd038);
+      this.fx.number(e.x, e.y - 26, '宝藏到手！', 'level');
+      return;
+    }
+
+    run.kills++;
     this.fx.splat(e.x, e.y, SPLAT_COLOR[def.id] ?? 0x4a2028, e.radius);
     const [min, max] = def.nectar;
     this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
@@ -437,7 +567,28 @@ export class GameScene extends Phaser.Scene {
     if (run.mods.killNectar > 0 && Math.random() < run.mods.killNectar) this.pickups.dropNectar(e.x, e.y, 1);
     // 蜂巢碎片：击杀时概率回血
     const comb = run.itemCount('honeycomb');
-    if (comb > 0 && Math.random() < 0.05 * comb) this.heal(2);
+    if (comb > 0 && Math.random() < 0.08 * comb) this.heal(2);
+    // 腺体 6 件套：带毒敌人死后留下毒云
+    if (run.mods.poisonNova > 0 && e.poison > 0) {
+      this.hazards.addCloud(e.x, e.y, 62, 2.5, 2 + run.stats.toxin, poisonPerStack(run.stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
+    }
+    // 爆裂腺体：击杀引发尸爆（限制连环深度防死循环）
+    if (run.mods.corpseExplode > 0 && !def.boss && this.corpseDepth < 2) {
+      this.corpseDepth++;
+      const r = 75;
+      const edmg = Math.max(1, Math.round((15 + 0.5 * run.maxHp) * run.mods.corpseExplode * (1 + run.stats.damagePct)));
+      this.fx.ring(e.x, e.y, r, 0xff6e38);
+      this.fx.burst(e.x, e.y, 0xff9a3a, 10, 200, 1);
+      for (const o of this.enemies.grid.query(e.x, e.y, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+        if (!o.active) continue;
+        const dx = o.x - e.x;
+        const dy = o.y - e.y;
+        if (dx * dx + dy * dy > (r + o.radius) ** 2) continue;
+        const d = Math.hypot(dx, dy) || 1;
+        this.enemies.hit(o, edmg, false, dx / d, dy / d, 140);
+      }
+      this.corpseDepth--;
+    }
     if (def.boss) this.onBossKilled();
   }
 
@@ -550,8 +701,8 @@ export class GameScene extends Phaser.Scene {
     const harvest = Math.max(0, Math.round(run.stats.harvest));
     run.waveHarvest = harvest;
     if (harvest > 0) this.addNectar(harvest);
-    if (run.stats.harvest > 0) {
-      run.bonus.harvest += run.stats.harvest * HARVEST_GROWTH;
+    if (run.stats.harvest > 0 || run.mods.waveHarvest > 0) {
+      run.bonus.harvest += Math.max(0, run.stats.harvest) * HARVEST_GROWTH + run.mods.waveHarvest;
       run.recomputeStats();
     }
     // 利息：存蜜树洞（每 20 给 1，最多 10）、瓢虫的被动（每 25 给 1，最多 8）

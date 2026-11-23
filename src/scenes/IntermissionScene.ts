@@ -23,20 +23,23 @@ import {
   type Offer,
 } from '../core/shop';
 import { activeSets, SET_THRESHOLDS, SETS, tagCounts } from '../core/sets';
-import { formatStatDelta, STAT_META } from '../core/stats';
+import { formatStat, formatStatDelta, STAT_META } from '../core/stats';
 import { ITEMS, type ItemDef } from '../data/items';
 import { TIER_ROMAN, weaponTex } from '../art/icons';
+import { SPRITE_RES } from '../art/draw';
 import { TIERS, WEAPONS, type WeaponTag } from '../data/weapons';
 import { createButton, drawKeycap } from '../ui/Button';
 import { setupUICamera } from '../ui/camera';
 import {
   COLOR,
   TAG_STYLE,
+  cardTitle,
   displayLabel,
   divider,
   itemLines,
   label,
   layoutLines,
+  numLabel,
   panel,
   pill,
   slotBox,
@@ -146,9 +149,23 @@ export class IntermissionScene extends Phaser.Scene {
       root.add(statsPanel(this, RIGHT_X, CARD_Y, RIGHT_W, 474, this.run.stats));
     }
 
-    // 顶部右侧花蜜数（土豆兄弟风格：利落大数字 + 黑墨外轮廓）
-    root.add(this.add.image(RIGHT_X + 20, 35, 'nectar').setDisplaySize(28, 28));
-    root.add(displayLabel(this, RIGHT_X + 42, 35, String(this.run.nectar), 28, COLOR.goldText).setOrigin(0, 0.5));
+    // 顶部右侧花蜜计数胶囊（右对齐右侧属性面板，避免悬空）
+    const nectarText = numLabel(this, 0, 0, String(this.run.nectar), 24, COLOR.goldText).setOrigin(0, 0.5);
+    const pillW = Math.max(122, Math.ceil(nectarText.width + 64));
+    const pillX = RIGHT_X + RIGHT_W - pillW;
+    const nBg = this.add.graphics();
+    nBg.fillStyle(COLOR.ink, 0.9);
+    nBg.fillRoundedRect(pillX + 3, 18, pillW, 38, 7);
+    nBg.fillStyle(COLOR.panelDeep, 1);
+    nBg.fillRoundedRect(pillX, 15, pillW, 38, 7);
+    nBg.lineStyle(1.6, COLOR.gold, 0.55);
+    nBg.strokeRoundedRect(pillX + 1.5, 16.5, pillW - 3, 35, 6);
+    nBg.lineStyle(2.5, COLOR.ink, 1);
+    nBg.strokeRoundedRect(pillX, 15, pillW, 38, 7);
+    root.add(nBg);
+    root.add(this.add.image(pillX + 24, 34, 'nectar').setDisplaySize(24, 24));
+    nectarText.setPosition(pillX + 44, 35);
+    root.add(nectarText);
 
     if (this.page === 'level') this.buildLevel(root);
     else if (this.page === 'chest') this.buildChest(root);
@@ -163,7 +180,11 @@ export class IntermissionScene extends Phaser.Scene {
     }
     const t = displayLabel(this, x, 35, text, 30, COLOR.text).setOrigin(0, 0.5);
     root.add(t);
-    if (sub) root.add(label(this, x + t.width + 16, 36, sub, 15, COLOR.dim).setOrigin(0, 0.5));
+    if (sub) {
+      const sp = pill(this, 0, 35, sub, COLOR.panelDeep, COLOR.borderSoft, COLOR.dim, 13, 12, 26);
+      sp.x = x + t.width + 16 + sp.width / 2;
+      root.add(sp);
+    }
   }
 
   // ---------- 升级 ----------
@@ -201,10 +222,11 @@ export class IntermissionScene extends Phaser.Scene {
       card.add(bg);
 
       card.add(pill(this, 0, ly + 34, `${tier.name}强化`, COLOR.panelDeep, tier.color, tier.css, 13, 12, 24));
-      card.add(displayLabel(this, 0, ly + 114, STAT_META[u.stat].label, 28, COLOR.text).setOrigin(0.5));
-      card.add(divider(this, lx + 26, ly + 144, CARD_W - 52, tier.color, 0.55));
-      card.add(displayLabel(this, 0, ly + 198, formatStatDelta(u.stat, u.value), 44, tier.css).setOrigin(0.5));
-      card.add(pill(this, 0, ly + CARD_H - 36, '点击选择', COLOR.panelDeep, COLOR.border, COLOR.text, 14, 18, 30));
+      card.add(cardTitle(this, 0, ly + 104, STAT_META[u.stat].label, 26, COLOR.text).setOrigin(0.5));
+      card.add(divider(this, lx + 26, ly + 132, CARD_W - 52, tier.color, 0.55));
+      card.add(numLabel(this, 0, ly + 180, formatStatDelta(u.stat, u.value), 44, u.tier === 0 ? COLOR.good : tier.css).setOrigin(0.5));
+      card.add(label(this, 0, ly + 222, `当前 ${formatStat(u.stat, run.stats[u.stat])}`, 13, COLOR.dim).setOrigin(0.5));
+      card.add(pill(this, 0, ly + CARD_H - 34, '选择强化', COLOR.panelHi, tier.color, COLOR.text, 14, 22, 32));
 
       const zone = this.tapZone(lx, ly, CARD_W, CARD_H, () => this.chooseUpgrade(u));
       zone.on('pointerover', () => {
@@ -223,10 +245,16 @@ export class IntermissionScene extends Phaser.Scene {
       root.add(card);
     });
 
+    // 升级时也在下方展示当前配装，方便针对性选属性，同时消除大面积空白
+    this.weaponRow(root);
+    this.itemGrid(root);
+
     const cost = levelRerollCost(run.wave);
+    const rx = PHONE ? PHONE_BTN_X : RIGHT_X + RIGHT_W / 2;
+    const bw = PHONE ? 220 : RIGHT_W;
     root.add(
-      createButton(this, CARDS_CX, 486, `刷新  ${cost}`, () => this.rerollUpgrades(), {
-        width: 220,
+      createButton(this, rx, PHONE ? 572 : 598, `刷新  ${cost}`, () => this.rerollUpgrades(), {
+        width: bw,
         height: 54,
         fontSize: 21,
         primary: false,
@@ -413,36 +441,23 @@ export class IntermissionScene extends Phaser.Scene {
       const cx = CARD_X0 + 39;
       const cy = LOW_Y + 68;
       root.add(slotBox(this, cx, cy, 78, COLOR.borderSoft));
-      root.add(this.add.image(cx, cy, 'workerant').setScale(1.5));
+      root.add(this.add.image(cx, cy, 'workerant').setScale(3.0 / SPRITE_RES));
       root.add(label(this, cx + 54, cy - 12, `${run.workerCount + run.mods.summonCount} 只工蚁`, 18, COLOR.text, true).setOrigin(0, 0.5));
       root.add(label(this, cx + 54, cy + 14, `${TIERS[run.workerTier].name}品质 · 每升一级多 1 只`, 14, COLOR.dim).setOrigin(0, 0.5));
       return;
     }
     const step = Math.min(88, Math.floor(540 / slots));
     const size = step - 10;
-    root.add(displayLabel(this, CARD_X0, LOW_Y + 10, `武器  ${run.weapons.length}/${slots}`, 19, COLOR.text).setOrigin(0, 0.5));
+    root.add(cardTitle(this, CARD_X0, LOW_Y + 10, `武器  ${run.weapons.length}/${slots}`, 19, COLOR.text).setOrigin(0, 0.5));
+    root.add(divider(this, CARD_X0, LOW_Y + 24, step * slots - 10, COLOR.borderSoft, 0.7));
     for (let j = 0; j < slots; j++) {
       const cx = CARD_X0 + size / 2 + j * step;
-      const cy = LOW_Y + 68;
+      const cy = LOW_Y + 70;
       const w = run.weapons[j];
       const canMerge = w ? mergePartner(run, j) >= 0 : false;
       root.add(slotBox(this, cx, cy, size, w ? TIERS[w.tier].color : COLOR.borderSoft, canMerge, w?.tier));
       if (!w) continue;
-      root.add(this.fitImage(cx, cy - 2, weaponTex(WEAPONS[w.id].icon, w.tier, true), size - 18));
-      // 右下角阶位标识（II / III / IV）
-      if (w.tier > 0) {
-        root.add(
-          this.add
-            .text(cx + size / 2 - 6, cy + size / 2 - 5, TIER_ROMAN[w.tier], {
-              fontSize: '12px',
-              fontStyle: 'bold',
-              color: TIERS[w.tier].css,
-              stroke: '#050507',
-              strokeThickness: 4,
-            })
-            .setOrigin(1, 1),
-        );
-      }
+      root.add(this.fitImage(cx, cy - 3, weaponTex(WEAPONS[w.id].icon, w.tier, true), size - 18));
       if (canMerge) {
         const badge = this.add.container(cx + size / 2 - 10, cy - size / 2 + 10);
         const g = this.add.graphics();
@@ -494,12 +509,14 @@ export class IntermissionScene extends Phaser.Scene {
 
   private itemGrid(root: Container): void {
     const run = this.run;
-    root.add(displayLabel(this, 586, LOW_Y + 10, '道具', 19, COLOR.text).setOrigin(0, 0.5));
     const ids = Object.keys(run.items).filter((id) => run.items[id] > 0);
+    const totalCount = ids.reduce((s, id) => s + run.items[id], 0);
+    root.add(cardTitle(this, 586, LOW_Y + 10, totalCount > 0 ? `道具  ${totalCount}` : '道具', 19, COLOR.text).setOrigin(0, 0.5));
+    root.add(divider(this, 586, LOW_Y + 24, 384, COLOR.borderSoft, 0.7));
     if (ids.length === 0) root.add(label(this, 586, LOW_Y + 42, '暂无道具', 15, COLOR.dim));
     ids.forEach((id, k) => {
       const cx = 614 + (k % 6) * 64;
-      const cy = LOW_Y + 58 + Math.floor(k / 6) * 64;
+      const cy = LOW_Y + 60 + Math.floor(k / 6) * 64;
       const def = ITEMS[id];
       root.add(slotBox(this, cx, cy, 56, TIERS[def.rarity].color));
       root.add(this.add.image(cx, cy, def.icon).setDisplaySize(42, 42));
@@ -535,7 +552,7 @@ export class IntermissionScene extends Phaser.Scene {
     weaponTier?: number,
   ): void {
     const t = TIERS[tier];
-    root.add(panel(this, x, CARD_Y, CARD_W, CARD_H, t.color, COLOR.panel, 2, t.color));
+    root.add(panel(this, x, CARD_Y, CARD_W, CARD_H, t.color, COLOR.panel, 2, t.color, 90));
 
     // 左上角方正图标槽
     const boxSize = 62;
@@ -544,29 +561,30 @@ export class IntermissionScene extends Phaser.Scene {
     root.add(slotBox(this, iconCx, iconCy, boxSize, t.color, tier >= 2, weaponTier));
     root.add(this.fitImage(iconCx, iconCy - (weaponTier !== undefined ? 2 : 0), iconKey, iconSize));
 
-    // 图标右侧：标题 + 类型副标
+    // 图标右侧：标题 + 类型副标（使用清透粗体字，小号汉字不糊）
     const tx = x + 14 + boxSize + 10;
     const titleMaxW = CARD_W - (tx - x) - 10;
-    const titleObj = displayLabel(this, tx, CARD_Y + 26, title, 18, t.css).setOrigin(0, 0.5);
+    const titleObj = cardTitle(this, tx, CARD_Y + 32, title, 19, t.css).setOrigin(0, 0.5);
     if (titleObj.width > titleMaxW) titleObj.setScale(titleMaxW / titleObj.width);
     root.add(titleObj);
-    root.add(label(this, tx, CARD_Y + 48, typeLine, 12, COLOR.dim).setOrigin(0, 0.5));
+    root.add(label(this, tx, CARD_Y + 56, typeLine, 12, COLOR.dim).setOrigin(0, 0.5));
 
-    let bodyY = CARD_Y + 90;
+    let bodyY = CARD_Y + 92;
     if (tags && tags.length > 0) {
       let px = x + 14;
       for (const tg of tags) {
         const ts = TAG_STYLE[tg];
-        const p = pill(this, px, bodyY + 9, tg, ts.bg, ts.border, ts.text, 11, 8, 19);
+        const p = pill(this, px, bodyY + 12, tg, ts.bg, ts.border, ts.text, 11, 8, 19);
         p.x = px + p.width / 2;
         root.add(p);
         px += p.width + 6;
       }
-      bodyY += 26;
+      bodyY += 28;
     }
 
     root.add(divider(this, x + 14, bodyY, CARD_W - 28, COLOR.border, 0.5));
-    layoutLines(this, root, x + 14, bodyY + 8, lines, 14, CARD_W - 28, 3, 0);
+    const isItem = !tags || tags.length === 0;
+    layoutLines(this, root, x + 14, bodyY + (isItem ? 12 : 8), lines, isItem ? 15 : 14, CARD_W - 28, isItem ? 6 : 3, 0);
   }
 
   private weaponCard(root: Container, x: number, id: string, tier: number): void {
@@ -624,7 +642,7 @@ export class IntermissionScene extends Phaser.Scene {
       c.add(slotBox(this, cx, y + 66, 92, tier.color, w.tier >= 2, w.tier));
       c.add(this.fitImage(cx, y + 63, weaponTex(def.icon, w.tier, true), 74));
       const wTitle = w.tier > 0 ? `${def.name} ${TIER_ROMAN[w.tier]}` : def.name;
-      c.add(displayLabel(this, cx, y + 130, wTitle, 24, tier.css).setOrigin(0.5));
+      c.add(cardTitle(this, cx, y + 130, wTitle, 24, tier.css).setOrigin(0.5));
       c.add(label(this, cx, y + 156, weaponTypeLine(def, w.tier), 15, COLOR.dim).setOrigin(0.5));
 
       const pills = def.tags.map((tg) => {
@@ -696,7 +714,7 @@ export class IntermissionScene extends Phaser.Scene {
       const cx = x + pw / 2;
       c.add(slotBox(this, cx, y + 66, 92, tier.color, def.rarity >= 2));
       c.add(this.fitImage(cx, y + 66, def.icon, 68));
-      c.add(displayLabel(this, cx, y + 132, def.name, 24, tier.css).setOrigin(0.5));
+      c.add(cardTitle(this, cx, y + 132, def.name, 24, tier.css).setOrigin(0.5));
       c.add(label(this, cx, y + 158, `${tier.name}道具 · 当前持有 ×${this.run.items[id]}`, 15, COLOR.dim).setOrigin(0.5));
       c.add(divider(this, x + 28, y + 180, pw - 56, tier.color, 0.5));
       layoutLines(this, c, cx, y + 194, itemLines(def), 16, pw - 48, 4);
@@ -718,7 +736,7 @@ export class IntermissionScene extends Phaser.Scene {
       return;
     }
     this.toastBusy = true;
-    const badge = pill(this, 685, 35, `★ ${text}`, 0x282012, COLOR.gold, COLOR.goldText, 16, 16, 34)
+    const badge = pill(this, CARDS_CX + 80, 35, `★ ${text}`, 0x282012, COLOR.gold, COLOR.goldText, 15, 16, 32)
       .setDepth(200)
       .setScale(0.9)
       .setAlpha(0);

@@ -49,6 +49,7 @@ export interface KeycapSpec {
   stripe?: number;
   stripeAlpha?: number;
   accentColor?: number;
+  accentAlpha?: number;
   lightBevel?: boolean;
   cornerTicks?: boolean;
   wingSlashes?: boolean;
@@ -110,10 +111,9 @@ function buildShapePoints(x: number, y: number, w: number, h: number, shape: But
     const c = Phaser.Math.Clamp(Math.round(Math.min(w, h) * 0.2), 5, 11);
     return chamferPoints(x, y, w, h, c, c, c, c);
   }
-  // bevel：非对称切角（左上/右下大斜切 + 右上/左下微切角，形成有前进动势的战术铭牌）
-  const big = Phaser.Math.Clamp(Math.round(h * 0.24), 8, 15);
-  const small = Phaser.Math.Clamp(Math.round(h * 0.1), 3, 6);
-  return chamferPoints(x, y, w, h, big, small, big, small);
+  // bevel：对称硬朗切角（与方正面板对齐，避免歪斜视觉错位）
+  const c = Phaser.Math.Clamp(Math.round(Math.min(w, h) * 0.14), 5, 8);
+  return chamferPoints(x, y, w, h, c, c, c, c);
 }
 
 function tracePoly(g: Phaser.GameObjects.Graphics, pts: Pt[]): void {
@@ -193,10 +193,10 @@ export function drawKeycap(g: Phaser.GameObjects.Graphics, spec: KeycapSpec): vo
           { x: sx0 - half + 3, y: y + oy + h - 2 },
         ],
         spec.accentColor,
-        0.95,
+        spec.accentAlpha ?? 0.95,
       );
     } else {
-      g.fillStyle(spec.accentColor, 0.95);
+      g.fillStyle(spec.accentColor, spec.accentAlpha ?? 0.95);
       g.fillRect(x + ox + 5, y + oy + 8, 4, h - 16);
     }
   }
@@ -282,10 +282,10 @@ export function createButton(
         lip: 0x0f1014,
         hoverBg: 0x1b1c22,
         hoverLip: 0x0f1014,
-        border: 0x2e3038,
-        hoverBorder: 0x2e3038,
-        text: '#585a64',
-        hoverText: '#585a64',
+        border: 0x3a3e4a,
+        hoverBorder: 0x3a3e4a,
+        text: '#888d9c',
+        hoverText: '#888d9c',
         stripe: 0xffffff,
       }
     : opts.variant === 'emerald'
@@ -352,7 +352,7 @@ export function createButton(
 
   if (opts.leftIcon) {
     leftImg = scene.add.image(cursor + iconSize / 2, 0, opts.leftIcon).setDisplaySize(iconSize, iconSize);
-    if (disabled) leftImg.setAlpha(0.4);
+    if (disabled) leftImg.setAlpha(0.55);
     parts.push(leftImg);
     cursor += iconSize + gap;
   }
@@ -362,7 +362,7 @@ export function createButton(
 
   if (opts.icon) {
     rightImg = scene.add.image(cursor + iconSize / 2, 0, opts.icon).setDisplaySize(iconSize, iconSize);
-    if (disabled) rightImg.setAlpha(0.4);
+    if (disabled) rightImg.setAlpha(0.55);
     parts.push(rightImg);
   }
 
@@ -386,9 +386,10 @@ export function createButton(
       stripe: colors.stripe,
       stripeAlpha: primary || opts.variant === 'emerald' ? 0.22 : 0.08,
       accentColor: opts.accentColor,
+      accentAlpha: disabled ? 0.45 : 0.95,
       lightBevel: !disabled && !(!primary && !opts.variant && active),
       cornerTicks: !disabled && !primary && !opts.variant,
-      wingSlashes: !disabled && (primary || opts.variant === 'emerald'),
+      wingSlashes: !disabled && shape === 'slant' && (primary || opts.variant === 'emerald'),
     });
 
     text.setColor(active ? colors.hoverText : colors.text);

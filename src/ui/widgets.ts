@@ -79,6 +79,24 @@ export function label(
   });
 }
 
+/** 卡片/面板小标题（粗体清透 + 轻硬投影，不用重黑描边糊住小号汉字） */
+export function cardTitle(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  str: string,
+  size: number,
+  color = COLOR.text,
+): Phaser.GameObjects.Text {
+  return scene.add.text(x, y, str, {
+    fontFamily: DISPLAY_FONT,
+    fontSize: fontPx(size),
+    fontStyle: 'bold',
+    color,
+    shadow: { offsetX: 1, offsetY: 2, color: '#050507', blur: 0, fill: true, stroke: false },
+  });
+}
+
 /** 土豆兄弟风格粗体墨线标题字（重黑外轮廓 + 硬投影，零模糊感） */
 export function displayLabel(
   scene: Phaser.Scene,
@@ -89,13 +107,14 @@ export function displayLabel(
   color = COLOR.text,
   stroke = '#050507',
 ): Phaser.GameObjects.Text {
+  const thickness = size >= 28 ? Math.round(size * 0.17) : Math.max(2, Math.round(size * 0.12));
   return scene.add.text(x, y, str, {
     fontFamily: DISPLAY_FONT,
     fontSize: fontPx(size),
     fontStyle: 'bold',
     color,
     stroke,
-    strokeThickness: Math.max(4, Math.round(size * 0.18)),
+    strokeThickness: thickness,
     shadow: { offsetX: 2, offsetY: 3, color: '#050507', blur: 0, fill: true, stroke: true },
   });
 }
@@ -135,6 +154,7 @@ export function panel(
   fill: number = COLOR.panel,
   borderWidth = 2,
   accentTop?: number,
+  headerH?: number,
 ): Phaser.GameObjects.Graphics {
   const g = scene.add.graphics();
   const r = Math.min(8, Math.round(Math.min(w, h) * 0.08));
@@ -147,21 +167,23 @@ export function panel(
   g.fillStyle(fill, 1);
   g.fillRoundedRect(x, y, w, h, r);
 
-  // 3. 可选品质顶部染色洗层 + 45° 版画斜排线（增加作画细节，不显单调）
+  // 3. 可选品质顶部染色洗层 + 45° 版画斜排线（headerH = 0 可仅保留顶部细彩条）
   if (accentTop !== undefined) {
-    const bandH = Math.min(72, Math.round(h * 0.25));
-    g.fillStyle(accentTop, 0.13);
-    g.fillRoundedRect(x + 2, y + 2, w - 4, bandH, { tl: r - 2, tr: r - 2, bl: 0, br: 0 });
-    g.lineStyle(2, 0xffffff, 0.045);
-    for (let sx = x + 12; sx < x + w - 8; sx += 12) {
-      const topX = Math.min(x + w - 4, sx + 16);
-      const botX = Math.max(x + 4, sx - 12);
-      g.beginPath();
-      g.moveTo(topX, y + 5);
-      g.lineTo(botX, y + Math.min(bandH - 4, 34));
-      g.strokePath();
+    const bandH = headerH ?? Math.min(72, Math.round(h * 0.25));
+    if (bandH > 0) {
+      g.fillStyle(accentTop, 0.12);
+      g.fillRoundedRect(x + 2, y + 2, w - 4, bandH, { tl: r - 2, tr: r - 2, bl: 0, br: 0 });
+      g.lineStyle(2, 0xffffff, 0.04);
+      for (let sx = x + 12; sx < x + w - 8; sx += 12) {
+        const topX = Math.min(x + w - 4, sx + 16);
+        const botX = Math.max(x + 4, sx - 12);
+        g.beginPath();
+        g.moveTo(topX, y + 5);
+        g.lineTo(botX, y + Math.min(bandH - 4, 34));
+        g.strokePath();
+      }
     }
-    g.fillStyle(accentTop, 0.88);
+    g.fillStyle(accentTop, 0.9);
     g.fillRect(x + 2, y + 2, w - 4, 4);
   }
 
@@ -326,6 +348,15 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
     pierce: '破甲穿刺',
   };
   if (def.melee && meleeLabel[def.melee.style]) parts.push(meleeLabel[def.melee.style]);
+  if (tier >= 2 && def.melee) parts.push(tier >= 3 ? '附带强力穿透剑气波' : '附带穿透剑气波');
+  if (tier >= 1 && p) {
+    if ((p.count ?? 1) > 1) parts.push(`升阶 +${(tier >= 1 ? 1 : 0) + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 2 : 0)} 弹丸`);
+    else if (p.explode) parts.push(`爆炸半径 +${Math.round(18 * tier)}%${tier >= 3 ? '，双发齐射' : ''}`);
+    else if (!p.lob && !p.returning && !p.roll) parts.push(tier >= 3 ? '三发齐射，+2 穿透' : tier >= 2 ? '双发齐射，+1 穿透' : '+1 穿透');
+  }
+  if (tier >= 1 && def.chain) parts.push(`升阶 +${tier} 跳跃`);
+  if (tier >= 2 && def.beam) parts.push(`额外分叉照射 ${tier >= 3 ? 2 : 1} 个目标`);
+  if (tier >= 2 && def.device) parts.push(`部署上限 +${Math.floor(tier / 2)}`);
   if (def.critMultiplier !== 2) parts.push(`暴击 ×${def.critMultiplier}`);
   if (def.summon?.type === 'aphid') parts.push(`召唤 ${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只蚜虫`);
   if (def.summon?.type === 'moth') parts.push(`${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只飞蛾绕身旋转，碰到怪造成伤害`);
@@ -402,12 +433,16 @@ export function layoutLines(
   return cy - y;
 }
 
-/** 右侧土豆兄弟风格属性面板：暗炭黑框 + 斑马底纹 + 鲜明色标 */
+/** 右侧土豆兄弟风格属性面板：暗炭黑框 + 斑马底纹 + 区分变动属性与零值 */
 export function statsPanel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, stats: Stats): Phaser.GameObjects.Container {
   const c = scene.add.container(0, 0);
   c.add(panel(scene, x, y, w, h, COLOR.border, COLOR.panel, 2));
-  c.add(displayLabel(scene, x + w / 2, y + 23, '属性', 21, COLOR.text).setOrigin(0.5));
-  c.add(divider(scene, x + 16, y + 42, w - 32, COLOR.border, 0.7));
+  const hdr = scene.add.graphics();
+  hdr.fillStyle(COLOR.panelDeep, 0.72);
+  hdr.fillRoundedRect(x + 2, y + 2, w - 4, 40, { tl: 6, tr: 6, bl: 0, br: 0 });
+  c.add(hdr);
+  c.add(cardTitle(scene, x + w / 2, y + 22, '属性', 20, COLOR.text).setOrigin(0.5));
+  c.add(divider(scene, x + 14, y + 42, w - 28, COLOR.border, 0.75));
 
   const g = scene.add.graphics();
   const topY = y + 48;
@@ -416,7 +451,7 @@ export function statsPanel(scene: Phaser.Scene, x: number, y: number, w: number,
   STAT_KEYS.forEach((k, i) => {
     const ry = topY + i * rowH;
     if (i % 2 === 0) {
-      g.fillStyle(0xffffff, 0.03);
+      g.fillStyle(0xffffff, 0.028);
       g.fillRect(x + 6, ry - 1, w - 12, rowH - 1);
     }
     const dotY = ry + rowH * 0.44;
@@ -427,12 +462,13 @@ export function statsPanel(scene: Phaser.Scene, x: number, y: number, w: number,
 
     const v = stats[k];
     const base = BASE_STATS[k];
-    const color = v > base + 1e-6 ? COLOR.good : v < base - 1e-6 ? COLOR.bad : COLOR.text;
-    c.add(label(scene, x + 28, ry + 1, STAT_META[k].label, 16, COLOR.dim));
-    c.add(label(scene, x + w - 14, ry + 1, formatStat(k, v), 16, color, true).setOrigin(1, 0));
+    const changed = Math.abs(v - base) > 1e-6;
+    const color = v > base + 1e-6 ? COLOR.good : v < base - 1e-6 ? COLOR.bad : '#7d8392';
+    c.add(label(scene, x + 28, ry + 1, STAT_META[k].label, 15, changed ? COLOR.text : '#9195a3', changed));
+    c.add(label(scene, x + w - 14, ry + 1, formatStat(k, v), 15, color, changed).setOrigin(1, 0));
   });
 
-  c.addAt(g, 1);
+  c.addAt(g, 2);
   return c;
 }
 

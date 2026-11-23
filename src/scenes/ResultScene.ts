@@ -89,7 +89,7 @@ export class ResultScene extends Phaser.Scene {
     const px = W / 2 - pw / 2;
     const py = 166;
     const accent = r.win ? COLOR.gold : 0xd84640;
-    panel(this, px, py, pw, ph, accent, COLOR.panel, 2, accent);
+    panel(this, px, py, pw, ph, accent, COLOR.panel, 2, accent, 0);
 
     // 左侧：主角展示台
     const leftCx = px + 148;
@@ -102,14 +102,14 @@ export class ResultScene extends Phaser.Scene {
     this.beetle = new BeetleView(this, leftCx, py + 138, character.shell).setScale(2.0).setRotation(-Math.PI / 2);
     const startW = character.startWeapons[0] ? WEAPONS[character.startWeapons[0]] : null;
     if (startW) {
-      this.beetle.setWeapon(0, startW.icon, r.win ? 2 : 0);
-      this.beetle.setWeaponAim(0, this.beetle.rotation + this.beetle.tipLocalAngle(0));
+      this.beetle.setWeapon(0, startW.icon, r.win ? 2 : 0, true);
+      this.beetle.setWeaponAim(0, this.beetle.rotation + this.beetle.tipLocalAngle(0) - 0.55);
     }
 
     displayLabel(this, leftCx, py + 244, character.name, 22, COLOR.goldText).setOrigin(0.5);
     const badgeY = py + 284;
-    const diffPill = pill(this, leftCx, badgeY, `  ${diff.name}难度`, COLOR.panelDeep, COLOR.border, COLOR.text, 14, 16, 28);
-    this.add.image(diffPill.x - diffPill.width / 2 + 18, badgeY, `weather-${r.difficulty}`).setDisplaySize(20, 20);
+    const diffPill = pill(this, leftCx, badgeY, `      ${diff.name}难度`, COLOR.panelDeep, COLOR.border, COLOR.text, 14, 16, 28);
+    this.add.image(diffPill.x - diffPill.width / 2 + 20, badgeY, `weather-${r.difficulty}`).setDisplaySize(18, 18);
 
     // 竖向分割线
     const sep = this.add.graphics();
