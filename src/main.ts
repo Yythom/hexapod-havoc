@@ -36,7 +36,74 @@ async function preloadFonts(): Promise<void> {
   ]);
 }
 
+/**
+ * 同步 #app 容器与浏览器真实可视区域（visualViewport），避免横屏切换或浏览器顶/底栏
+ * 动画展开/收起时 100dvh 滞后导致画布被标签头或底部工具栏遮挡。
+ */
+function syncAppViewport(game?: Phaser.Game): void {
+  if (window.scrollX !== 0 || window.scrollY !== 0) {
+    window.scrollTo(0, 0);
+  }
+  const app = document.getElementById('app');
+  if (!app) return;
+
+  const vv = window.visualViewport;
+  const zoomed = vv != null && Math.abs(vv.scale - 1) > 0.05;
+  const w = Math.floor(!zoomed && vv ? vv.width : window.innerWidth);
+  const h = Math.floor(!zoomed && vv ? vv.height : window.innerHeight);
+  const left = Math.floor(!zoomed && vv ? vv.offsetLeft : 0);
+  const top = Math.floor(!zoomed && vv ? vv.offsetTop : 0);
+  if (w <= 0 || h <= 0) return;
+
+  const nextLeft = `${left}px`;
+  const nextTop = `${top}px`;
+  const nextW = `${w}px`;
+  const nextH = `${h}px`;
+  const changed =
+    app.style.left !== nextLeft ||
+    app.style.top !== nextTop ||
+    app.style.width !== nextW ||
+    app.style.height !== nextH;
+
+  if (changed) {
+    app.style.left = nextLeft;
+    app.style.top = nextTop;
+    app.style.width = nextW;
+    app.style.height = nextH;
+  }
+  if (game && (changed || game.scale.parentSize.width !== w || game.scale.parentSize.height !== h)) {
+    game.scale.setParentSize(w, h);
+  }
+}
+
+function installViewportSync(game: Phaser.Game): void {
+  const timers: number[] = [];
+  const run = () => syncAppViewport(game);
+  const schedule = () => {
+    run();
+    requestAnimationFrame(run);
+    while (timers.length > 0) window.clearTimeout(timers.pop());
+    // 手机横竖屏切换时，浏览器标签栏/底部工具栏通常在 100~500ms 后才完成高度动画
+    for (const ms of [120, 300, 550]) {
+      timers.push(window.setTimeout(run, ms));
+    }
+  };
+
+  window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  window.addEventListener('pageshow', schedule);
+  screen.orientation?.addEventListener?.('change', schedule);
+  window.visualViewport?.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('scroll', run);
+  document.addEventListener('fullscreenchange', schedule);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) schedule();
+  });
+  schedule();
+}
+
 void preloadFonts().then(() => {
+  syncAppViewport();
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'app',
@@ -52,6 +119,7 @@ void preloadFonts().then(() => {
     render: { antialias: true },
     scene: [BootScene, MenuScene, CharacterSelectScene, GameScene, UIScene, IntermissionScene, ResultScene],
   });
+  installViewportSync(game);
 
   // 开发模式下暴露给控制台，方便调试；模拟玩家（调难度用）也只在开发模式加载
   if (import.meta.env.DEV) {

@@ -25,7 +25,7 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 
 function createJoystickOverlay(): { svg: SVGSVGElement; base: SVGGElement; knob: SVGGElement } {
   const svg = svgEl('svg', { width: '100%', height: '100%' });
-  svg.style.cssText = 'position:fixed;inset:0;width:100vw;height:100dvh;pointer-events:none;z-index:20;display:none;';
+  svg.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:20;display:none;';
 
   const base = svgEl('g', {});
   base.appendChild(svgEl('circle', { cx: 0, cy: 0, r: BASE_R, fill: 'rgba(20,13,7,0.34)', stroke: 'rgba(255,224,152,0.5)', 'stroke-width': 3 }));
