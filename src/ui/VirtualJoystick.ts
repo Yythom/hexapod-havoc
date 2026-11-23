@@ -7,7 +7,15 @@ const DEADZONE = 0.12;
 const FULL_AT = 0.6;
 const BASE_R = 72;
 const KNOB_R = 28;
+const MOUSE_FALLBACK_ID = -2;
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+interface PendingPointer {
+  id: number;
+  pointerType: string;
+  x: number;
+  y: number;
+}
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
   const el = document.createElementNS(SVG_NS, tag);
@@ -67,6 +75,8 @@ export class VirtualJoystick {
   private oy = 0;
   private activeScale = 1;
   private enabled = true;
+  /** Phaser 的 MouseManager/TouchManager 使用 mousedown/touchstart，需通过前置 pointerdown 关联真实的 PointerEvent.pointerId */
+  private readonly pendingCanvasDowns: PendingPointer[] = [];
 
   constructor(
     scene: Phaser.Scene,
@@ -141,34 +151,80 @@ export class VirtualJoystick {
     touchMove.y = (dy / len) * m;
   }
 
+  private takePendingCanvasDown(isMouse: boolean): PendingPointer | undefined {
+    const idx = this.pendingCanvasDowns.findIndex((item) =>
+      isMouse ? item.pointerType !== 'touch' : item.pointerType !== 'mouse',
+    );
+    if (idx === -1) return undefined;
+    return this.pendingCanvasDowns.splice(idx, 1)[0];
+  }
+
+  private matchesActive(ev: PointerEvent): boolean {
+    if (this.pointerId === -1) return false;
+    if (this.pointerId === MOUSE_FALLBACK_ID) return ev.pointerType === 'mouse';
+    return ev.pointerId === this.pointerId;
+  }
+
   private onCanvasDown(p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
+    const isMouse = !p.wasTouch;
+    if (isMouse && p.button !== 0) return;
+    const pending = this.takePendingCanvasDown(isMouse);
     if (!this.enabled || this.pointerId !== -1 || over.length > 0) return;
-    const ev = p.event as PointerEvent | TouchEvent | undefined;
+
+    const ev = p.event as PointerEvent | TouchEvent | MouseEvent | undefined;
     if (ev && 'pointerId' in ev) {
       this.start(ev.pointerId, ev.clientX, ev.clientY);
       return;
     }
+    if (pending) {
+      this.start(pending.id, pending.x, pending.y);
+      return;
+    }
     const touch = ev && 'changedTouches' in ev ? ev.changedTouches[0] : undefined;
     const rect = this.canvas.getBoundingClientRect();
-    const x = touch ? touch.clientX : rect.left + (p.x / (this.canvas.width || 1)) * rect.width;
-    const y = touch ? touch.clientY : rect.top + (p.y / (this.canvas.height || 1)) * rect.height;
-    this.start(touch ? touch.identifier : p.id, x, y);
+    const x = touch
+      ? touch.clientX
+      : ev && 'clientX' in ev
+        ? ev.clientX
+        : rect.left + (p.x / (this.canvas.width || 1)) * rect.width;
+    const y = touch
+      ? touch.clientY
+      : ev && 'clientY' in ev
+        ? ev.clientY
+        : rect.top + (p.y / (this.canvas.height || 1)) * rect.height;
+    this.start(touch ? touch.identifier : isMouse ? MOUSE_FALLBACK_ID : p.id, x, y);
   }
 
   private readonly onWindowDown = (ev: PointerEvent): void => {
-    if (!this.enabled || this.pointerId !== -1) return;
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
-    // 画布内部由 Phaser onCanvasDown 判定（避开暂停等 UI 按钮）；画布外留白区域直接在这里启动摇杆
-    if (ev.target === this.canvas) return;
+    if (!this.enabled || this.pointerId !== -1) return;
+    // 画布内部需等 Phaser onCanvasDown 判定是否点中按钮，这里先记下 PointerEvent 以便关联 pointerId
+    if (ev.target === this.canvas) {
+      this.pendingCanvasDowns.push({
+        id: ev.pointerId,
+        pointerType: ev.pointerType,
+        x: ev.clientX,
+        y: ev.clientY,
+      });
+      if (this.pendingCanvasDowns.length > 8) this.pendingCanvasDowns.shift();
+      return;
+    }
     this.start(ev.pointerId, ev.clientX, ev.clientY);
   };
 
   private readonly onWindowMove = (ev: PointerEvent): void => {
-    if (ev.pointerId === this.pointerId) this.move(ev.clientX, ev.clientY);
+    if (!this.matchesActive(ev)) return;
+    if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) {
+      this.release();
+      return;
+    }
+    this.move(ev.clientX, ev.clientY);
   };
 
   private readonly onWindowUp = (ev: PointerEvent): void => {
-    if (ev.pointerId === this.pointerId) this.release();
+    const pendingIdx = this.pendingCanvasDowns.findIndex((item) => item.id === ev.pointerId);
+    if (pendingIdx !== -1) this.pendingCanvasDowns.splice(pendingIdx, 1);
+    if (this.matchesActive(ev)) this.release();
   };
 
   private readonly onBlur = (): void => {
@@ -177,6 +233,7 @@ export class VirtualJoystick {
 
   private release(): void {
     this.pointerId = -1;
+    this.pendingCanvasDowns.length = 0;
     this.svg.style.display = 'none';
     touchMove.x = touchMove.y = 0;
   }
