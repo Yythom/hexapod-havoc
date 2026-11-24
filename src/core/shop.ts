@@ -436,7 +436,9 @@ function applyCursedItemBonus(run: RunState, id: string): void {
 
 export function addItem(run: RunState, id: string): void {
   const d = ITEMS[id];
-  if (!d.unique && (run.items[id] ?? 0) >= maxItemStack(d)) {
+  if (!d) return;
+  // 唯一道具最多 1 件：锁定的旧货架 + 宝箱可能让同一件唯一道具再次入手
+  if ((run.items[id] ?? 0) >= (d.unique ? 1 : maxItemStack(d))) {
     run.nectar += 5;
     return;
   }

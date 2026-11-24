@@ -26,6 +26,8 @@ export function fadeInScene(scene: Phaser.Scene, duration = 150): void {
 export function transitionTo(scene: Phaser.Scene, target: string, data?: object, duration = 120): void {
   if (scene.data.get('__transitioning')) return;
   scene.data.set('__transitioning', true);
+  // scene.data 会跨 shutdown/restart 保留：场景关闭时必须解锁，否则回到该场景后所有转场都会被当成连点忽略
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.data.set('__transitioning', false));
   const veil = scene.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050507, 0).setOrigin(0).setDepth(9999).setInteractive();
   scene.tweens.add({
     targets: veil,

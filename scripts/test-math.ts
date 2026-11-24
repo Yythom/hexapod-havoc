@@ -113,6 +113,10 @@ test('道具堆叠上限：传说唯一件不可叠加、精良/稀有/传说上
   assert.equal(run.itemCount('royaljelly'), 2);
   for (let i = 0; i < 6; i++) addItem(run, 'leaf');
   assert.equal(run.itemCount('leaf'), 3);
+  // 唯一道具：任何来源重复入手都只保留 1 件（防止锁定旧货架 + 宝箱重复叠同一件）
+  addItem(run, 'giantscarab');
+  addItem(run, 'giantscarab');
+  assert.equal(run.itemCount('giantscarab'), 1);
 });
 
 test('升级四选一严格过滤角色死属性（蚁后 / 蚊子 / 刺蛾 / 螳螂）', () => {

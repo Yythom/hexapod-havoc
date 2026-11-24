@@ -62,6 +62,8 @@ export class MenuScene extends Phaser.Scene {
   private px = 0;
   private py = 0;
   private elapsed = 0;
+  /** 当前打开的弹窗：打开时屏蔽主菜单 Enter/Space 开战快捷键 */
+  private modal: Phaser.GameObjects.Container | null = null;
 
   constructor() {
     super('Menu');
@@ -79,6 +81,7 @@ export class MenuScene extends Phaser.Scene {
     this.grass = [];
     this.bugs = [];
     this.sunrays = null;
+    this.modal = null;
 
     // 1. 背景：后院中央老树桩居中铺底，营造完整沉浸式微距空间
     this.groundImg = this.add.image(CX, CY + 22, 'ground');
@@ -433,8 +436,12 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(1, 1)
       .setDepth(30);
 
-    this.input.keyboard!.once('keydown-ENTER', savedRun ? resume : start);
-    this.input.keyboard!.once('keydown-SPACE', savedRun ? resume : start);
+    const keyboardStart = () => {
+      if (this.modal) return;
+      (savedRun ? resume : start)();
+    };
+    this.input.keyboard!.on('keydown-ENTER', keyboardStart);
+    this.input.keyboard!.on('keydown-SPACE', keyboardStart);
     fadeInScene(this);
 
     // 若 URL 携带好友分享的 ?challenge=HHS1:... 参数，首次进主菜单自动打开挑战书
@@ -448,6 +455,15 @@ export class MenuScene extends Phaser.Scene {
     }
   }
 
+  /** 记录当前弹窗，销毁时解除；弹窗打开期间不响应主菜单的开战快捷键 */
+  private trackModal(c: Phaser.GameObjects.Container): Phaser.GameObjects.Container {
+    this.modal = c;
+    c.once(Phaser.GameObjects.Events.DESTROY, () => {
+      if (this.modal === c) this.modal = null;
+    });
+    return c;
+  }
+
   /** 每日挑战弹窗：展示今日固定角色、初始武器、天气难度与 2 条随机突变词条 */
   private openDailyModal(): void {
     const W = GAME_WIDTH;
@@ -459,7 +475,7 @@ export class MenuScene extends Phaser.Scene {
     const weap = daily.weapon ? WEAPONS[daily.weapon] : null;
     const best = getDailyBest(daily.dateKey);
 
-    const c = this.add.container(0, 0).setDepth(100);
+    const c = this.trackModal(this.add.container(0, 0).setDepth(100));
     const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.78).setOrigin(0).setInteractive();
     const pw = 620;
     const ph = 432;
@@ -544,7 +560,7 @@ export class MenuScene extends Phaser.Scene {
     const save = loadSave();
     const cleared = new Set(save.challengesCleared);
 
-    const c = this.add.container(0, 0).setDepth(100);
+    const c = this.trackModal(this.add.container(0, 0).setDepth(100));
     const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.78).setOrigin(0).setInteractive();
     const pw = 960;
     const ph = 560;
@@ -623,7 +639,7 @@ export class MenuScene extends Phaser.Scene {
     const H = GAME_HEIGHT;
     const save = loadSave();
 
-    const c = this.add.container(0, 0).setDepth(100);
+    const c = this.trackModal(this.add.container(0, 0).setDepth(100));
     const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.8).setOrigin(0).setInteractive();
     const pw = 680;
     const ph = initial ? 476 : 360;
@@ -826,7 +842,7 @@ export class MenuScene extends Phaser.Scene {
   private openSettings(): void {
     const W = GAME_WIDTH;
     const H = GAME_HEIGHT;
-    const c = this.add.container(0, 0).setDepth(100);
+    const c = this.trackModal(this.add.container(0, 0).setDepth(100));
     const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.74).setOrigin(0).setInteractive();
     const pw = 580;
     const ph = 474;
