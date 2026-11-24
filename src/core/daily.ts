@@ -2,7 +2,19 @@ import { CHARACTER_ORDER, CHARACTERS } from '../data/characters';
 import type { Mods } from '../data/items';
 import type { Stats } from './stats';
 
-export type DailyMutatorId = 'turbo' | 'discount' | 'treasure' | 'glass' | 'swarm' | 'vamp';
+export type DailyMutatorId =
+  | 'turbo'
+  | 'discount'
+  | 'treasure'
+  | 'glass'
+  | 'swarm'
+  | 'vamp'
+  | 'chaos'
+  | 'cursed_market'
+  | 'quick_dash'
+  | 'boom_party'
+  | 'one_slot'
+  | 'glass_soul';
 
 export interface DailyMutatorDef {
   id: DailyMutatorId;
@@ -10,6 +22,8 @@ export interface DailyMutatorDef {
   desc: string;
   stats?: Partial<Stats>;
   mods?: Partial<Mods>;
+  /** 仅挑战关专属（不进每日挑战和常规自定义池） */
+  challengeOnly?: boolean;
 }
 
 export const DAILY_MUTATORS: Record<DailyMutatorId, DailyMutatorDef> = {
@@ -49,9 +63,48 @@ export const DAILY_MUTATORS: Record<DailyMutatorId, DailyMutatorDef> = {
     desc: '吸取 +10%，每波开局额外 +1 层护盾',
     stats: { lifesteal: 0.1 },
   },
+  chaos: {
+    id: 'chaos',
+    name: '百变武器',
+    desc: '每波开始时所有武器随机重铸为同品阶新武器',
+  },
+  cursed_market: {
+    id: 'cursed_market',
+    name: '诅咒黑市',
+    desc: '开局诅咒 +12，商店紫火诅咒商品概率翻倍',
+    stats: { curse: 12 },
+  },
+  quick_dash: {
+    id: 'quick_dash',
+    name: '疾影连冲',
+    desc: '冲刺冷却 −40%，冲刺充能 +1',
+    mods: { dashCooldownPct: -0.4, dashCharges: 1 },
+  },
+  boom_party: {
+    id: 'boom_party',
+    name: '爆裂派对',
+    desc: '爆裂毒菇翻倍，气囊虫死亡对周围虫群引发连锁爆破',
+    mods: { explodeRadiusPct: 0.2 },
+  },
+  one_slot: {
+    id: 'one_slot',
+    name: '孤胆单槽',
+    desc: '武器槽锁为 1 个，伤害 +180%、攻速 +80%、暴击 +20%',
+    stats: { damagePct: 1.8, attackSpeedPct: 0.8, critChance: 0.2 },
+    challengeOnly: true,
+  },
+  glass_soul: {
+    id: 'glass_soul',
+    name: '玻璃之魂',
+    desc: '生命上限锁为 1，伤害 +100%，开局 2 盾且每 12 秒再生 1 盾',
+    stats: { damagePct: 1.0 },
+    challengeOnly: true,
+  },
 };
 
-const MUTATOR_ORDER = Object.keys(DAILY_MUTATORS) as DailyMutatorId[];
+const MUTATOR_ORDER = (Object.keys(DAILY_MUTATORS) as DailyMutatorId[]).filter((id) => !DAILY_MUTATORS[id].challengeOnly);
+/** 可供玩家在选人页自由勾选的自定义词条列表 */
+export const CUSTOM_MUTATOR_ORDER: DailyMutatorId[] = MUTATOR_ORDER;
 
 export interface DailyChallenge {
   dateKey: string;

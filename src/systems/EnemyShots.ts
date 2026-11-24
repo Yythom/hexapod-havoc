@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { DEPTH, WORLD_HEIGHT, WORLD_WIDTH } from '../config';
 
-export type EnemyShotKind = 'silk' | 'stinger';
+export type EnemyShotKind = 'silk' | 'stinger' | 'orb';
 
 interface Shot {
   sprite: Phaser.GameObjects.Image;
@@ -35,7 +35,7 @@ export class EnemyShots {
   }
 
   fire(x: number, y: number, angle: number, speed: number, damage: number, kind: EnemyShotKind = 'silk'): void {
-    const tex = kind === 'stinger' ? 'enemy-stinger' : 'silk';
+    const tex = kind === 'stinger' ? 'enemy-stinger' : kind === 'orb' ? 'enemy-orb' : 'silk';
     const s = this.pool.pop() ?? {
       sprite: this.scene.add.image(0, 0, tex).setDepth(DEPTH.projectile).setScale(1 / SPRITE_RES),
       kind,
@@ -53,13 +53,13 @@ export class EnemyShots {
     s.vx = Math.cos(angle) * speed;
     s.vy = Math.sin(angle) * speed;
     s.angle = angle;
-    s.life = SHOT_LIFE;
+    s.life = kind === 'orb' ? 3.2 : SHOT_LIFE;
     s.damage = damage;
     s.sprite
       .setTexture(tex)
       .setPosition(x, y)
       .setRotation(kind === 'stinger' ? angle : 0)
-      .setScale((kind === 'stinger' ? 1.05 : 1) / SPRITE_RES)
+      .setScale((kind === 'stinger' ? 1.05 : kind === 'orb' ? 0.98 : 1) / SPRITE_RES)
       .setVisible(true);
     this.list.push(s);
   }
@@ -93,8 +93,8 @@ export class EnemyShots {
       // 高对比敌方弹幕危险尾迹 + 脉冲外圈（与己方弹道/刀光彻底区分）
       const ux = Math.cos(s.angle);
       const uy = Math.sin(s.angle);
-      const tailLen = s.kind === 'stinger' ? 20 : 14;
-      const col = s.kind === 'stinger' ? 0xff2a48 : 0xff3b8d;
+      const tailLen = s.kind === 'stinger' ? 20 : s.kind === 'orb' ? 12 : 14;
+      const col = s.kind === 'stinger' ? 0xff2a48 : s.kind === 'orb' ? 0xff2e84 : 0xff3b8d;
       g.lineStyle(s.kind === 'stinger' ? 4.2 : 3.4, 0x160408, 0.72);
       g.beginPath();
       g.moveTo(s.x - ux * tailLen, s.y - uy * tailLen);
@@ -106,7 +106,7 @@ export class EnemyShots {
       g.lineTo(s.x, s.y);
       g.strokePath();
 
-      const haloR = (s.kind === 'stinger' ? 8.2 : 8.8) * ringPulse;
+      const haloR = (s.kind === 'stinger' ? 8.2 : s.kind === 'orb' ? 9.4 : 8.8) * ringPulse;
       g.fillStyle(col, 0.22);
       g.fillCircle(s.x, s.y, haloR);
       g.lineStyle(2.0, 0x160408, 0.88);

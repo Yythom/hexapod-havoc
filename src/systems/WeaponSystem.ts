@@ -3,6 +3,7 @@ import { SPRITE_RES } from '../art/draw';
 import { sfx } from '../audio/sfx';
 import { DEPTH } from '../config';
 import { effectiveRange, MAX_SCREEN_RANGE, rollDamage, weaponDamage } from '../core/combat';
+import { computeSlotBonus, type SlotBonus } from '../core/legSynergy';
 import type { OwnedWeapon } from '../core/RunState';
 import { attackInterval, type Stats } from '../core/stats';
 import type { Mods } from '../data/items';
@@ -52,14 +53,19 @@ export interface WeaponContext {
   workerHp: number;
   /** 手瞄 / 鼠标集火目标世界坐标（未启用时为 null） */
   aimPoint?: { x: number; y: number } | null;
+  /** 螳螂冲刺后近战必暴击 */
+  mantisCrit?: boolean;
 }
 
 interface Slot {
   def: WeaponDef;
   tier: number;
   owned: OwnedWeapon;
+  slotBonus: SlotBonus;
   src: HitSource;
   cd: number;
+  /** 枪械 6 件套计数（每 4 次射击附加穿透弹） */
+  gunShots: number;
   /** 炮台：距离下一次放置的时间 */
   placeCd: number;
   /** Railgun：距离下一次蓄力加伤的时间 */
@@ -104,6 +110,8 @@ export class WeaponSystem {
   onAttack: (() => void) | null = null;
   /** 放下一个机关时调用（白蚁解锁统计） */
   onDevicePlaced: (() => void) | null = null;
+  /** 链式闪电命中点回调（供雨天水洼全域导电） */
+  onLightningHit: ((x: number, y: number, damage: number) => void) | null = null;
   private slots: Slot[] = [];
   private devices: Device[] = [];
   private ctx!: WeaponContext;
@@ -131,8 +139,10 @@ export class WeaponSystem {
         def,
         tier: w.tier,
         owned: w,
+        slotBonus: computeSlotBonus(owned, i, slotCount),
         src: { def, owned: w, tier: w.tier },
         cd: 0.3 + i * 0.07,
+        gunShots: 0,
         placeCd: 0.2 + i * 0.1,
         rampTimer: 5,
         aim: view.rotation + view.tipLocalAngle(i),
@@ -150,6 +160,34 @@ export class WeaponSystem {
       const s = this.slots[i];
       view.setWeapon(i, s ? s.def.icon : null, s?.tier ?? 0);
     }
+  }
+
+  /** 极限擦弹闪避：按比例缩减全部武器剩余冷却 */
+  reduceCooldowns(ratio: number): void {
+    const keep = Math.max(0, 1 - ratio);
+    for (const s of this.slots) s.cd *= keep;
+  }
+
+  /** 白蚁冲刺：在指定位置放置一颗免费迷你爆破地雷 */
+  placeFreeMine(x: number, y: number): void {
+    const def = WEAPONS['landmines'] ?? WEAPONS['wrench'];
+    if (!def) return;
+    const sprite = this.player.view.scene.add.image(x, y, 'mine').setDepth(DEPTH.mound).setScale(0);
+    this.devices.push({
+      type: 'mine',
+      slot: -1,
+      def: { ...def, device: { type: 'mine', max: 9, radius: 78 } },
+      tier: 1,
+      src: { def, owned: null, tier: 1 },
+      sprite,
+      x,
+      y,
+      age: 0.25,
+      cd: 0,
+    });
+    this.fx?.burst(x, y, 0xc8a464, 5, 90, 0.7);
+    sfx.play('place');
+    this.onDevicePlaced?.();
   }
 
   /** Blunderbuss：拾取花蜜时重置冷却 */
@@ -215,7 +253,7 @@ export class WeaponSystem {
         return;
       }
 
-      const range = this.rangeOf(s.def, stats, s.tier);
+      const range = this.rangeOf(s.def, stats, s.tier, s.slotBonus);
       const aimPt = ctx.aimPoint;
       const target = aimPt ? this.nearestToFocus(tip.x, tip.y, range, aimPt.x, aimPt.y) : this.enemies.nearest(tip.x, tip.y, range);
       if (aimPt) {
@@ -238,6 +276,27 @@ export class WeaponSystem {
           const dist = target ? Math.hypot(target.x - tip.x, target.y - tip.y) : range * 0.85;
           this.startSwing(s, dist, range, interval);
           this.emitMeleeFx(s, tip.x, tip.y);
+          // 刀刃 6 件套觉醒：挥击向前发射穿透剑气波
+          if (mods.bladeWave > 0 && s.def.classes.includes('Blade')) {
+            this.projectiles.fire({
+              texture: 'leafblade',
+              x: tip.x,
+              y: tip.y,
+              angle: s.aim,
+              speed: 620,
+              maxDist: Math.min(MAX_SCREEN_RANGE, 250),
+              damage: Math.max(2, Math.round(s.damage * 0.65)),
+              crit: s.crit,
+              radius: 10,
+              knockback: 80,
+              pierce: 4,
+              spin: 12,
+              explode: 0,
+              poison: null,
+              cloud: null,
+              src: s.src,
+            });
+          }
           this.onAttack?.();
           sfx.play('melee');
         } else if (s.def.beam) {
@@ -297,25 +356,28 @@ export class WeaponSystem {
     view.setWeaponAim(i, s.aim);
   }
 
-  private rangeOf(def: WeaponDef, stats: Stats, tier: number): number {
-    return effectiveRange(def, stats, tier);
+  private rangeOf(def: WeaponDef, stats: Stats, tier: number, slotBonus?: SlotBonus): number {
+    return effectiveRange(def, stats, tier, slotBonus);
   }
 
-  /** 攻击间隔：吃攻速；蜂蜜罐低血时再快 30% */
+  /** 攻击间隔：吃全局攻速 + 槽位位阶/相邻共鸣攻速 + 诅咒武器 +10% 攻速；蜂蜜罐低血再快 30% */
   private intervalOf(s: Slot): number {
-    let interval = attackInterval(tierOf(s.def, s.tier).cooldown, this.ctx.stats);
+    const extraAspd = s.slotBonus.attackSpeedPct + (s.owned.cursed ? 0.1 : 0);
+    const effStats = extraAspd !== 0 ? { ...this.ctx.stats, attackSpeedPct: this.ctx.stats.attackSpeedPct + extraAspd } : this.ctx.stats;
+    let interval = attackInterval(tierOf(s.def, s.tier).cooldown, effStats);
     if (s.def.lowHpHaste && this.ctx.hpRatio < 0.5) interval /= 1 + s.def.lowHpHaste;
     const growth = s.def.special?.growthAttackSpeed;
     if (growth && s.owned) interval /= 1 + Math.min(0.6, Math.floor((s.owned.kills ?? 0) / 12) * growth);
     return interval;
   }
 
-  private roll(def: WeaponDef, tier: number, owned: OwnedWeapon | null) {
+  private roll(def: WeaponDef, tier: number, owned: OwnedWeapon | null, slotBonus?: SlotBonus | null) {
     const c = this.ctx;
     const copies = this.slots.filter((x) => x.def.id === def.id).length;
     const sp = def.special;
     const mult = c.damageMult * (sp?.stationaryPenalty && !c.moving ? 1 + sp.stationaryPenalty.damagePct : 1);
-    return rollDamage(def, tier, c.stats, c.mods, owned, mult, undefined, c.emptySlots, copies);
+    const forceCrit = !!(c.mantisCrit && def.kind === 'melee');
+    return rollDamage(def, tier, c.stats, c.mods, owned, mult, undefined, c.emptySlots, copies, slotBonus, forceCrit);
   }
 
   private fire(s: Slot, x: number, y: number, range: number, target: Enemy): void {
@@ -341,7 +403,7 @@ export class WeaponSystem {
     const poisonDuration = POISON_DURATION + mods.poisonDuration;
     const perStack = poisonPerStack(stats, mods);
     for (let k = 0; k < count; k++) {
-      const { damage, crit } = this.roll(s.def, tier, s.owned);
+      const { damage, crit } = this.roll(s.def, tier, s.owned, s.slotBonus);
       const offset = count > 1 ? -arc / 2 + (arc * k) / (count - 1) : 0;
       const lob = proj.lob;
       const solid = proj.returning || proj.roll;
@@ -355,7 +417,7 @@ export class WeaponSystem {
         damage,
         crit,
         radius: proj.radius,
-        knockback: tierOf(s.def, tier).knockback,
+        knockback: tierOf(s.def, tier).knockback * (1 + s.slotBonus.knockbackPct),
         pierce,
         spin: proj.spin,
         explode: Math.round(explode * (1 + mods.explodeRadiusPct)),
@@ -368,6 +430,32 @@ export class WeaponSystem {
         fade: !!proj.fade,
         split: straight && mods.splitShots > 0,
       });
+    }
+    // 枪械 6 件套觉醒：每 4 次射击额外发射 1 枚高速穿透弹
+    if (mods.gunVolley > 0 && s.def.classes.includes('Gun')) {
+      s.gunShots++;
+      if (s.gunShots >= 4) {
+        s.gunShots = 0;
+        const { damage, crit } = this.roll(s.def, tier, s.owned, s.slotBonus);
+        this.projectiles.fire({
+          texture: 'heavybullet',
+          x,
+          y,
+          angle: s.aim,
+          speed: Math.max(760, proj.speed * 1.15),
+          maxDist: Math.min(MAX_SCREEN_RANGE, range + 35),
+          damage: Math.max(2, Math.round(damage * 1.2)),
+          crit,
+          radius: 7,
+          knockback: tierOf(s.def, tier).knockback * 1.2,
+          pierce: 3,
+          spin: 0,
+          explode: 0,
+          poison: null,
+          cloud: null,
+          src: s.src,
+        });
+      }
     }
   }
 
@@ -408,6 +496,7 @@ export class WeaponSystem {
       const d = Math.hypot(cx - fromX, cy - fromY) || 1;
       const amount = Math.max(1, Math.round(dmg));
       this.resolver.hit(cur, amount, first.crit, (cx - fromX) / d, (cy - fromY) / d, tierOf(s.def, s.tier).knockback, s.src);
+      if (j === 0) this.onLightningHit?.(cx, cy, amount);
       this.fx?.star(cx, cy, 15, 0x8ce2ff);
       this.fx?.streaks(cx, cy, Math.atan2(cy - fromY, cx - fromX), 0x8ce2ff, 3, 180, 0.7);
       // 避雷针：每跳一次有概率再劈一道落雷
@@ -587,7 +676,7 @@ export class WeaponSystem {
   // ---------- 近战 ----------
 
   private startSwing(s: Slot, dist: number, range: number, interval: number): void {
-    const { damage, crit } = this.roll(s.def, s.tier, s.owned);
+    const { damage, crit } = this.roll(s.def, s.tier, s.owned, s.slotBonus);
     const style = s.def.melee!.style;
     const sweep = style === 'sweep';
     s.damage = damage;
@@ -690,7 +779,7 @@ export class WeaponSystem {
   private updateSwing(s: Slot, slot: number, tipX: number, tipY: number, dt: number, mods: Mods): void {
     const view = this.player.view;
     const melee = s.def.melee!;
-    const kb = tierOf(s.def, s.tier).knockback * (1 + mods.meleeKnockbackPct);
+    const kb = tierOf(s.def, s.tier).knockback * (1 + mods.meleeKnockbackPct + s.slotBonus.knockbackPct);
     s.swing = Math.max(0, s.swing - dt);
     const t = 1 - s.swing / s.swingTotal;
     const hitR = melee.hitRadius * (1 + 0.14 * s.tier);

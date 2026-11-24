@@ -55,6 +55,23 @@ export class PickupManager {
     }
   }
 
+  /** 瓢虫冲刺：瞬间强磁吸取半径内所有花蜜 */
+  pullNectarInRadius(x: number, y: number, radius: number): number {
+    const r2 = radius * radius;
+    let count = 0;
+    for (const d of this.list) {
+      if (d.kind !== 'nectar' || d.pulled) continue;
+      const dx = d.x - x;
+      const dy = d.y - y;
+      if (dx * dx + dy * dy <= r2) {
+        d.pulled = true;
+        d.pullTime = 0.25;
+        count += d.value;
+      }
+    }
+    return count;
+  }
+
   dropNectar(x: number, y: number, n: number): void {
     if (n <= 0) return;
     let activeNectar = 0;

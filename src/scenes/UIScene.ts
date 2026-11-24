@@ -4,9 +4,11 @@ import { sfx } from '../audio/sfx';
 import { weaponTex } from '../art/icons';
 import { FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH, HUD_SCALE, IS_COARSE_POINTER, NUM_FONT } from '../config';
 import { bus, EVT, listen } from '../core/bus';
+import { CHALLENGES } from '../core/challenges';
 import type { RunState } from '../core/RunState';
 import { activeSets } from '../core/sets';
 import { CHARACTERS } from '../data/characters';
+import { DIFFICULTIES } from '../data/difficulty';
 import { CLASS_LABEL, TIERS, WEAPONS } from '../data/weapons';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { chamferPoints, createButton, drawKeycap, fillPoly, slantPoints, strokePoly } from '../ui/Button';
@@ -52,7 +54,10 @@ export class UIScene extends Phaser.Scene {
   private waveText!: Phaser.GameObjects.Text;
   private weatherIcon!: Phaser.GameObjects.Image;
   private timerText!: Phaser.GameObjects.Text;
+  private arenaHintText!: Phaser.GameObjects.Text;
   private shieldBadge!: Phaser.GameObjects.Container;
+  private shieldText!: Phaser.GameObjects.Text;
+  private shownWeather = -1;
   private bossBar!: Phaser.GameObjects.Graphics;
   private bossName!: Phaser.GameObjects.Text;
   private bossCrown!: Phaser.GameObjects.Image;
@@ -92,10 +97,11 @@ export class UIScene extends Phaser.Scene {
     this.bossLag = 1;
     this.pulseTime = 0;
     this.shown = { hp: -1, maxHp: -1, nectar: -1, wave: -1, time: -2, xp: -1, level: -1, pending: -1 };
+    this.shownWeather = this.run.activeWeather;
     this.bossShown = -1;
 
     // 实时天气光影层 + 极轻微距前景草叶四角框景（完全不遮挡战斗视野）
-    this.weatherFx = new WeatherAmbience(this, -10, this.run.setup.difficulty);
+    this.weatherFx = new WeatherAmbience(this, -10, this.run.activeWeather);
     this.add.image(-12, -10, 'ui-macro-grass-tl').setOrigin(0, 0).setScale(0.36).setAlpha(0.36).setDepth(-5);
     this.add.image(W + 12, -10, 'ui-macro-grass-tl').setOrigin(0, 0).setScale(-0.34, 0.34).setAlpha(0.32).setDepth(-5);
     this.add.image(W + 12, H + 12, 'ui-macro-grass-br').setOrigin(1, 1).setScale(0.38).setAlpha(0.36).setDepth(-5);
@@ -259,14 +265,27 @@ export class UIScene extends Phaser.Scene {
     const s = this.nectarText.scale;
     if (s > 1) this.nectarText.setScale(Math.max(1, s - dt * 2.2));
 
-    if (r.wave !== this.shown.wave) {
+    if (r.wave !== this.shown.wave || r.activeWeather !== this.shownWeather) {
       this.shown.wave = r.wave;
-      this.waveText.setText(r.endless ? `无尽 · 第 ${r.wave} 波 · ${r.difficulty.name}` : `第 ${r.wave} 波 · ${r.difficulty.name}`);
+      this.shownWeather = r.activeWeather;
+      this.weatherFx.setWeather(r.activeWeather);
+      this.weatherIcon.setTexture(`weather-${r.activeWeather}`);
+      const weatherName = DIFFICULTIES[r.activeWeather]?.name ?? r.difficulty.name;
+      const chName = r.setup.challenge ? CHALLENGES[r.setup.challenge]?.name : '';
+      const labelStr = r.endless
+        ? `无尽 · 第 ${r.wave} 波 · ${weatherName}`
+        : chName
+          ? `${chName} · 第 ${r.wave}/${r.maxWaves} 波 · ${weatherName}`
+          : `第 ${r.wave} 波 · ${weatherName}`;
+      this.waveText.setText(labelStr);
       this.weatherIcon.setPosition(-this.waveText.width / 2 - 14, 24);
     }
 
     this.shieldBadge.setVisible(r.shield > 0 && r.phase === 'combat');
-    this.drawDashHud(r.dashRatio, r.phase === 'combat');
+    if (r.shield > 0) this.shieldText.setText(r.shield > 1 ? `护盾×${r.shield}` : '护盾');
+    this.drawDashHud(r.dashRatio, r.dashCharges, r.maxDashCharges, r.phase === 'combat');
+    this.arenaHintText.setVisible(r.phase === 'combat' && !r.boss && r.arenaHint.length > 0);
+    if (r.arenaHint) this.arenaHintText.setText(r.arenaHint);
     const frenzyOn = r.frenzyTime > 0 && r.phase === 'combat';
     this.frenzyBadge.setVisible(frenzyOn);
     if (frenzyOn) this.frenzyText.setText(`狂热 ${r.frenzyTime.toFixed(1)}s`);
@@ -345,8 +364,8 @@ export class UIScene extends Phaser.Scene {
       inkWidth: 2.4,
     });
     const shIcon = this.add.image(9, 0, 'ui-shield').setDisplaySize(17, 17);
-    const shTxt = this.add.text(20, 0, '护盾', style(13, '#bceeff')).setOrigin(0, 0.5);
-    this.shieldBadge = this.add.container(280, 31, [shBg, shIcon, shTxt]).setVisible(false);
+    this.shieldText = this.add.text(20, 0, '护盾', style(13, '#bceeff')).setOrigin(0, 0.5);
+    this.shieldBadge = this.add.container(280, 31, [shBg, shIcon, this.shieldText]).setVisible(false);
 
     const nectarIcon = this.add.image(31, 90, 'nectar').setDisplaySize(26, 26);
     this.nectarText = this.add.text(50, 90, '0', style(28, '#ffd44c', true)).setOrigin(0, 0.5);
@@ -389,10 +408,11 @@ export class UIScene extends Phaser.Scene {
     this.weatherIcon = this.add.image(0, 24, `weather-${this.run.setup.difficulty}`).setDisplaySize(22, 22);
     this.waveText = this.add.text(8, 24, '', style(20, '#f2f1ec')).setOrigin(0.5);
     this.timerText = this.add.text(0, 42, '', style(48, '#f2f1ec', true)).setOrigin(0.5, 0);
+    this.arenaHintText = this.add.text(0, 102, '', style(13, '#aeeeff')).setOrigin(0.5, 0.5).setVisible(false);
     this.bossBar = this.add.graphics();
     this.bossName = this.add.text(10, 102, '', style(18, '#ffe0c8')).setOrigin(0.5, 0.5).setVisible(false);
     this.bossCrown = this.add.image(0, 102, 'ui-crown').setDisplaySize(22, 22).setVisible(false);
-    tc.add([this.weatherIcon, this.waveText, this.timerText, this.bossBar, this.bossCrown, this.bossName]);
+    tc.add([this.weatherIcon, this.waveText, this.timerText, this.arenaHintText, this.bossBar, this.bossCrown, this.bossName]);
 
     // 右上：八角机械键帽暂停键
     const pg = this.add.graphics();
@@ -595,7 +615,7 @@ export class UIScene extends Phaser.Scene {
     this.levelText.setColor(pending > 0 ? '#ffd44c' : '#8ee868');
   }
 
-  private drawDashHud(ratio: number, visible: boolean): void {
+  private drawDashHud(ratio: number, charges: number, maxCharges: number, visible: boolean): void {
     const g = this.dashBar;
     g.clear();
     this.dashText.setVisible(visible);
@@ -604,15 +624,17 @@ export class UIScene extends Phaser.Scene {
     const y = 116;
     const w = 86;
     const h = 10;
-    const ready = ratio >= 0.999;
+    const ready = charges > 0;
     const pts = chamferPoints(x, y, w, h, 3, 2, 3, 2);
     fillPoly(g, chamferPoints(x + 2, y + 2, w, h, 3, 2, 3, 2), COLOR.ink, 0.9);
     fillPoly(g, pts, 0x121b22, 1);
-    if (ratio > 0.02) {
-      this.fillBarSlice(g, x + 1, y + 1, w - 2, h - 2, ratio, 2, 1, ready ? 0x62e8ff : 0x3b7b9e, 0.28, 0.14);
+    const displayRatio = charges >= maxCharges ? 1 : ratio;
+    if (displayRatio > 0.02) {
+      this.fillBarSlice(g, x + 1, y + 1, w - 2, h - 2, displayRatio, 2, 1, ready ? 0x62e8ff : 0x3b7b9e, 0.28, 0.14);
     }
     strokePoly(g, pts, 2.2, COLOR.ink, 1);
-    this.dashText.setText(ready ? (IS_COARSE_POINTER ? '冲刺就绪' : '冲刺 [Space]') : '充能中');
+    const chargeTag = maxCharges > 1 ? ` ×${charges}/${maxCharges}` : '';
+    this.dashText.setText(ready ? (IS_COARSE_POINTER ? `冲刺${chargeTag}` : `冲刺${chargeTag} [Space]`) : '充能中');
     this.dashText.setColor(ready ? '#a8f4ff' : '#808896');
   }
 
@@ -746,8 +768,8 @@ export class UIScene extends Phaser.Scene {
       const pa = -sa;
       const pb = ca;
       const isDanger = m.kind === 'elite' || m.kind === 'boss';
-      const fillCol = isDanger ? 0xff463e : m.kind === 'lootbug' ? 0xffd44c : 0x62e878;
-      const sz = (m.kind === 'boss' ? 14 : 11) * pulse;
+      const fillCol = isDanger ? 0xff463e : m.kind === 'lootbug' ? 0xffd44c : m.kind === 'bloom' ? 0xffe458 : 0x62e878;
+      const sz = (m.kind === 'boss' || m.kind === 'bloom' ? 14 : 11) * pulse;
       const tipX = sx + ca * sz;
       const tipY = sy + sa * sz;
       const backX = sx - ca * (sz * 0.7);
@@ -840,7 +862,7 @@ export class UIScene extends Phaser.Scene {
         const leftCx = px + 296;
         c.add(createButton(this, leftCx, top + 122, '继续战斗', () => this.resume(), { width: 268, height: 54 }));
         c.add(createButton(this, leftCx - 134, top + 196, '重新开始', () => this.restart(), { width: 238, height: 48, fontSize: 19, primary: false }));
-        c.add(createButton(this, leftCx + 134, top + 196, '返回菜单', () => this.toMenu(), { width: 238, height: 48, fontSize: 19, primary: false }));
+        c.add(createButton(this, leftCx + 134, top + 196, '放弃本局', () => this.toMenu(), { width: 238, height: 48, fontSize: 19, primary: false }));
         addSettingsButtons(this, c, leftCx, top + 272);
 
         // 左侧底部：当前局内构筑预览（武器槽 + 激活羁绊）

@@ -1,9 +1,13 @@
 import { baseSlots, CHARACTERS, type CharacterDef } from '../data/characters';
 import { DIFFICULTIES, type DifficultyDef } from '../data/difficulty';
 import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
+import { WAVES } from '../data/waves';
 import { WEAPONS } from '../data/weapons';
+import { CHALLENGES, type ChallengeId } from './challenges';
+import type { ContractId, WeaponEnchantId } from './contracts';
 import { DAILY_MUTATORS, type DailyMutatorId } from './daily';
-import { xpToNext } from './progression';
+import { xpToNext, type UpgradeOption } from './progression';
+import type { ShellSkinId } from './save';
 import { activeSets } from './sets';
 import type { Offer } from './shop';
 import { BASE_STATS, STAT_KEYS, ZERO_STATS, type Stats } from './stats';
@@ -22,12 +26,16 @@ export interface OwnedWeapon {
   waveDamage?: number;
   /** 本局累计造成的伤害统计 */
   totalDamage?: number;
+  /** 紫火诅咒版本（伤害 +25%，攻速 +10%） */
+  cursed?: boolean;
+  /** 蜗老板蜕壳台赋予的武器附魔 */
+  enchant?: WeaponEnchantId;
 }
 
 export interface OffscreenMarker {
   x: number;
   y: number;
-  kind: 'lootbug' | 'elite' | 'boss' | 'chest';
+  kind: 'lootbug' | 'elite' | 'boss' | 'chest' | 'bloom';
 }
 
 /** 局中断点续玩存档结构（波间进入商店时自动保存） */
@@ -52,6 +60,32 @@ export interface SavedRun {
   xp: number;
   pendingLevelUps: number;
   chests: number;
+  /** 当前待选的升级强化卡（持久化，防止刷新页面白嫖重抽） */
+  pendingUpgrades?: UpgradeOption[];
+  /** 当前待开启宝箱的道具 id（持久化，防止刷新页面白嫖重抽） */
+  pendingChestItem?: string;
+  /** 本波待选的里程碑后院赌约（持久化防重抽） */
+  pendingContracts?: ContractId[];
+  /** 本波里程碑赌约是否已处理 */
+  contractDone?: boolean;
+  /** 已签下、将在下一波生效的赌约 */
+  activeContract?: ContractId | null;
+  /** 商店蜕壳台本波是否已使用 */
+  forgeUsed?: boolean;
+  /** 深渊献祭赌约：本波商店诅咒货加成 */
+  curseOfferBonus?: boolean;
+  /** 本波商店已刷新次数（持久化，防止刷新页面重置刷新费/免费刷新） */
+  shopRerolls?: number;
+  /** 本波商店货架是否已初始化刷新过 */
+  shopReady?: boolean;
+  /** 幽灵蝉蜕：下一波开局生命锁为 1 */
+  nextWaveOneHp?: boolean;
+  /** 诱饵甜果：下一波开局额外空降的黄蜂批次数（每批 3 只） */
+  nextWaveBait?: number;
+  /** 孔雀尾羽：下一波生效的层数（经验 +100%、敌伤 +50%） */
+  nextWavePeacock?: number;
+  /** 复刻魔镜：待生效的复制次数 */
+  mirrorCharges?: number;
   toxinDamage: number;
   meleeKills: number;
   maxSummons: number;
@@ -59,13 +93,16 @@ export interface SavedRun {
   devicesPlaced: number;
 }
 
-/** 开局选择：角色、难度、初始武器（可选每日挑战日期与突变词条） */
+/** 开局选择：角色、难度、初始武器（可选每日挑战、主题挑战、自定义词条、禁用池与甲壳涂装） */
 export interface RunSetup {
   character: string;
   difficulty: number;
   weapon: string;
   daily?: string;
+  challenge?: ChallengeId;
   mutators?: DailyMutatorId[];
+  banished?: string[];
+  shellSkin?: ShellSkinId;
 }
 
 /** 蜘蛛 8 个槽 + 第七条腿 */
@@ -107,13 +144,58 @@ export class RunState {
   pendingLevelUps = 0;
   /** 本波捡到、还没打开的宝箱 */
   chests = 0;
+  /** 当前已抽出待选的升级强化卡 */
+  pendingUpgrades: UpgradeOption[] = [];
+  /** 当前已抽出待开启宝箱的道具 id */
+  pendingChestItem = '';
+  /** 当前待选的里程碑后院赌约 */
+  pendingContracts: ContractId[] = [];
+  /** 本波里程碑赌约是否已选择完毕 */
+  contractDone = false;
+  /** 当前生效（或将在下一波生效）的后院赌约 */
+  activeContract: ContractId | null = null;
+  /** 本波商店蜕壳赋能台是否已使用 */
+  forgeUsed = false;
+  /** 深渊献祭赌约：本波商店额外提升诅咒货率 */
+  curseOfferBonus = false;
+  /** 本波商店已刷新次数 */
+  shopRerolls = 0;
+  /** 本波商店货架是否已初始化刷新过 */
+  shopReady = false;
+  /** 幽灵蝉蜕：下一波 1 血开局 */
+  nextWaveOneHp = false;
+  /** 诱饵甜果：下一波开局额外黄蜂批次数 */
+  nextWaveBait = 0;
+  /** 孔雀尾羽：下一波经验翻倍/敌伤+50% 层数 */
+  nextWavePeacock = 0;
+  /** 复刻魔镜：待生效的商店道具复制次数 */
+  mirrorCharges = 0;
+  /** 力量三角：本波因受伤累积的伤害惩罚（下波开局清零） */
+  waveDamagePenalty = 0;
+  /** 孔雀尾羽/赌约：本波激活的敌人伤害倍率 */
+  waveEnemyDamageMult = 1;
+  /** 孔雀尾羽/赌约：本波激活的经验获取倍率 */
+  waveXpMult = 1;
+  /** 赌约：本波激活的临时全伤害加成 */
+  waveContractDamagePct = 0;
+  /** 赌约：本波是否禁用一切回血（断愈死斗） */
+  waveNoHeal = false;
+  /** 赌约：本波花蜜拾取倍率（狂潮收割） */
+  waveNectarMult = 1;
+  /** 当前波次生效的天气序号（常规等于难度，无尽每 5 波轮换） */
+  activeWeather = 0;
+  /** 战场生态提示（阵风/金露花等，供 HUD 微胶囊展示） */
+  arenaHint = '';
 
   /** Boss 战时的血量，给 HUD 显示 */
   boss: { name: string; hp: number; maxHp: number } | null = null;
-  /** 屏幕外高价值目标方向指示（宝藏虫、精英、Boss、宝箱） */
+  /** 屏幕外高价值目标方向指示（宝藏虫、精英、Boss、宝箱、金露花） */
   offscreenMarkers: OffscreenMarker[] = [];
-  /** 主动冲刺充能进度（0~1，1 表示就绪） */
+  /** 主动冲刺充能进度（0~1，1 表示当前充能格已满） */
   dashRatio = 1;
+  /** 当前可用冲刺次数 & 最大充能次数 */
+  dashCharges = 1;
+  maxDashCharges = 1;
   /** 琥珀狂热剩余秒数 */
   frenzyTime = 0;
   /** 本局造成的毒素伤害（解锁屁步甲用） */
@@ -134,12 +216,19 @@ export class RunState {
     this.setup = setup;
     this.character = CHARACTERS[setup.character];
     this.difficulty = DIFFICULTIES[setup.difficulty];
+    this.activeWeather = setup.difficulty;
     this.weapons = setup.weapon && this.weaponSlotsBase > 0 ? [{ id: setup.weapon, tier: 0 }] : [];
     this.recomputeStats();
     this.hp = this.maxHp;
   }
 
+  /** 本局目标通关波数（常规 20 波，主题挑战 10 波） */
+  get maxWaves(): number {
+    return this.setup.challenge ? CHALLENGES[this.setup.challenge].maxWaves : WAVES.length;
+  }
+
   get maxHp(): number {
+    if (this.hasMutator('glass_soul')) return 1;
     return Math.max(1, Math.round(this.stats.maxHp));
   }
 
@@ -148,14 +237,28 @@ export class RunState {
   }
 
   private get weaponSlotsBase(): number {
-    return baseSlots(this.character);
+    const base = baseSlots(this.character);
+    if (base <= 0) return 0;
+    if (this.hasMutator('one_slot')) return 1;
+    return base;
   }
 
-  /** 能装几把武器；蚁后不能装武器 */
+  /** 能装几把武器；蚁后不能装武器；孤胆单槽挑战锁为 1 */
   get weaponSlots(): number {
     const base = this.weaponSlotsBase;
     if (base <= 0) return 0;
+    if (this.hasMutator('one_slot')) return 1;
     return Math.min(MAX_WEAPON_SLOTS, base + this.mods.weaponSlots);
+  }
+
+  /** 交换两个武器槽的位置（用于调整六足位阶与相邻共鸣） */
+  swapWeapons(i: number, j: number): boolean {
+    if (i === j || i < 0 || j < 0 || i >= this.weapons.length || j >= this.weapons.length) return false;
+    const tmp = this.weapons[i];
+    this.weapons[i] = this.weapons[j];
+    this.weapons[j] = tmp;
+    this.recomputeStats();
+    return true;
   }
 
   /** 蚁后：工蚁的品质，每 5 波提升一档 */
@@ -231,9 +334,21 @@ export class RunState {
       s.damagePct += empty * 0.3 * m.loneWolf;
       s.attackSpeedPct += empty * 0.12 * m.loneWolf;
     }
+    // 血色巨钳（Bloody Hand）：每 1% 吸取额外 +2% 伤害
+    if (m.bloodyHand > 0 && s.lifesteal > 0) {
+      s.damagePct += s.lifesteal * 2 * m.bloodyHand;
+    }
+    // 力量三角（Triangle of Power）：本波受击累积减伤惩罚
+    if (this.waveDamagePenalty > 0) {
+      s.damagePct -= this.waveDamagePenalty;
+    }
+    if (this.waveContractDamagePct !== 0) {
+      s.damagePct += this.waveContractDamagePct;
+    }
     s.maxHp *= Math.max(0.1, 1 + m.maxHpPct);
     this.stats = s;
     this.mods = m;
+    this.maxDashCharges = 1 + Math.max(0, Math.floor(m.dashCharges));
   }
 
   /** 加经验，返回升了几级 */
@@ -247,6 +362,18 @@ export class RunState {
       up++;
     }
     return up;
+  }
+
+  /** 进入新一波战斗前清空本波波间抽卡缓存（保留锁定的商店货架供下一波刷新沿用） */
+  resetIntermissionState(): void {
+    this.pendingUpgrades = [];
+    this.pendingChestItem = '';
+    this.pendingContracts = [];
+    this.contractDone = false;
+    this.forgeUsed = false;
+    this.curseOfferBonus = false;
+    this.shopRerolls = 0;
+    this.shopReady = false;
   }
 
   /** 序列化当前局内进度（用于波间断点续玩） */
@@ -272,6 +399,19 @@ export class RunState {
       xp: this.xp,
       pendingLevelUps: this.pendingLevelUps,
       chests: this.chests,
+      pendingUpgrades: this.pendingUpgrades.map((u) => ({ ...u })),
+      pendingChestItem: this.pendingChestItem,
+      pendingContracts: [...this.pendingContracts],
+      contractDone: this.contractDone,
+      activeContract: this.activeContract,
+      forgeUsed: this.forgeUsed,
+      curseOfferBonus: this.curseOfferBonus,
+      shopRerolls: this.shopRerolls,
+      shopReady: this.shopReady,
+      nextWaveOneHp: this.nextWaveOneHp,
+      nextWaveBait: this.nextWaveBait,
+      nextWavePeacock: this.nextWavePeacock,
+      mirrorCharges: this.mirrorCharges,
       toxinDamage: this.toxinDamage,
       meleeKills: this.meleeKills,
       maxSummons: this.maxSummons,
@@ -301,6 +441,32 @@ export class RunState {
     run.xp = Math.max(0, Number(data.xp) || 0);
     run.pendingLevelUps = Math.max(0, Number(data.pendingLevelUps) || 0);
     run.chests = Math.max(0, Number(data.chests) || 0);
+    run.pendingUpgrades = Array.isArray(data.pendingUpgrades)
+      ? data.pendingUpgrades
+          .filter((u) => u && STAT_KEYS.includes(u.stat) && Number.isFinite(u.value) && Number.isFinite(u.tier))
+          .map((u) => ({ stat: u.stat, value: u.value, tier: u.tier }))
+      : [];
+    run.pendingChestItem = typeof data.pendingChestItem === 'string' && ITEMS[data.pendingChestItem] ? data.pendingChestItem : '';
+    run.pendingContracts = Array.isArray(data.pendingContracts) ? [...data.pendingContracts] : [];
+    run.contractDone = !!data.contractDone;
+    run.activeContract = data.activeContract ?? null;
+    run.forgeUsed = !!data.forgeUsed;
+    run.curseOfferBonus = !!data.curseOfferBonus;
+    run.shopRerolls = Math.max(0, Math.floor(Number(data.shopRerolls) || 0));
+    run.shopReady =
+      typeof data.shopReady === 'boolean'
+        ? data.shopReady
+        : run.pendingLevelUps === 0 && run.chests === 0 && run.offers.length === run.shopOfferCount;
+    run.nextWaveOneHp = !!data.nextWaveOneHp;
+    run.nextWaveBait = Math.max(0, Math.floor(Number(data.nextWaveBait) || 0));
+    run.nextWavePeacock = Math.max(0, Math.floor(Number(data.nextWavePeacock) || 0));
+    run.mirrorCharges = Math.max(0, Math.floor(Number(data.mirrorCharges) || 0));
+    run.waveDamagePenalty = 0;
+    run.waveEnemyDamageMult = 1;
+    run.waveXpMult = 1;
+    run.waveContractDamagePct = 0;
+    run.waveNoHeal = false;
+    run.waveNectarMult = 1;
     run.toxinDamage = Number(data.toxinDamage) || 0;
     run.meleeKills = Number(data.meleeKills) || 0;
     run.maxSummons = Number(data.maxSummons) || 0;

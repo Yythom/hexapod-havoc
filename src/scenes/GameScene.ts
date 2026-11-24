@@ -6,15 +6,28 @@ import { bus, EVT, listen } from '../core/bus';
 import { MAX_SCREEN_RANGE } from '../core/combat';
 import { touchMove } from '../core/input';
 import { RunState, type RunSetup, type SavedRun } from '../core/RunState';
-import { clearActiveRun, loadSave, recordDailyResult, recordEndlessWave, recordEnemyKillsBatch, recordRun, recordWeaponSeen, saveActiveRun } from '../core/save';
+import {
+  clearActiveRun,
+  loadSave,
+  recordChallengeCleared,
+  recordDailyResult,
+  recordEndlessWave,
+  recordEnemyKillsBatch,
+  recordRun,
+  recordWeaponSeen,
+  saveActiveRun,
+} from '../core/save';
 import { activeSets } from '../core/sets';
 import { getSettings } from '../core/settings';
+import { weaponPool } from '../core/shop';
 import { checkUnlocks } from '../core/unlocks';
 import { damageTakenMultiplier, dodgeChance, moveSpeed, pickupRange, regenPerSecond } from '../core/stats';
+import { ENEMIES } from '../data/enemies';
 import { waveDefFor, WAVES } from '../data/waves';
 import { WEAPONS, type WeaponClass } from '../data/weapons';
 import { Player } from '../entities/Player';
 import { shake } from '../ui/camera';
+import { BackyardArena } from '../systems/BackyardArena';
 import { Effects } from '../systems/Effects';
 import { EnemyManager, MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyHost } from '../systems/EnemyManager';
 import { EnemyShots } from '../systems/EnemyShots';
@@ -46,6 +59,12 @@ export interface ResultData {
   daily?: string;
   /** 是否刷新当日每日挑战最佳 */
   newDailyBest?: boolean;
+  /** 主题挑战 id（存在则表示主题挑战局） */
+  challenge?: string;
+  /** 是否首次通关该挑战 */
+  newChallengeCleared?: boolean;
+  /** 本局目标波次 */
+  maxWaves?: number;
   /** 这局解锁的新角色 */
   unlocked: string[];
   /** 最终构筑武器（含累计输出，用于结算页展示与 MVP 标记） */
@@ -82,9 +101,21 @@ const SPLAT_COLOR: Record<string, number> = {
   spider: 0x421c46,
   wasp: 0x7c5412,
   hornet_elite: 0x8a4814,
+  gargoyle_elite: 0x4e3c68,
   slime: 0x7a329a,
   minislime: 0x7a329a,
   gasbag: 0x8e2824,
+  pursuer: 0x5c2478,
+  healer: 0x268a4c,
+  buffer: 0xa82028,
+  slasher_egg: 0x8a1e36,
+  slasher: 0xa21e38,
+  puffer: 0x9c2858,
+  lamprey: 0x6c246e,
+  spawner: 0x567028,
+  spitter: 0x9e38a8,
+  curse_slug: 0x7828be,
+  mummy: 0x8a7450,
   mantis: 0x467824,
   goliath_boss: 0x6a4424,
 };
@@ -94,9 +125,11 @@ const GROUND_WEATHER_TINT = [0xffffff, 0xe8eff5, 0xd8e5ec, 0xbfcbd8, 0xa8b4cc];
 
 export class GameScene extends Phaser.Scene {
   private run!: RunState;
+  private groundImg!: Phaser.GameObjects.Image;
   private player!: Player;
   private fx!: Effects;
   private tel!: Telegraphs;
+  private arena!: BackyardArena;
   private enemies!: EnemyManager;
   private shots!: EnemyShots;
   private projectiles!: ProjectileManager;
@@ -127,6 +160,12 @@ export class GameScene extends Phaser.Scene {
   private overhealCd = 0;
   private nectarShotCount = 0;
   private corpseDepth = 0;
+  /** 独角仙/蚊子冲刺沿途已命中的怪（避免单次冲刺每帧重复判定） */
+  private dashHitSet = new Set<Enemy>();
+  /** 炽翼靴冲刺火迹冷却 */
+  private dashFlameAcc = 0;
+  /** 纯血玻璃挑战：每 12 秒再生 1 层护盾计时 */
+  private glassShieldTimer = 12;
   private moving = false;
   /** 极短微顿帧（重击/爆炸/精英Boss击杀） */
   private hitstop = 0;
@@ -178,6 +217,9 @@ export class GameScene extends Phaser.Scene {
     this.overhealCd = 0;
     this.nectarShotCount = 0;
     this.corpseDepth = 0;
+    this.dashHitSet.clear();
+    this.dashFlameAcc = 0;
+    this.glassShieldTimer = 12;
     this.moving = false;
     this.hitstop = 0;
     this.recentKills = [];
@@ -194,10 +236,11 @@ export class GameScene extends Phaser.Scene {
     }
     this.registry.set('run', this.run);
 
-    const groundTint = GROUND_WEATHER_TINT[this.run.setup.difficulty] ?? 0xffffff;
-    this.add.image(0, 0, 'ground').setOrigin(0).setDepth(DEPTH.ground).setTint(groundTint);
+    const groundTint = GROUND_WEATHER_TINT[this.run.activeWeather] ?? 0xffffff;
+    this.groundImg = this.add.image(0, 0, 'ground').setOrigin(0).setDepth(DEPTH.ground).setTint(groundTint);
     this.fx = new Effects(this);
     this.tel = new Telegraphs(this);
+    this.arena = new BackyardArena(this, this.fx, this.tel);
     this.enemies = new EnemyManager(this, this.fx, this.tel);
     this.resolver = new HitResolver(this.enemies, this.fx);
     this.shots = new EnemyShots(this);
@@ -206,15 +249,37 @@ export class GameScene extends Phaser.Scene {
     this.projectiles = new ProjectileManager(this, this.fx, this.hazards, this.resolver);
     this.pickups = new PickupManager(this);
     this.spawner = new SpawnSystem(this, this.enemies, this.fx);
-    this.player = new Player(this, WORLD_WIDTH / 2, WORLD_HEIGHT / 2, this.run.character.shell);
+    const skin = this.run.setup.shellSkin ?? loadSave().shellSkin;
+    this.player = new Player(this, WORLD_WIDTH / 2, WORLD_HEIGHT / 2, this.run.character.shell, skin);
     this.weapons = new WeaponSystem(this.player, this.projectiles, this.enemies, this.hazards, this.summons, this.resolver, this.fx);
     this.reticle = this.add.graphics().setDepth(DEPTH.text - 2);
     this.boundaryG = this.add.graphics().setDepth(DEPTH.ground + 2);
 
     this.spawner.onEvent = (title, color) => bus.emit(EVT.WAVE_EVENT, title, color);
+    this.spawner.onBloom = () => this.arena.spawnBloom(this.player.x, this.player.y);
     this.projectiles.onExplode = (r) => this.triggerHitstop(r >= 80 ? 0.032 : 0.022);
+    this.weapons.onLightningHit = (x, y, dmg) => this.arena.conductLightning(x, y, dmg, this.enemies);
 
     const scene = this;
+    this.arena.host = {
+      get px() {
+        return scene.player.x;
+      },
+      get py() {
+        return scene.player.y;
+      },
+      get pr() {
+        return scene.player.radius;
+      },
+      get wave() {
+        return scene.run.wave;
+      },
+      hurtPlayer: (d) => this.damagePlayer(d),
+      onBloomComplete: (bx, by) => this.onBloomComplete(bx, by),
+      onArenaHint: (text) => {
+        scene.run.arenaHint = text;
+      },
+    };
     const host: EnemyHost = {
       get px() {
         return scene.player.x;
@@ -240,6 +305,10 @@ export class GameScene extends Phaser.Scene {
       get enemySpeedMult() {
         return scene.run.hasMutator('turbo') ? 1.15 : 1;
       },
+      get boomParty() {
+        return scene.run.hasMutator('boom_party');
+      },
+      onLightningStrike: (x, y, dmg) => this.arena.conductLightning(x, y, dmg, this.enemies),
       hurtPlayer: (d) => this.damagePlayer(d),
       shoot: (x, y, a, sp, d, kind) => this.shots.fire(x, y, a, sp, d, kind),
     };
@@ -318,7 +387,7 @@ export class GameScene extends Phaser.Scene {
       this.weapons.sync(this.run.weapons, this.run.weaponSlots);
       this.run.phase = 'intermission';
       bgm.setMode('shop');
-      this.scene.launch('Intermission', { resumed: true });
+      this.scene.launch('Intermission');
     } else {
       this.startWave(1);
     }
@@ -357,18 +426,32 @@ export class GameScene extends Phaser.Scene {
     this.idleTime = Math.hypot(ix, iy) > 0.05 ? 0 : this.idleTime + dt;
     this.ramCd = Math.max(0, this.ramCd - dt);
     this.overhealCd = Math.max(0, this.overhealCd - dt);
-    this.player.update(dt, ix, iy, moveSpeed(stats), run.shield > 0);
-    run.dashRatio = this.player.dashCd > 0 ? Math.max(0, 1 - this.player.dashCd / Math.max(0.1, this.player.dashCdMax)) : 1;
+    this.player.syncDashConfig(run.maxDashCharges, stats.speedPct, run.mods.dashCooldownPct);
+    const [windX, windY] = run.phase === 'combat' ? this.arena.windVector : [0, 0];
+    const dashEnded = this.player.update(dt, ix, iy, moveSpeed(stats), run.shield > 0, windX, windY);
+    run.dashCharges = this.player.dashCharges;
+    run.dashRatio =
+      this.player.dashCharges >= this.player.maxDashCharges
+        ? 1
+        : this.player.dashCd > 0
+          ? Math.max(0, 1 - this.player.dashCd / Math.max(0.1, this.player.dashCdMax))
+          : 1;
     run.frenzyTime = this.player.frenzyTime;
-    if (this.player.dashTime > 0 && Math.random() < dt * 45) {
-      this.fx.streaks(this.player.x, this.player.y, this.player.view.rotation + Math.PI, 0xb8f4ff, 1, 130, 0.72);
+    if (this.player.dashTime > 0) {
+      if (Math.random() < dt * 45) {
+        this.fx.streaks(this.player.x, this.player.y, this.player.view.rotation + Math.PI, 0xb8f4ff, 1, 130, 0.72);
+      }
+      if (run.phase === 'combat') this.updateDashActive(dt);
     } else if (this.player.frenzyTime > 0 && Math.random() < dt * 18) {
       this.fx.burst(this.player.x, this.player.y, 0xffd44c, 1, 65, 0.6);
     }
+    if (dashEnded && run.phase === 'combat') this.onDashEnd();
     this.drawBoundaryWarning();
     this.enemies.update(dt);
+    this.projectiles.aftershockEnabled = run.mods.explosiveAftershock > 0;
     this.projectiles.update(dt, this.enemies, this.player.x, this.player.y);
     this.hazards.update(dt, this.enemies);
+    if (run.phase === 'combat') this.arena.update(dt, this.enemies);
     this.tel.update(dt);
 
     if (run.phase === 'combat') {
@@ -400,8 +483,9 @@ export class GameScene extends Phaser.Scene {
         workerTier: run.workerTier,
         workerHp: Math.round((12 + 4 * (run.wave - 1)) * (1 + Math.max(0, stats.armor) * 0.04)),
         aimPoint,
+        mantisCrit: this.player.mantisCritTime > 0,
       });
-      const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0);
+      const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0) + run.mods.selfDamagePerSec;
       if (selfDps > 0 && run.phase === 'combat') {
         this.selfDamageAcc += selfDps * dt;
         const n = Math.floor(this.selfDamageAcc);
@@ -416,7 +500,13 @@ export class GameScene extends Phaser.Scene {
       this.shots.update(dt, this.player.x, this.player.y, this.player.radius, (d, kind) => {
         if (this.damagePlayer(d) && kind === 'silk') this.player.slowTime = SILK_SLOW_TIME;
       });
-      run.hp = Math.min(run.maxHp, run.hp + regenPerSecond(stats) * (1 + run.mods.healingPct) * dt);
+      if (!run.waveNoHeal) {
+        if (run.mods.torture > 0) {
+          run.hp = Math.min(run.maxHp, run.hp + 5 * dt);
+        } else {
+          run.hp = Math.min(run.maxHp, run.hp + regenPerSecond(stats) * (1 + run.mods.healingPct) * dt);
+        }
+      }
       this.checkContact();
       this.updateItemTimers(dt);
       this.trackBoss();
@@ -436,8 +526,9 @@ export class GameScene extends Phaser.Scene {
       run.mods.magnetSpeed > 0,
     );
     if (this.pickups.gotNectar > 0) {
-      // 蜣螂：亲自捡到的花蜜按倍率算，小数部分按概率进位（波次结束自动收走的不算）
-      const mult = touch && run.phase === 'combat' ? touch.mult : 1;
+      // 蜣螂：亲自捡到的花蜜按倍率算，小数部分按概率进位（波次结束自动收走的不算）；狂潮收割赌约叠乘
+      const touchMult = touch && run.phase === 'combat' ? touch.mult : 1;
+      const mult = touchMult * (run.phase === 'combat' ? run.waveNectarMult : 1);
       const raw = this.pickups.gotNectar * mult;
       this.addNectar(Math.floor(raw) + (Math.random() < raw - Math.floor(raw) ? 1 : 0));
       sfx.play('nectar');
@@ -460,7 +551,8 @@ export class GameScene extends Phaser.Scene {
     this.fx.update(dt);
 
     if (run.phase === 'combat') {
-      const duration = waveDefFor(run.wave).duration;
+      const def = this.currentWaveDef(run.wave);
+      const duration = def.duration;
       run.waveTimeLeft = duration === null ? Infinity : Math.max(0, duration - this.elapsed);
       if (run.hp <= 0) this.die();
       else if (run.waveTimeLeft <= 0 || this.bossDown) this.endWave();
@@ -522,10 +614,52 @@ export class GameScene extends Phaser.Scene {
     return idle && this.idleTime > idle.delay ? idle.mult : 1;
   }
 
+  /** 获取本波配置：主题挑战的最后一波（第 10 波）自动升级为 Boss 决战波 */
+  private currentWaveDef(n: number) {
+    if (this.run.setup.challenge && n === this.run.maxWaves && !this.run.endless) {
+      return { ...WAVES[WAVES.length - 1], duration: null, boss: 'boss_pool' as const };
+    }
+    return waveDefFor(n);
+  }
+
   private startWave(n: number): void {
     const run = this.run;
     run.wave = n;
+    if (n > run.maxWaves) run.endless = true;
+    run.resetIntermissionState();
+    // 开战瞬间清除波间断点存档：禁止通过刷新网页或中途退回菜单重打本波
+    clearActiveRun();
     run.phase = 'combat';
+    run.waveDamagePenalty = 0;
+    run.waveContractDamagePct = 0;
+    run.waveNoHeal = false;
+    run.waveNectarMult = 1;
+    const contract = run.activeContract;
+    const peacockStacks = run.nextWavePeacock;
+    run.nextWavePeacock = 0;
+    run.waveXpMult = (1 + peacockStacks) * (contract === 'swarm_harvest' ? 1.55 : 1);
+    run.waveEnemyDamageMult = (1 + peacockStacks * 0.5) * (contract === 'glass_frenzy' ? 1.35 : 1);
+    if (contract === 'no_heal_vow') run.waveNoHeal = true;
+    if (contract === 'swarm_harvest') run.waveNectarMult = 1.55;
+    if (contract === 'glass_frenzy') run.waveContractDamagePct = 0.4;
+
+    // 百变武器词条：第 2 波起每波开局所有武器随机重铸为同品阶新武器（继承诅咒与附魔）
+    let chaosReforged = false;
+    if (run.hasMutator('chaos') && n > 1 && run.weapons.length > 0) {
+      for (const ow of run.weapons) {
+        const pool = weaponPool(run, ow.tier);
+        if (pool.length > 0) {
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          ow.id = pick.id;
+        }
+      }
+      chaosReforged = true;
+    }
+
+    // 无尽模式每 5 波自动轮换后院天气
+    run.activeWeather = run.endless ? (run.setup.difficulty + Math.floor((n - 21) / 5) + 1) % 5 : run.setup.difficulty;
+    this.groundImg.setTint(GROUND_WEATHER_TINT[run.activeWeather] ?? 0xffffff);
+
     // 古树年轮：每波开始最大生命永久 +2
     if (run.itemCount('treering') > 0) run.bonus.maxHp += 2;
     // 蝉：熬过前几波后，每波开始永久成长
@@ -535,16 +669,35 @@ export class GameScene extends Phaser.Scene {
       run.bonus.damagePct += bloom.damagePct;
     }
     run.recomputeStats();
-    run.hp = run.maxHp;
-    run.shield = (run.itemCount('horncharm') > 0 ? 1 : 0) + (run.hasMutator('vamp') ? 1 : 0);
+    const oneHpStart = run.nextWaveOneHp;
+    run.nextWaveOneHp = false;
+    run.hp = oneHpStart ? 1 : run.maxHp;
+    // 存蜜猪猪罐（Piggy Bank）：第 20 波前，每波开始按未花花蜜 +20% 派息
+    let piggyBonus = 0;
+    if (n > 1 && n <= WAVES.length && run.itemCount('piggybank') > 0 && run.nectar > 0) {
+      piggyBonus = Math.floor(run.nectar * 0.2);
+      if (piggyBonus > 0) {
+        run.nectar += piggyBonus;
+        run.totalNectar += piggyBonus;
+      }
+    }
+    const baitWaves = run.nextWaveBait;
+    run.nextWaveBait = 0;
+    this.selfDamageAcc = 0;
+    this.glassShieldTimer = 12;
+    run.shield =
+      (run.itemCount('horncharm') > 0 ? 1 : 0) +
+      (run.hasMutator('vamp') ? 1 : 0) +
+      (run.hasMutator('glass_soul') ? 2 : 0);
     run.waveNectar = 0;
     run.waveKills = 0;
     run.waveHarvest = 0;
     run.waveInterest = 0;
     run.boss = null;
+    run.arenaHint = '';
     this.recentKills.length = 0;
     this.streakCd = 0;
-    const def = waveDefFor(n);
+    const def = this.currentWaveDef(n);
     run.waveTimeLeft = def.duration ?? Infinity;
     this.elapsed = 0;
     this.fairyTimer = 0;
@@ -557,8 +710,11 @@ export class GameScene extends Phaser.Scene {
     this.player.slowTime = 0;
     this.player.hasteTime = 0;
     this.player.frenzyTime = 0;
+    this.player.mantisCritTime = 0;
     this.player.dashTime = 0;
     this.player.dashCd = 0;
+    this.player.syncDashConfig(run.maxDashCharges, run.stats.speedPct, run.mods.dashCooldownPct);
+    this.player.dashCharges = this.player.maxDashCharges;
     this.waveKillsById = {};
     for (const w of run.weapons) {
       w.ramp = 0;
@@ -566,10 +722,37 @@ export class GameScene extends Phaser.Scene {
       recordWeaponSeen(w.id, w.tier);
     }
     this.weapons.sync(run.weapons, run.weaponSlots);
-    this.spawner.startWave(def, n, run.difficulty, run.mods.spawnRatePct, run.hasMutator('treasure'));
+    this.arena.startWave(run.activeWeather);
+    const spawnBonus = run.mods.spawnRatePct + (contract === 'swarm_harvest' ? 0.4 : 0);
+    this.spawner.startWave(def, n, run.difficulty, spawnBonus, run.hasMutator('treasure'), {
+      boomParty: run.hasMutator('boom_party'),
+      extraElite: contract === 'elite_bounty',
+    });
+    // 诱饵甜果（Bait）：开局立刻空降专属突袭怪——噬蜜飞鳗（冲锋并向两侧甩弹幕）
+    if (baitWaves > 0) {
+      const count = baitWaves * 3;
+      for (let i = 0; i < count; i++) {
+        const ang = (i / count) * Math.PI * 2 + Math.random() * 0.35;
+        const dist = Phaser.Math.Between(270, 360);
+        const bx = Phaser.Math.Clamp(this.player.x + Math.cos(ang) * dist, WORLD_MARGIN + 24, WORLD_WIDTH - WORLD_MARGIN - 24);
+        const by = Phaser.Math.Clamp(this.player.y + Math.sin(ang) * dist, WORLD_MARGIN + 24, WORLD_HEIGHT - WORLD_MARGIN - 24);
+        this.enemies.spawn(ENEMIES.lamprey, bx, by, n);
+      }
+    }
     const intense = !!def.boss || (def.elites && def.elites.length > 0) || run.endless;
     bgm.setMode(intense ? 'boss' : 'combat');
     bus.emit(EVT.WAVE_START, n);
+    if (chaosReforged) bus.emit(EVT.WAVE_EVENT, '🎲 百变虫军：武器已随机重铸！', '#7ce8ff');
+    if (contract === 'elite_bounty') bus.emit(EVT.WAVE_EVENT, '⚔ 猎王悬赏生效：额外精英空降！', '#ffd44c');
+    else if (contract === 'no_heal_vow') bus.emit(EVT.WAVE_EVENT, '🩸 断愈死斗生效：本波禁止一切回血！', '#ff7a84');
+    else if (contract === 'swarm_harvest') bus.emit(EVT.WAVE_EVENT, '✿ 狂潮收割生效：虫群暴增 · 收益 +55%！', '#78ec74');
+    else if (contract === 'glass_frenzy') bus.emit(EVT.WAVE_EVENT, '⚡ 薄壳狂袭生效：伤 +40% · 受击 +35%！', '#7ce8ff');
+    if (piggyBonus > 0) bus.emit(EVT.WAVE_EVENT, `存蜜猪猪罐派息 +${piggyBonus} 花蜜！`, '#ffd44c');
+    if (oneHpStart) bus.emit(EVT.WAVE_EVENT, '幽灵蝉蜕：本波 1 血开局！', '#78e6ff');
+    if (baitWaves > 0) bus.emit(EVT.WAVE_EVENT, `诱饵甜果：${baitWaves * 3} 只噬蜜飞鳗突袭！`, '#ff6a5a');
+    if (peacockStacks > 0) {
+      bus.emit(EVT.WAVE_EVENT, `孔雀尾羽：经验 +${peacockStacks * 100}% · 敌伤 +${peacockStacks * 50}%`, '#ffb258');
+    }
     sfx.play('waveStart');
   }
 
@@ -638,8 +821,13 @@ export class GameScene extends Phaser.Scene {
       sfx.play('shield');
       return false;
     }
-    const dmg = Math.max(1, Math.round(raw * damageTakenMultiplier(run.stats.armor)));
+    const dmg = Math.max(1, Math.round(raw * run.waveEnemyDamageMult * damageTakenMultiplier(run.stats.armor)));
     run.hp -= dmg;
+    // 力量三角（Triangle of Power）：每次受伤本波伤害 −2%
+    if (run.mods.trianglePenalty > 0) {
+      run.waveDamagePenalty += 0.02 * run.mods.trianglePenalty;
+      run.recomputeStats();
+    }
     this.fx.number(p.x, p.y - 28, dmg, 'player');
     shake(this, 90, 0.004);
     sfx.play('hurt');
@@ -672,6 +860,7 @@ export class GameScene extends Phaser.Scene {
   /** 回血：吃治疗效果加成；蚊子只能靠吸取回血；吸取受全局速率桶限制防高频永动；传入来源坐标时发射吸取光丝 */
   private heal(n: number, kind: 'lifesteal' | 'other' = 'other', fromX?: number, fromY?: number): void {
     const run = this.run;
+    if (run.mods.torture > 0 || run.waveNoHeal) return;
     if (kind === 'other' && run.character.perks.lifestealOnly) return;
     let effectiveN = n;
     if (kind === 'lifesteal') {
@@ -786,6 +975,24 @@ export class GameScene extends Phaser.Scene {
       if (Math.random() < 0.45) this.pickups.dropFrenzy(e.x, e.y);
       return;
     }
+    if (def.id === 'deworb') {
+      // 露珠冰球被打爆：范围冰冻水浪（全冻住）+ 临时 7 秒潮湿水洼 + 掉落少量花蜜
+      const r = 140;
+      this.fx.ring(e.x, e.y, r, 0x7ce8ff);
+      this.fx.iceShatter(e.x, e.y, 44, 12);
+      this.arena.addTempPuddle(e.x, e.y, 112, 7);
+      sfx.play('freeze');
+      for (const o of this.enemies.grid.query(e.x, e.y, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+        if (!o.active || o === e || o.def.behavior === 'tree') continue;
+        const dx = o.x - e.x;
+        const dy = o.y - e.y;
+        if (dx * dx + dy * dy > (r + o.radius) ** 2) continue;
+        this.enemies.applyFreeze(o, 3);
+        o.wetTime = Math.max(o.wetTime, 3.5);
+      }
+      this.pickups.dropNectar(e.x, e.y, 3);
+      return;
+    }
     this.waveKillsById[def.id] = (this.waveKillsById[def.id] ?? 0) + 1;
     if (def.id === 'lootbug') {
       run.kills++;
@@ -819,7 +1026,40 @@ export class GameScene extends Phaser.Scene {
     }
     this.fx.splat(e.x, e.y, SPLAT_COLOR[def.id] ?? 0x4a2028, e.radius);
     const [min, max] = def.nectar;
-    this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
+    const baseNectar = Phaser.Math.Between(min, max);
+    this.pickups.dropNectar(e.x, e.y, baseNectar);
+    // 紫火诅咒变异怪：额外双倍花蜜 + 海军 6 件套附加掉蜜 + 6% 概率直爆宝箱
+    if (e.cursed) {
+      this.pickups.dropNectar(e.x, e.y, Math.max(2, baseNectar) + run.mods.curseBonusNectar);
+      this.fx.ring(e.x, e.y, 34, 0xc058ff);
+      this.fx.burst(e.x, e.y, 0xe08cff, 5, 120, 0.75);
+      if (Math.random() < 0.06) this.pickups.dropChest(e.x, e.y);
+    }
+    // 厄运紫蛞蝓（Sea Pig）：击杀永久为玩家 +1 诅咒，撬动高风险紫光怪刷钱生态
+    if (def.id === 'curse_slug') {
+      run.bonus.curse += 1;
+      run.recomputeStats();
+      this.fx.ring(e.x, e.y, 52, 0xc854ff);
+      this.fx.number(e.x, e.y - 24, '诅咒 +1！', 'crit');
+      if (Math.random() < 0.25) this.pickups.dropChest(e.x, e.y);
+    }
+    // 气囊虫提前打爆（膨胀期或爆裂派对词条）：连锁炸伤周围敌人！
+    if (def.id === 'gasbag' && (e.state === 1 || run.hasMutator('boom_party')) && this.corpseDepth < 2) {
+      this.corpseDepth++;
+      const r = run.hasMutator('boom_party') ? 128 : 96;
+      const bdmg = Math.max(12, Math.round(e.maxHp * (run.hasMutator('boom_party') ? 2.6 : 1.1)));
+      this.fx.explosion(e.x, e.y, r, 0xff7858, 1);
+      sfx.play('explode');
+      for (const o of this.enemies.grid.query(e.x, e.y, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+        if (!o.active || o === e || o.def.behavior === 'tree') continue;
+        const dx = o.x - e.x;
+        const dy = o.y - e.y;
+        if (dx * dx + dy * dy > (r + o.radius) ** 2) continue;
+        const d = Math.hypot(dx, dy) || 1;
+        this.enemies.hit(o, o.def.boss ? Math.round(bdmg * 0.35) : bdmg, false, dx / d, dy / d, 190);
+      }
+      this.corpseDepth--;
+    }
     if (run.stats.curse > 0) {
       const cRaw = run.stats.curse * 0.16;
       const cExtra = Math.floor(cRaw) + (Math.random() < cRaw - Math.floor(cRaw) ? 1 : 0);
@@ -835,6 +1075,11 @@ export class GameScene extends Phaser.Scene {
     }
     // 战利品袋：击杀时概率多掉 1 颗花蜜
     if (run.mods.killNectar > 0 && Math.random() < run.mods.killNectar) this.pickups.dropNectar(e.x, e.y, 1);
+    // 猎手战利品（Hunting Trophy）：暴击击杀时 33% 概率直接获得 1 花蜜（叠加最高 100%）
+    if (e.lastHitCrit && run.mods.critKillNectar > 0 && Math.random() < Math.min(1, run.mods.critKillNectar)) {
+      this.addNectar(1);
+      this.fx.burst(e.x, e.y, 0xffd44c, 4, 110, 0.75);
+    }
     // 蜂巢碎片：击杀时概率回血
     const comb = run.itemCount('honeycomb');
     if (comb > 0 && Math.random() < 0.08 * comb) this.heal(2);
@@ -893,8 +1138,21 @@ export class GameScene extends Phaser.Scene {
   /** 蘑菇圈：每 10 秒在脚下长一朵蘑菇；蜂巢药剂：低血时持续回血 */
   private updateItemTimers(dt: number): void {
     const run = this.run;
+    // 纯血玻璃挑战：每 12 秒自动再生 1 层护盾（上限 3 层）
+    if (run.hasMutator('glass_soul')) {
+      this.glassShieldTimer -= dt;
+      if (this.glassShieldTimer <= 0) {
+        this.glassShieldTimer = 12;
+        if (run.shield < 3) {
+          run.shield++;
+          this.fx.ring(this.player.x, this.player.y, 38, 0x9fd8ff);
+          this.fx.number(this.player.x, this.player.y - 32, '+1 护盾', 'shield');
+          sfx.play('shield');
+        }
+      }
+    }
     const potion = run.itemCount('honeypotion');
-    if (potion > 0 && this.potionTime < POTION_TIME && run.hp < run.maxHp * POTION_THRESHOLD && !run.character.perks.lifestealOnly) {
+    if (potion > 0 && run.mods.torture === 0 && !run.waveNoHeal && this.potionTime < POTION_TIME && run.hp < run.maxHp * POTION_THRESHOLD && !run.character.perks.lifestealOnly) {
       this.potionTime += dt;
       run.hp = Math.min(run.maxHp, run.hp + POTION_RATE * potion * (1 + run.mods.healingPct) * dt);
       if (Math.random() < dt * 4) this.fx.burst(this.player.x, this.player.y, 0xffd060, 2, 60, 0.6);
@@ -909,14 +1167,226 @@ export class GameScene extends Phaser.Scene {
   }
 
   private performDash(): void {
-    if (this.run.phase !== 'combat' || this.scene.isPaused('Game')) return;
+    const run = this.run;
+    if (run.phase !== 'combat' || this.scene.isPaused('Game')) return;
     const [ix, iy] = this.readInput();
-    if (!this.player.tryDash(ix, iy, this.run.stats.speedPct)) return;
-    const ang = Math.atan2(iy, ix);
-    const back = Math.hypot(ix, iy) > 0.05 ? ang + Math.PI : this.player.view.rotation + Math.PI;
-    this.fx.ring(this.player.x, this.player.y, 26, 0xb8f4ff);
-    this.fx.streaks(this.player.x, this.player.y, back, 0xe8fbff, 7, 210, 0.88);
+    if (!this.player.tryDash(ix, iy, run.stats.speedPct, run.mods.dashCooldownPct, run.maxDashCharges)) return;
+    this.dashHitSet.clear();
+    this.dashFlameAcc = 0;
+    const p = this.player;
+    const ang = Math.atan2(p.dashDirY, p.dashDirX);
+    const back = ang + Math.PI;
+    this.fx.ring(p.x, p.y, 26, 0xb8f4ff);
+    this.fx.streaks(p.x, p.y, back, 0xe8fbff, 7, 210, 0.88);
     sfx.play('dash');
+
+    // 起手极限擦弹判定
+    this.checkDashGraze();
+
+    // 炽翼靴：起点留火迹
+    if (run.mods.dashFlame > 0) {
+      this.arena.addFlamePatch(p.x, p.y, Math.max(6, (8 + run.stats.elemental * 1.5) * (1 + run.stats.damagePct)));
+    }
+
+    // 13 角色专属冲刺起手特效
+    const cid = run.character.id;
+    const stats = run.stats;
+    if (cid === 'bombardier') {
+      this.hazards.addCloud(p.x, p.y, 72, 2.8, 3 + stats.toxin, poisonPerStack(stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
+    } else if (cid === 'ladybug') {
+      this.pickups.pullNectarInRadius(p.x, p.y, 290);
+      this.fx.ring(p.x, p.y, 120, 0xffd44c);
+    } else if (cid === 'spider') {
+      this.hazards.addWeb(p.x, p.y, 72, 3.8, Math.max(2, 3 + stats.toxin * 0.5), 0.45, 4);
+    } else if (cid === 'antqueen') {
+      const r = 125;
+      this.fx.ring(p.x, p.y, r, 0xffe478);
+      for (const e of this.enemies.grid.query(p.x, p.y, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+        if (!e.active || e.def.behavior === 'tree') continue;
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        if (dx * dx + dy * dy > (r + e.radius) ** 2) continue;
+        const d = Math.hypot(dx, dy) || 1;
+        this.enemies.hit(e, Math.max(4, Math.round((8 + stats.melee) * (1 + stats.damagePct))), false, dx / d, dy / d, 300);
+      }
+      p.frenzyTime = Math.max(p.frenzyTime, 1.2);
+    } else if (cid === 'cicada') {
+      this.arena.addDecoy(p.x, p.y, Math.max(18, Math.round((24 + run.wave * 6) * (1 + stats.damagePct))));
+    } else if (cid === 'caterpillar') {
+      const dmg = Math.max(6, Math.round((8 + Math.max(0, stats.armor) * 2) * (1 + stats.damagePct)));
+      for (let k = 0; k < 6; k++) {
+        const a = ang + (k / 6) * Math.PI * 2;
+        this.projectiles.fire({
+          texture: 'stinger',
+          x: p.x,
+          y: p.y,
+          angle: a,
+          speed: 620,
+          maxDist: 230,
+          damage: dmg,
+          crit: false,
+          radius: 6,
+          knockback: 110,
+          pierce: 1,
+          spin: 0,
+          explode: 0,
+          poison: null,
+          cloud: null,
+          src: null,
+        });
+      }
+    } else if (cid === 'dungbeetle') {
+      const dmg = Math.max(10, Math.round((14 + stats.melee + run.wave * 3) * (1 + stats.damagePct)));
+      this.projectiles.fire({
+        texture: 'dungball',
+        x: p.x + p.dashDirX * 16,
+        y: p.y + p.dashDirY * 16,
+        angle: ang,
+        speed: 420,
+        maxDist: 280,
+        damage: dmg,
+        crit: false,
+        radius: 11,
+        knockback: 220,
+        pierce: 99,
+        spin: 10,
+        explode: 0,
+        poison: null,
+        cloud: null,
+        src: null,
+        grow: 1.0,
+      });
+    } else if (cid === 'termite') {
+      this.weapons.placeFreeMine(p.x, p.y);
+    }
+  }
+
+  /** 冲刺过程中逐帧检测：极限擦弹闪避 + 独角仙霸体撞击 + 蚊子穿刺吸血 + 炽翼靴火迹 */
+  private updateDashActive(dt: number): void {
+    const p = this.player;
+    const run = this.run;
+    const stats = run.stats;
+    if (!p.dashGrazed) this.checkDashGraze();
+
+    if (run.mods.dashFlame > 0) {
+      this.dashFlameAcc += dt;
+      if (this.dashFlameAcc >= 0.065) {
+        this.dashFlameAcc = 0;
+        this.arena.addFlamePatch(p.x, p.y, Math.max(6, (8 + stats.elemental * 1.5) * (1 + stats.damagePct)));
+      }
+    }
+
+    const cid = run.character.id;
+    if (cid !== 'rhino' && cid !== 'mosquito') return;
+    for (const e of this.enemies.grid.query(p.x, p.y, p.radius + MAX_ENEMY_RADIUS + 18, this.contactBuf).slice()) {
+      if (!e.active || e.def.behavior === 'tree' || this.dashHitSet.has(e)) continue;
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      const rr = p.radius + e.radius + 14;
+      if (dx * dx + dy * dy > rr * rr) continue;
+      this.dashHitSet.add(e);
+      const d = Math.hypot(dx, dy) || 1;
+      if (cid === 'rhino') {
+        const dmg = Math.max(10, Math.round((14 + Math.max(0, stats.armor) * 2.5 + stats.melee) * (1 + stats.damagePct)));
+        this.enemies.hit(e, dmg, false, dx / d, dy / d, 360);
+        this.fx.ring(e.x, e.y, 30, 0xffc868);
+      } else {
+        const dmg = Math.max(6, Math.round((8 + run.wave * 2.5) * (1 + stats.damagePct)));
+        this.enemies.hit(e, dmg, false, dx / d, dy / d, 90);
+        this.heal(1, 'lifesteal', e.x, e.y);
+      }
+    }
+  }
+
+  /** 冲刺收尾特效：锹甲钳击震波、屁步甲尾毒云、螳螂必暴窗口、虎甲疾风、回旋羽翼齐射 */
+  private onDashEnd(): void {
+    const p = this.player;
+    const run = this.run;
+    const stats = run.stats;
+    const cid = run.character.id;
+    if (cid === 'stag') {
+      const fxX = p.x + p.dashDirX * 36;
+      const fxY = p.y + p.dashDirY * 36;
+      const r = 92;
+      const dmg = Math.max(8, Math.round((14 + stats.melee * 1.4) * (1 + stats.damagePct)));
+      this.fx.ring(fxX, fxY, r, 0xffc858);
+      for (const e of this.enemies.grid.query(fxX, fxY, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+        if (!e.active || e.def.behavior === 'tree') continue;
+        const dx = e.x - fxX;
+        const dy = e.y - fxY;
+        if (dx * dx + dy * dy > (r + e.radius) ** 2) continue;
+        const d = Math.hypot(dx, dy) || 1;
+        this.enemies.hit(e, dmg, false, dx / d, dy / d, 240);
+      }
+    } else if (cid === 'bombardier') {
+      this.hazards.addCloud(p.x, p.y, 70, 2.8, 3 + stats.toxin, poisonPerStack(stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
+    } else if (cid === 'mantis') {
+      p.mantisCritTime = 1.5;
+      this.fx.number(p.x, p.y - 34, '必暴！', 'crit');
+    } else if (cid === 'tiger') {
+      p.hasteTime = Math.max(p.hasteTime, 0.9);
+    }
+    if (run.mods.dashVolley > 0) {
+      const count = 4 + run.mods.dashVolley * 2;
+      this.fireSeekingSparks(p.x, p.y, count, 12 + stats.ranged * 0.6 + stats.melee * 0.6);
+    }
+  }
+
+  /** 极限擦弹闪避：冲刺掠过敌弹、冲锋怪或近身怪时触发高光奖励 */
+  private checkDashGraze(): void {
+    const p = this.player;
+    let danger = false;
+    const shotR2 = (p.radius + 38) ** 2;
+    for (const s of this.shots.shots) {
+      const dx = s.x - p.x;
+      const dy = s.y - p.y;
+      if (dx * dx + dy * dy <= shotR2) {
+        danger = true;
+        break;
+      }
+    }
+    if (!danger) {
+      for (const e of this.enemies.grid.query(p.x, p.y, p.radius + MAX_ENEMY_RADIUS + 34, this.contactBuf)) {
+        if (!e.active || e.damage <= 0 || e.age < SPAWN_POP) continue;
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        const rr = p.radius + e.radius + 30;
+        if (dx * dx + dy * dy <= rr * rr) {
+          danger = true;
+          break;
+        }
+      }
+    }
+    if (!danger) return;
+    p.dashGrazed = true;
+    p.frenzyTime = Math.max(p.frenzyTime, 1.8);
+    this.weapons.reduceCooldowns(0.5);
+    this.pickups.dropNectar(p.x, p.y, 2);
+    this.triggerHitstop(0.026);
+    this.fx.ring(p.x, p.y, 56, 0x7ce8ff);
+    this.fx.number(p.x, p.y - 38, '极限闪避！', 'level');
+    sfx.play('frenzy');
+  }
+
+  /** 金露花抢点盛开：全屏震退虫群 + 掉落免费宝箱、花蜜与琥珀狂热 */
+  private onBloomComplete(bx: number, by: number): void {
+    const r = 240;
+    this.fx.ring(bx, by, r, 0xffd84c);
+    this.fx.explosion(bx, by, 130, 0xffe478, 2);
+    shake(this, 160, 0.008);
+    sfx.play('chest');
+    for (const e of this.enemies.grid.query(bx, by, r + MAX_ENEMY_RADIUS, this.contactBuf).slice()) {
+      if (!e.active || e.def.behavior === 'tree') continue;
+      const dx = e.x - bx;
+      const dy = e.y - by;
+      if (dx * dx + dy * dy > (r + e.radius) ** 2) continue;
+      const d = Math.hypot(dx, dy) || 1;
+      this.enemies.hit(e, Math.max(10, Math.round((18 + this.run.wave * 4) * (1 + this.run.stats.damagePct))), false, dx / d, dy / d, 380);
+    }
+    this.pickups.dropChest(bx, by);
+    this.pickups.dropNectar(bx, by, 10);
+    this.pickups.dropFrenzy(bx + 18, by);
+    bus.emit(EVT.WAVE_EVENT, '★ 金露花盛开！免费宝箱 + 10 花蜜！', '#ffd44c');
   }
 
   /** 靠近战场四边 115px 内时浮现漫画虚线边界预警，防止走位风筝卡墙 */
@@ -1013,6 +1483,10 @@ export class GameScene extends Phaser.Scene {
     this.pickups.forEachChest((x, y) => {
       if (isOff(x, y)) markers.push({ x, y, kind: 'chest' });
     });
+    const bloom = this.arena.activeBloom;
+    if (bloom && isOff(bloom.x, bloom.y)) {
+      markers.push({ x: bloom.x, y: bloom.y, kind: 'bloom' });
+    }
   }
 
   private trackBoss(): void {
@@ -1020,6 +1494,11 @@ export class GameScene extends Phaser.Scene {
     if (!this.bossEnemy) {
       this.bossEnemy = this.enemies.active.find((e) => e.def.boss) ?? null;
       if (!this.bossEnemy) return;
+      // 10 波短局主题挑战的最终 Boss 按第 10 波构筑强度适当缩减血量
+      if (run.setup.challenge && !run.endless && run.wave <= 10) {
+        this.bossEnemy.maxHp = Math.round(this.bossEnemy.maxHp * 0.44);
+        this.bossEnemy.hp = this.bossEnemy.maxHp;
+      }
     }
     const b = this.bossEnemy;
     run.boss = { name: b.def.name, hp: Math.max(0, b.hp), maxHp: b.maxHp };
@@ -1029,7 +1508,7 @@ export class GameScene extends Phaser.Scene {
     const run = this.run;
     if (run.boss) run.boss.hp = 0;
     shake(this, 400, 0.012);
-    if (waveDefFor(run.wave).duration === null) {
+    if (this.currentWaveDef(run.wave).duration === null) {
       this.bossDown = true;
     } else {
       // 无尽模式里程碑 Boss：斩落掉落双宝箱 + 大量花蜜，波次继续计时
@@ -1049,7 +1528,8 @@ export class GameScene extends Phaser.Scene {
     run.nectar += n;
     run.waveNectar += n;
     run.totalNectar += n;
-    if (run.addXp(n) > 0) {
+    const xpGain = n * (1 + run.mods.xpGainPct) * run.waveXpMult;
+    if (run.addXp(xpGain) > 0) {
       this.fx.number(this.player.x, this.player.y - 44, '升级！', 'level');
       sfx.play('levelUp');
       bus.emit(EVT.LEVEL_UP, run.level);
@@ -1074,9 +1554,11 @@ export class GameScene extends Phaser.Scene {
     this.projectiles.clear();
     this.shots.clear();
     this.hazards.clear();
+    this.arena.clear();
     this.summons.clear();
     this.weapons.clearDevices();
     this.tel.clear();
+    run.arenaHint = '';
     bus.emit(EVT.WAVE_CLEAR, run.wave);
     sfx.play('waveClear');
   }
@@ -1086,6 +1568,27 @@ export class GameScene extends Phaser.Scene {
     const left = this.pickups.collectAll();
     if (left.nectar > 0) this.addNectar(left.nectar);
     if (left.chests > 0) run.chests += left.chests;
+
+    // 兑现本波已完成的里程碑后院赌约奖励
+    const doneContract = run.activeContract;
+    run.activeContract = null;
+    run.waveContractDamagePct = 0;
+    run.waveNoHeal = false;
+    run.waveNectarMult = 1;
+    if (doneContract === 'elite_bounty') {
+      run.chests += 1;
+      run.nectar += 45;
+      run.totalNectar += 45;
+    } else if (doneContract === 'no_heal_vow') {
+      run.bonus.maxHp += 10;
+      run.bonus.armor += 3;
+      run.recomputeStats();
+    } else if (doneContract === 'swarm_harvest') {
+      run.bonus.harvest += 10;
+      run.recomputeStats();
+    } else if (doneContract === 'glass_frenzy') {
+      run.chests += 1;
+    }
 
     // 采蜜：1~20 波每波自动成长；21+ 无尽模式每波衰减 20% 防无限经济滚雪球
     const harvest = Math.max(0, Math.round(run.stats.harvest));
@@ -1100,17 +1603,19 @@ export class GameScene extends Phaser.Scene {
       run.bonus.harvest += Math.max(0, run.stats.harvest) * HARVEST_GROWTH + run.mods.waveHarvest;
       run.recomputeStats();
     }
-    // 利息：存蜜树洞（每 20 给 1，最多 10）、瓢虫的被动（每 25 给 1，最多 8）
+    // 利息：存蜜树洞（每 20 给 1，最多 10）、瓢虫的被动（每 20 给 1，最多 10）
     let interest = 0;
     if (run.itemCount('treehole') > 0) interest += Math.min(10, Math.floor(run.nectar / 20));
     const perk = run.character.perks.interest;
     if (perk) interest += Math.min(perk.max, Math.floor(run.nectar / perk.per));
     run.waveInterest = interest;
     run.nectar += interest;
-    if (run.wave >= WAVES.length && !run.endless) {
+    if (run.wave >= run.maxWaves && !run.endless) {
       run.won = true;
       if (!run.victoryRecorded) {
-        run.newDifficultyUnlocked = recordRun(run.setup.character, run.setup.difficulty, true);
+        if (!run.setup.challenge) {
+          run.newDifficultyUnlocked = recordRun(run.setup.character, run.setup.difficulty, true);
+        }
         run.victoryRecorded = true;
       }
       this.checkUnlocks();
@@ -1118,8 +1623,12 @@ export class GameScene extends Phaser.Scene {
       bgm.setMode('shop');
       bus.emit(EVT.VICTORY);
       sfx.play('victory');
-      saveActiveRun(run.serialize());
-      this.time.delayedCall(950, () => bus.emit(EVT.VICTORY_CHOICE));
+      clearActiveRun();
+      if (run.setup.challenge) {
+        this.time.delayedCall(1200, () => this.toResult(true));
+      } else {
+        this.time.delayedCall(950, () => bus.emit(EVT.VICTORY_CHOICE));
+      }
       return;
     }
     this.checkUnlocks();
@@ -1141,6 +1650,7 @@ export class GameScene extends Phaser.Scene {
     this.spawner.clear();
     this.projectiles.clear();
     this.shots.clear();
+    this.arena.clear();
     this.summons.clear();
     this.weapons.clearDevices();
     this.fx.burst(p.x, p.y, 0xe8832a, 36, 280, 1.5);
@@ -1166,9 +1676,10 @@ export class GameScene extends Phaser.Scene {
     const { character, difficulty } = run.setup;
     clearActiveRun();
     bgm.setMode('menu');
-    const newDifficulty = run.victoryRecorded ? run.newDifficultyUnlocked : recordRun(character, difficulty, win);
+    const newDifficulty = run.setup.challenge ? false : run.victoryRecorded ? run.newDifficultyUnlocked : recordRun(character, difficulty, win);
     const newEndlessRecord = run.endless ? recordEndlessWave(character, run.wave) : false;
     const newDailyBest = run.setup.daily ? recordDailyResult(run.setup.daily, run.wave, win) : false;
+    const newChallengeCleared = run.setup.challenge && win ? recordChallengeCleared(run.setup.challenge) : false;
     const data: ResultData = {
       win,
       endless: run.endless,
@@ -1182,6 +1693,9 @@ export class GameScene extends Phaser.Scene {
       newEndlessRecord,
       daily: run.setup.daily,
       newDailyBest,
+      challenge: run.setup.challenge,
+      newChallengeCleared,
+      maxWaves: run.maxWaves,
       unlocked: this.unlocked,
       weapons: run.weapons.map((w) => ({ id: w.id, tier: w.tier, totalDamage: w.totalDamage ?? 0 })),
       sets: activeSets(run.weapons).map((s) => ({ cls: s.cls, count: s.count })),

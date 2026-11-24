@@ -94,6 +94,38 @@ export interface Mods {
   poisonNova: number;
   /** 灼烧怪死后火焰爆炸 */
   burnExplode: number;
+  /** 战斗中每秒固定自损生命（不触发无敌帧，献血/血手） */
+  selfDamagePerSec: number;
+  /** 永久经验获取加成（孔雀尾羽） */
+  xpGainPct: number;
+  /** 暴击击杀敌人时额外得 1 花蜜的概率（猎手战利品，上限 100%） */
+  critKillNectar: number;
+  /** 本波每次受伤时本波伤害下降层数（力量三角，每层 −2%） */
+  trianglePenalty: number;
+  /** 每 1% 吸取额外 +2% 伤害（血色巨钳） */
+  bloodyHand: number;
+  /** 固定每秒回 5 生命，禁用其他一切回血方式（苦痛虫壳） */
+  torture: number;
+  /** 冲刺冷却修正（如 -0.2 = 冷却缩减 20%） */
+  dashCooldownPct: number;
+  /** 额外冲刺充能层数 */
+  dashCharges: number;
+  /** 冲刺路径留火迹点燃敌人 */
+  dashFlame: number;
+  /** 冲刺结束向周围齐射追踪风刃 */
+  dashVolley: number;
+  /** 6 羁绊觉醒：刀刃近战挥出穿透剑气 */
+  bladeWave: number;
+  /** 6 羁绊觉醒：爆炸 0.35 秒后触发二次余震 */
+  explosiveAftershock: number;
+  /** 6 羁绊觉醒：元素混合（灼烧+冰/电）触发元素爆裂 */
+  elementalBurst: number;
+  /** 6 羁绊觉醒：枪械每 4 次射击额外发射 1 枚穿透弹 */
+  gunVolley: number;
+  /** 6 羁绊觉醒：通用暴击倍率加成（精准 6 件套等） */
+  critMultBonus: number;
+  /** 6 羁绊觉醒：击杀诅咒怪额外掉花蜜（海军 6 件套） */
+  curseBonusNectar: number;
 }
 
 export const ZERO_MODS: Readonly<Mods> = {
@@ -143,6 +175,22 @@ export const ZERO_MODS: Readonly<Mods> = {
   critNova: 0,
   poisonNova: 0,
   burnExplode: 0,
+  selfDamagePerSec: 0,
+  xpGainPct: 0,
+  critKillNectar: 0,
+  trianglePenalty: 0,
+  bloodyHand: 0,
+  torture: 0,
+  dashCooldownPct: 0,
+  dashCharges: 0,
+  dashFlame: 0,
+  dashVolley: 0,
+  bladeWave: 0,
+  explosiveAftershock: 0,
+  elementalBurst: 0,
+  gunVolley: 0,
+  critMultBonus: 0,
+  curseBonusNectar: 0,
 };
 
 const pct = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}%`;
@@ -194,6 +242,22 @@ export const MOD_LABEL: Record<keyof Mods, (v: number) => string> = {
   critNova: () => '暴击时在目标处爆发尖刺震波（50% 范围伤害）',
   poisonNova: () => '带毒敌人死亡时原地留下毒云',
   burnExplode: () => '灼烧敌人死亡时引发火焰爆炸',
+  selfDamagePerSec: (v) => `每秒固定损失 ${v} 点生命（不触发无敌）`,
+  xpGainPct: (v) => `经验获取 ${pct(v)}`,
+  critKillNectar: (v) => `暴击击杀有 ${Math.min(100, Math.round(v * 100))}% 概率额外获得 1 花蜜`,
+  trianglePenalty: (v) => `本波每次受伤时，本波伤害 −${Math.round(v * 2)}%`,
+  bloodyHand: () => '每有 1% 吸取，伤害额外 +2%',
+  torture: () => '固定每秒回复 5 生命，禁用其他一切回血',
+  dashCooldownPct: (v) => `冲刺冷却 ${pct(v)}`,
+  dashCharges: (v) => `冲刺充能上限 +${v}`,
+  dashFlame: () => '冲刺路径留下烈焰火迹，灼烧沿途敌人',
+  dashVolley: (v) => `冲刺结束向周围齐射 ${4 + v * 2} 枚追踪风刃`,
+  bladeWave: () => '近战挥击释放穿透剑气波',
+  explosiveAftershock: () => '爆炸后引发 0.35 秒延迟二次余震',
+  elementalBurst: () => '冰火/电火交汇触发元素爆裂',
+  gunVolley: () => '每 4 次射击额外射出 1 枚穿透弹',
+  critMultBonus: (v) => `全局暴击倍率 +${v}`,
+  curseBonusNectar: (v) => `击杀诅咒怪额外掉落 +${v} 花蜜`,
 };
 
 /** 触发型道具的效果，实现在 GameScene（DESIGN.md 第 6 节） */
@@ -207,7 +271,12 @@ export type TriggerId =
   | 'stinkgland'
   | 'treering'
   | 'lightning'
-  | 'honeypotion';
+  | 'honeypotion'
+  | 'weirdghost'
+  | 'piggybank'
+  | 'bait'
+  | 'peacock'
+  | 'mirror';
 
 export interface ItemDef {
   id: string;
@@ -314,6 +383,21 @@ const LIST: ItemDef[] = [
   item('lonewolf', '独行甲刃', 3, 185, {}, { mods: { loneWolf: 1 }, unique: true }),
   item('ricochetwing', '跳弹翅鞘', 3, 190, {}, { mods: { gunRicochet: 1 } }),
   item('giantscarab', '巨虫血清', 3, 185, { maxHp: 25, melee: 8, ranged: 8, toxin: 8, dodge: -0.1 }, { unique: true }),
+  // 赌博 / 高风险高回报系列（致敬土豆兄弟经典机制）
+  item('weirdghost', '幽灵蝉蜕', 0, 20, { maxHp: 4 }, { trigger: 'weirdghost', desc: '下一波开始时生命直接变为 1 点' }),
+  item('piggybank', '存蜜猪猪罐', 1, 52, {}, { trigger: 'piggybank', unique: true, desc: '第 20 波前，每波开始获得当前未花花蜜 +20% 派息' }),
+  item('bait', '诱饵甜果', 1, 34, { damagePct: 0.08 }, { trigger: 'bait', desc: '下一波开局立刻空降 3 只冲锋侧射的噬蜜飞鳗突袭' }),
+  item('blooddonation', '献血蜜腺', 2, 82, { harvest: 40 }, { mods: { selfDamagePerSec: 1 } }),
+  item('peacock', '孔雀尾羽', 2, 86, {}, { trigger: 'peacock', mods: { xpGainPct: 0.25 }, desc: '下一波经验再 +100%，但下波敌人伤害 +50%' }),
+  item('powertriangle', '力量三角', 2, 95, { damagePct: 0.2, armor: 1 }, { mods: { trianglePenalty: 1 } }),
+  item('huntingtrophy', '猎手战利品', 2, 96, {}, { mods: { critKillNectar: 0.33 } }),
+  item('mirror', '复刻魔镜', 2, 98, {}, { trigger: 'mirror', desc: '下一次在商店购买非唯一道具时免费额外复制 1 份' }),
+  item('bloodyhand', '血色巨钳', 3, 185, { lifesteal: 0.1 }, { mods: { bloodyHand: 1, selfDamagePerSec: 1 }, unique: true }),
+  item('torture', '苦痛虫壳', 3, 175, { maxHp: 15 }, { mods: { torture: 1 }, unique: true }),
+  // 冲刺联动系列
+  item('dashflame', '炽翼靴', 1, 52, { speedPct: 0.05 }, { mods: { dashCooldownPct: -0.2, dashFlame: 1 }, unique: true }),
+  item('dashcharge', '双节跃足', 2, 98, { speedPct: 0.06, dodge: 0.04 }, { mods: { dashCharges: 1 }, unique: true }),
+  item('dashvolley', '回旋羽翼', 2, 96, { attackSpeedPct: 0.08 }, { mods: { dashVolley: 1 } }),
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(LIST.map((d) => [d.id, d]));

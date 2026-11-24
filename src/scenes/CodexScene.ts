@@ -3,7 +3,7 @@ import { bgm } from '../audio/bgm';
 import { sfx } from '../audio/sfx';
 import { weaponTex } from '../art/icons';
 import { GAME_HEIGHT, GAME_WIDTH } from '../config';
-import { loadSave } from '../core/save';
+import { codexMilestones, loadSave } from '../core/save';
 import { BASE_STATS } from '../core/stats';
 import { ENEMIES, type EnemyDef } from '../data/enemies';
 import { ITEMS, ZERO_MODS, type ItemDef } from '../data/items';
@@ -44,17 +44,28 @@ const GAP_Y = 12;
 
 const CODEX_WEAPONS: WeaponDef[] = [...SHOP_WEAPONS].sort((a, b) => (a.minTier ?? 0) - (b.minTier ?? 0));
 const ITEM_LIST: ItemDef[] = Object.values(ITEMS).sort((a, b) => a.rarity - b.rarity);
-const CODEX_ENEMIES: EnemyDef[] = Object.values(ENEMIES).filter((e) => e.id !== 'tree' && e.id !== 'boomshroom');
+const CODEX_ENEMIES: EnemyDef[] = Object.values(ENEMIES).filter((e) => e.id !== 'tree' && e.id !== 'boomshroom' && e.id !== 'deworb');
 
 const BEHAVIOR_DESC: Record<string, string> = {
-  chase: '直线追击玩家，数量庞大。',
+  chase: '直线追击玩家，数量庞大（腐巢母虫死亡时会爆出 3 只吐酸幼虫）。',
   swarm: '高速弧线绕行接近，容易成群包围。',
   charger: '蓄力后沿直线高速冲锋，注意侧向走位。',
   ranged: '保持中距离发射黏性丝弹，命中会减速。',
   bomber: '贴近后原地膨胀自爆，及时拉开或提前击杀。',
   summoner: '远离玩家并持续孵化大量工蚁。',
+  pursuer: '紧咬追击玩家，存活时间越长移速越快，务必优先点杀。',
+  healer: '游走于虫群之中，周期释放翠绿治疗波为周围虫敌回血。',
+  buffer: '躲在后排释放赤红声波，使周围虫敌通体泛红并大幅提升血量、移速与伤害！',
+  egg: '原地倒计时 5 秒孵化：及时拆卵可保平安，放任孵出镰刃螳虫击杀则掉落更多花蜜！',
+  slasher: '保持中距游走，在玩家脚下画 V 字形红带延迟斩击，专克原地站桩。',
+  puffer: '亡语向四周 8 向迸发慢速毒球弹幕；但若用近战武器劈死，可直接截断不爆弹幕！',
+  lamprey: '诱饵甜果专属突袭怪：高速冲锋并在冲刺沿途向左右两侧甩出成对弹幕。',
+  spitter: '由腐巢母虫爆出的游走散射弹幕幼虫，切忌在贴脸时一口气打爆多只母巢。',
+  curse_slug: '温顺游走的厄运紫蛞蝓：击杀可永久 +1 诅咒并爆出丰厚花蜜，开启紫光怪高风险刷钱。',
+  mummy: '自带负击退抗性的弹弹滚球虫：高击退武器会像台球一样把它弹飞并在边界反弹！',
   elite: '精英：三连冲锋接大范围震击，必掉宝箱。',
   elite_hornet: '精英：5 连扇形与 8 向环形赤红毒针弹幕，必掉宝箱。',
+  elite_gargoyle: '三阶段血量突变精英：100%→60%→30% 血逐步裂变，切换慢环弹、X 形地面斩与残血狂暴弹幕雨，必掉宝箱。',
   boss: '最终 Boss：扇形连斩、跳跃砸地，半血狂暴召唤若虫。',
   boss_goliath: '最终 Boss：重角崩冲接碎角弹幕、震地落岩，半血狂暴二连冲。',
   lootbug: '黄金盗宝虫：限时逃跑，击杀掉落宝箱与大量花蜜。',
@@ -146,6 +157,13 @@ export class CodexScene extends Phaser.Scene {
     const prog = pill(this, 0, 35, progText, COLOR.panelDeep, COLOR.gold, COLOR.goldText, 13, 12, 26);
     prog.x = 44 + title.width + 18 + prog.width / 2;
     root.add(prog);
+
+    // 图鉴里程碑奖励胶囊（展示已解锁禁用槽与炫彩涂装进度）
+    const ms = codexMilestones(save);
+    const msText = `里程碑：禁用槽 ${ms.banishCap}/3 · 涂装 ${ms.unlockedSkins.length}/5（收录 ${ms.seenEntries}/40 · 击杀 ${ms.totalKills}/1500）`;
+    const msPill = pill(this, 0, 35, msText, 0x16241d, 0x5de862, '#b8ffbe', 12, 11, 26);
+    msPill.x = prog.x + prog.width / 2 + 12 + msPill.width / 2;
+    root.add(msPill);
 
     root.add(createButton(this, W - 96, 35, '返回菜单', () => transitionTo(this, 'Menu'), { width: 138, height: 42, fontSize: 18, primary: false }));
 

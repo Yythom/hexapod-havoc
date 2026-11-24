@@ -69,8 +69,19 @@ export class HitResolver {
     if (special?.damageVsHighHp && hpRatio >= 0.8) damage *= 1 + special.damageVsHighHp;
     if (special?.damageVsLowHp && hpRatio <= 0.3) damage *= 1 + special.damageVsLowHp;
 
-    // 处决：Vorpal Sword
+    // 潮湿增伤：雨天/露珠水洼中的敌人吃冰/电/元素伤害 +25%
+    const enchant = src.owned?.enchant;
+    const isElementalHit =
+      def.classes.includes('Elemental') || !!def.chain || !!def.onHit?.freeze || enchant === 'frost';
+    if (e.wetTime > 0 && isElementalHit) {
+      damage = Math.max(1, Math.round(damage * 1.25));
+    }
+
+    // 处决：Vorpal Sword；IV 阶传说武器自带 15% 低血处决觉醒
     if (special?.executeChance && !e.def.boss && !e.def.elite && Math.random() < special.executeChance) {
+      damage = Math.max(damage, e.hp + 1);
+      crit = true;
+    } else if (src.tier >= 3 && !e.def.boss && !e.def.elite && hpRatio <= 0.15) {
       damage = Math.max(damage, e.hp + 1);
       crit = true;
     }
@@ -83,7 +94,7 @@ export class HitResolver {
       src.owned.waveDamage = (src.owned.waveDamage ?? 0) + dealt;
       src.owned.totalDamage = (src.owned.totalDamage ?? 0) + dealt;
     }
-    const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback);
+    const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback, 'normal', def.kind === 'melee');
     if (killed && (e.def.elite || e.def.boss)) {
       this.host.onHitstop?.(e.def.boss ? 0.07 : 0.042);
     }
@@ -159,8 +170,41 @@ export class HitResolver {
       if (killed && fx.nectarOnKill && Math.random() < fx.nectarOnKill) this.host.dropBonusNectar(x, y, 1);
     }
 
-    // 武器自带吸取：每次命中按几率回 1 血（带吸血光丝飞向甲虫）
-    let ls = weaponLifesteal(def, src.tier);
+    // 蜗老板武器附魔效果（炽焰 / 寒霜 / 贪婪）
+    if (!killed && enchant === 'ignite') {
+      this.enemies.applyBurn(e, damage * BURN_RATIO * 1.2 * (1 + mods.burnDamagePct));
+      this.fx?.burst(x, y, 0xff7828, 3, 100, 0.65);
+    }
+    if (!killed && enchant === 'frost') {
+      this.enemies.applyFreeze(e, 1);
+      this.enemies.applySlow(e, 1.5, 0.8);
+    }
+    if (killed && enchant === 'greed' && Math.random() < 0.22) {
+      this.host.dropBonusNectar(x, y, 1);
+    }
+
+    // 元素 6 件套觉醒：冰火/雷火交汇触发元素爆裂
+    if (mods.elementalBurst > 0) {
+      const hasBurn = e.burnTime > 0 || !!fx?.burn || enchant === 'ignite';
+      const hasIceOrZap = e.ice > 0 || e.frozen > 0 || !!fx?.freeze || !!def.chain || enchant === 'frost';
+      if (hasBurn && hasIceOrZap) {
+        const er = 72;
+        const edmg = Math.max(4, Math.round(damage * 0.55));
+        this.fx?.ring(x, y, er, 0x8ceeff);
+        this.fx?.explosion(x, y, er * 0.85, 0xff8a38, 1);
+        for (const o of this.enemies.grid.query(x, y, er + 40, this.aoeBuf).slice()) {
+          if (!o.active || o === e) continue;
+          const dx = o.x - x;
+          const dy = o.y - y;
+          if (dx * dx + dy * dy > (er + o.radius) ** 2) continue;
+          const d = Math.hypot(dx, dy) || 1;
+          this.enemies.hit(o, edmg, false, dx / d, dy / d, 80, 'burn');
+        }
+      }
+    }
+
+    // 武器自带吸取（含嗜血附魔）：每次命中按几率回 1 血
+    let ls = weaponLifesteal(def, src.tier, src.owned);
     if (special?.lifestealPerMissingHp) ls += special.lifestealPerMissingHp * (1 - Math.max(0, Math.min(1, this.host.hpRatio))) * 10;
     if (ls > 0 && Math.random() < ls) this.host.heal(1, x, y, 'lifesteal');
     // Brick：命中时概率掉花蜜（原作会碎武器，这里只保留掉落）

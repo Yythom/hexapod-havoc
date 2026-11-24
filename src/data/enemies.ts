@@ -1,4 +1,27 @@
-export type EnemyBehavior = 'chase' | 'swarm' | 'charger' | 'ranged' | 'bomber' | 'summoner' | 'elite' | 'elite_hornet' | 'boss' | 'boss_goliath' | 'tree' | 'lootbug';
+export type EnemyBehavior =
+  | 'chase'
+  | 'swarm'
+  | 'charger'
+  | 'ranged'
+  | 'bomber'
+  | 'summoner'
+  | 'buffer'
+  | 'healer'
+  | 'pursuer'
+  | 'egg'
+  | 'slasher'
+  | 'puffer'
+  | 'lamprey'
+  | 'spitter'
+  | 'curse_slug'
+  | 'mummy'
+  | 'elite'
+  | 'elite_hornet'
+  | 'elite_gargoyle'
+  | 'boss'
+  | 'boss_goliath'
+  | 'tree'
+  | 'lootbug';
 
 export interface EnemyDef {
   id: string;
@@ -109,6 +132,141 @@ const LIST: EnemyDef[] = [
     knockbackResist: 0.5,
   },
   {
+    id: 'pursuer',
+    name: '疾影猎虫',
+    hp: 13,
+    damage: 2,
+    speed: 96,
+    nectar: [2, 3],
+    radius: 13,
+    texture: 'pursuer',
+    behavior: 'pursuer',
+  },
+  {
+    id: 'healer',
+    name: '绿露医虫',
+    hp: 22,
+    damage: 1,
+    speed: 92,
+    nectar: [3, 4],
+    radius: 14,
+    texture: 'healer',
+    behavior: 'healer',
+    knockbackResist: 0.25,
+  },
+  {
+    id: 'buffer',
+    name: '狂化鸣蝉',
+    hp: 26,
+    damage: 1,
+    speed: 102,
+    nectar: [4, 5],
+    radius: 15,
+    texture: 'buffer',
+    behavior: 'buffer',
+    knockbackResist: 0.3,
+  },
+  {
+    id: 'slasher_egg',
+    name: '镰斩魔卵',
+    hp: 20,
+    damage: 1,
+    speed: 0,
+    nectar: [1, 2],
+    radius: 15,
+    texture: 'slasher_egg',
+    behavior: 'egg',
+    knockbackResist: 1,
+  },
+  {
+    id: 'slasher',
+    name: '镰刃螳虫',
+    hp: 32,
+    damage: 2,
+    speed: 94,
+    nectar: [4, 6],
+    radius: 16,
+    texture: 'slasher',
+    behavior: 'slasher',
+    skillDamage: 3.5,
+    knockbackResist: 0.35,
+  },
+  {
+    id: 'puffer',
+    name: '棘球毒虫',
+    hp: 15,
+    damage: 2,
+    speed: 78,
+    nectar: [2, 3],
+    radius: 15,
+    texture: 'puffer',
+    behavior: 'puffer',
+    skillDamage: 2.2,
+  },
+  {
+    id: 'lamprey',
+    name: '噬蜜飞鳗',
+    hp: 18,
+    damage: 2,
+    speed: 112,
+    nectar: [3, 4],
+    radius: 14,
+    texture: 'lamprey',
+    behavior: 'lamprey',
+    dashSpeed: 390,
+    skillDamage: 2.2,
+  },
+  {
+    id: 'spawner',
+    name: '腐巢母虫',
+    hp: 38,
+    damage: 2,
+    speed: 54,
+    nectar: [3, 4],
+    radius: 19,
+    texture: 'spawner',
+    behavior: 'chase',
+    knockbackResist: 0.65,
+    splitInto: { id: 'spitter', count: 3 },
+  },
+  {
+    id: 'spitter',
+    name: '吐酸幼虫',
+    hp: 9,
+    damage: 1,
+    speed: 105,
+    nectar: [1, 1],
+    radius: 10,
+    texture: 'spitter',
+    behavior: 'spitter',
+    skillDamage: 1.8,
+  },
+  {
+    id: 'curse_slug',
+    name: '厄运紫蛞蝓',
+    hp: 24,
+    damage: 0,
+    speed: 96,
+    nectar: [5, 7],
+    radius: 15,
+    texture: 'curse_slug',
+    behavior: 'curse_slug',
+    knockbackResist: 0.3,
+    hpGrowth: 0.5,
+  },
+  {
+    id: 'mummy',
+    name: '滚球毛虫',
+    hp: 28,
+    damage: 2,
+    speed: 88,
+    nectar: [3, 4],
+    radius: 16,
+    texture: 'mummy',
+    behavior: 'mummy',
+    knockbackResist: -1.8,
+  },
+  {
     id: 'soldier',
     name: '兵蚁',
     hp: 300,
@@ -136,6 +294,20 @@ const LIST: EnemyDef[] = [
     dashSpeed: 420,
     skillDamage: 2.5,
     knockbackResist: 0.8,
+    elite: true,
+  },
+  {
+    id: 'gargoyle_elite',
+    name: '曜石甲像',
+    hp: 270,
+    damage: 3,
+    speed: 94,
+    nectar: [24, 24],
+    radius: 24,
+    texture: 'gargoyle_elite',
+    behavior: 'elite_gargoyle',
+    skillDamage: 2.8,
+    knockbackResist: 0.9,
     elite: true,
   },
   {
@@ -209,6 +381,19 @@ const LIST: EnemyDef[] = [
     behavior: 'tree',
     knockbackResist: 1,
     hpGrowth: 0.45,
+  },
+  {
+    id: 'deworb',
+    name: '露珠冰球',
+    hp: 14,
+    damage: 0,
+    speed: 0,
+    nectar: [2, 3],
+    radius: 16,
+    texture: 'deworb',
+    behavior: 'tree',
+    knockbackResist: 1,
+    hpGrowth: 0.4,
   },
   {
     id: 'lootbug',

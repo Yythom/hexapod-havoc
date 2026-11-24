@@ -8,7 +8,7 @@ import { bgm } from './audio/bgm';
 import { sfx } from './audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from './config';
 import { touchMove } from './core/input';
-import { getSettings } from './core/settings';
+import { getSettings, useSettingsStore } from './core/settings';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
 import { CodexScene } from './scenes/CodexScene';
@@ -30,6 +30,16 @@ factory.text = function (this: Phaser.GameObjects.GameObjectFactory, x, y, text,
 const initSettings = getSettings();
 sfx.init(initSettings.volume);
 bgm.init(initSettings.bgm, initSettings.volume);
+// 订阅 Zustand 设置 Store：任意位置修改音量/BGM（含跨标签页同步）自动联动音频引擎
+useSettingsStore.subscribe((next, prev) => {
+  if (next.volume !== prev.volume) {
+    sfx.setVolume(next.volume);
+    bgm.setVolume(next.volume);
+  }
+  if (next.bgm !== prev.bgm) {
+    bgm.setEnabled(next.bgm);
+  }
+});
 
 async function preloadFonts(): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts?.load) return;

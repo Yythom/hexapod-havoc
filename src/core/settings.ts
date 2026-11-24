@@ -1,3 +1,7 @@
+import { createStore } from 'zustand/vanilla';
+import { persist } from 'zustand/middleware';
+import { createCompatStorage, syncOnStorageEvent } from './storage';
+
 export type DamageNumberMode = 'all' | 'crit' | 'off';
 
 /** 玩家设置：音效音量、背景音乐、震屏、隐藏武器、伤害数字分级、瞄准模式。和进度存档分开存。 */
@@ -9,6 +13,11 @@ export interface Settings {
   hideWeapons: boolean;
   damageNumbers: DamageNumberMode;
   manualAim: boolean;
+}
+
+export interface SettingsStoreState extends Settings {
+  update: (patch: Partial<Settings>) => Settings;
+  reset: () => void;
 }
 
 export const VOLUME_STEPS = [
@@ -25,39 +34,76 @@ const DAMAGE_NUMBER_MODES: { value: DamageNumberMode; label: string }[] = [
 ];
 
 const KEY = 'hexapod-havoc-settings-v1';
-let cache: Settings | null = null;
 
-export function getSettings(): Settings {
-  if (cache) return cache;
-  const s: Settings = { volume: 0.7, bgm: true, shake: true, hideWeapons: false, damageNumbers: 'all', manualAim: false };
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Settings>;
-      if (typeof parsed.volume === 'number') s.volume = Math.min(1, Math.max(0, parsed.volume));
-      if (typeof parsed.bgm === 'boolean') s.bgm = parsed.bgm;
-      if (typeof parsed.shake === 'boolean') s.shake = parsed.shake;
-      if (typeof parsed.hideWeapons === 'boolean') s.hideWeapons = parsed.hideWeapons;
-      if (parsed.damageNumbers === 'all' || parsed.damageNumbers === 'crit' || parsed.damageNumbers === 'off') {
-        s.damageNumbers = parsed.damageNumbers;
-      }
-      if (typeof parsed.manualAim === 'boolean') s.manualAim = parsed.manualAim;
-    }
-  } catch {
-    // 读不到就用默认设置
+const DEFAULT_SETTINGS: Settings = {
+  volume: 0.7,
+  bgm: true,
+  shake: true,
+  hideWeapons: false,
+  damageNumbers: 'all',
+  manualAim: false,
+};
+
+function sanitizeSettings(raw: Partial<Settings> | undefined): Settings {
+  const s: Settings = { ...DEFAULT_SETTINGS };
+  if (!raw || typeof raw !== 'object') return s;
+  if (typeof raw.volume === 'number' && Number.isFinite(raw.volume)) s.volume = Math.min(1, Math.max(0, raw.volume));
+  if (typeof raw.bgm === 'boolean') s.bgm = raw.bgm;
+  if (typeof raw.shake === 'boolean') s.shake = raw.shake;
+  if (typeof raw.hideWeapons === 'boolean') s.hideWeapons = raw.hideWeapons;
+  if (raw.damageNumbers === 'all' || raw.damageNumbers === 'crit' || raw.damageNumbers === 'off') {
+    s.damageNumbers = raw.damageNumbers;
   }
-  cache = s;
+  if (typeof raw.manualAim === 'boolean') s.manualAim = raw.manualAim;
   return s;
 }
 
+function pickSettings(s: SettingsStoreState): Settings {
+  return {
+    volume: s.volume,
+    bgm: s.bgm,
+    shake: s.shake,
+    hideWeapons: s.hideWeapons,
+    damageNumbers: s.damageNumbers,
+    manualAim: s.manualAim,
+  };
+}
+
+/** 全局设置 Zustand Store（自动持久化、旧版裸 JSON 兼容迁移、多标签页自动同步） */
+export const useSettingsStore = createStore<SettingsStoreState>()(
+  persist(
+    (set, get) => ({
+      ...DEFAULT_SETTINGS,
+      update: (patch) => {
+        const next = sanitizeSettings({ ...pickSettings(get()), ...patch });
+        set(next);
+        return next;
+      },
+      reset: () => set({ ...DEFAULT_SETTINGS }),
+    }),
+    {
+      name: KEY,
+      version: 1,
+      storage: createCompatStorage<Settings>(),
+      partialize: (state) => pickSettings(state),
+      merge: (persisted, current) => ({
+        ...current,
+        ...sanitizeSettings(persisted as Partial<Settings> | undefined),
+      }),
+    },
+  ),
+);
+
+syncOnStorageEvent(KEY, () => {
+  void useSettingsStore.persist.rehydrate();
+});
+
+export function getSettings(): Settings {
+  return pickSettings(useSettingsStore.getState());
+}
+
 export function updateSettings(patch: Partial<Settings>): Settings {
-  const s = Object.assign(getSettings(), patch);
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(s));
-  } catch {
-    // 写不进去就只在本次会话生效
-  }
-  return s;
+  return useSettingsStore.getState().update(patch);
 }
 
 export function volumeLabel(v: number): string {

@@ -85,7 +85,10 @@ const MAX_LIFE = 6;
 
 export class ProjectileManager {
   onExplode: ((r: number) => void) | null = null;
+  /** 爆炸 6 件套觉醒：爆炸后 0.35 秒触发二次余震 */
+  aftershockEnabled = false;
   private readonly list: Projectile[] = [];
+  private readonly aftershocks: { x: number; y: number; r: number; damage: number; t: number; src: HitSource | null }[] = [];
   /** 整包复用 Projectile 对象与 hits 数组，减少高频弹幕的 GC 抖动 */
   private readonly pool: Projectile[] = [];
   private readonly buf: Enemy[] = [];
@@ -161,6 +164,23 @@ export class ProjectileManager {
 
   /** px/py：玩家位置（回旋叶刃要飞回来） */
   update(dt: number, enemies: EnemyManager, px: number, py: number): void {
+    // 爆炸 6 件套二次余震结算
+    for (let i = this.aftershocks.length - 1; i >= 0; i--) {
+      const a = this.aftershocks[i];
+      a.t -= dt;
+      if (a.t > 0) continue;
+      this.aftershocks.splice(i, 1);
+      sfx.play('explode');
+      this.fx.explosion(a.x, a.y, a.r, 0xffd048, 1);
+      for (const e of enemies.grid.query(a.x, a.y, a.r + MAX_ENEMY_RADIUS, this.aoeBuf).slice()) {
+        if (!e.active) continue;
+        const dx = e.x - a.x;
+        const dy = e.y - a.y;
+        if (dx * dx + dy * dy > (a.r + e.radius) ** 2) continue;
+        const d = Math.hypot(dx, dy) || 1;
+        this.resolver.hit(e, a.damage, false, dx / d, dy / d, 90, a.src);
+      }
+    }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.life += dt;
@@ -237,6 +257,7 @@ export class ProjectileManager {
   }
 
   clear(): void {
+    this.aftershocks.length = 0;
     for (let i = this.list.length - 1; i >= 0; i--) this.release(i);
   }
 
@@ -365,6 +386,16 @@ export class ProjectileManager {
       if (dx * dx + dy * dy > rr * rr) continue;
       const d = Math.hypot(dx, dy) || 1;
       this.resolver.hit(e, p.damage, p.crit, dx / d, dy / d, p.knockback, p.src ?? null);
+    }
+    if (this.aftershockEnabled && p.explode >= 30) {
+      this.aftershocks.push({
+        x: p.x,
+        y: p.y,
+        r: Math.round(p.explode * 0.85),
+        damage: Math.max(2, Math.round(p.damage * 0.55)),
+        t: 0.35,
+        src: p.src ?? null,
+      });
     }
   }
 

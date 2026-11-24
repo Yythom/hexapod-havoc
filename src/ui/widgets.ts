@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import { DISPLAY_FONT, FONT_FAMILY, NUM_FONT, fontPx } from '../config';
 import { effectiveRange, growthBonus, rangeOverflowBonus, weaponDamage } from '../core/combat';
+import { WEAPON_ENCHANTS } from '../core/contracts';
+import type { SlotBonus } from '../core/legSynergy';
 import type { OwnedWeapon } from '../core/RunState';
+import { CURSED_OFFER_CURSE, cursedItemExtraStats } from '../core/shop';
 import { attackInterval, BASE_STATS, formatStat, formatStatDelta, STAT_META, type Stats } from '../core/stats';
 import { MOD_LABEL, type ItemDef, type Mods } from '../data/items';
 import { CLASS_LABEL, KIND_LABEL, TIERS, tierOf, type WeaponClass, type WeaponDef } from '../data/weapons';
@@ -407,16 +410,30 @@ export interface Line {
   color: string;
 }
 
-/** 道具效果描述：属性（正面绿色、负面红色）、规则加成、触发效果 */
-export function itemLines(def: ItemDef): Line[] {
-  const lines: Line[] = (Object.entries(def.stats) as [keyof Stats, number][]).map(([k, v]) => ({
-    text: `${STAT_META[k].label} ${formatStatDelta(k, v)}`,
-    color: v >= 0 ? COLOR.good : COLOR.bad,
-  }));
+/** 道具效果描述：属性（正面绿色、负面红色）、规则加成、触发效果；诅咒版本额外标出紫火增幅 */
+export function itemLines(def: ItemDef, cursed = false): Line[] {
+  const extra = cursed ? cursedItemExtraStats(def.id) : {};
+  const lines: Line[] = (Object.entries(def.stats) as [keyof Stats, number][]).map(([k, v]) => {
+    const bonus = extra[k] ?? 0;
+    const tot = v + bonus;
+    const tag = bonus > 0 ? ` (诅咒+${formatStat(k, bonus)})` : '';
+    return {
+      text: `${STAT_META[k].label} ${formatStatDelta(k, tot)}${tag}`,
+      color: bonus > 0 ? '#e2a8ff' : v >= 0 ? COLOR.good : COLOR.bad,
+    };
+  });
   for (const [k, v] of Object.entries(def.mods ?? {}) as [keyof Mods, number][]) {
-    const bad = k === 'maxHpPct' ? v < 0 : k === 'pricePct' ? v > 0 : v < 0;
+    const bad =
+      k === 'maxHpPct'
+        ? v < 0
+        : k === 'pricePct' || k === 'dashCooldownPct'
+          ? v > 0
+          : k === 'selfDamagePerSec' || k === 'trianglePenalty'
+            ? v > 0
+            : v < 0;
     lines.push({ text: MOD_LABEL[k](v), color: bad ? COLOR.bad : COLOR.good });
   }
+  if (cursed) lines.push({ text: `✦ 紫火诅咒：购买时 诅咒 +${CURSED_OFFER_CURSE}`, color: '#d898ff' });
   if (def.desc) lines.push({ text: def.desc.replace(/ /g, ''), color: COLOR.special });
   if (def.unique) lines.push({ text: '✦ 唯一道具', color: COLOR.goldText });
   return lines;
@@ -481,19 +498,30 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
   return parts.join('，');
 }
 
-/** 武器说明：按当前属性算出的实际数值 */
-export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mods, owned?: OwnedWeapon | null): Line[] {
-  let dmg = weaponDamage(def, tier, stats, mods, owned);
+/** 武器说明：按当前属性算出的实际数值（含六足位阶、紫火诅咒、附魔与 IV 阶觉醒） */
+export function weaponLines(
+  def: WeaponDef,
+  tier: number,
+  stats: Stats,
+  mods: Mods,
+  owned?: OwnedWeapon | null,
+  slotBonus?: SlotBonus | null,
+  cursed = false,
+): Line[] {
+  const isCursed = !!(owned?.cursed || cursed);
+  const simOwned = isCursed && !owned ? ({ id: def.id, tier, cursed: true } as OwnedWeapon) : owned;
+  let dmg = weaponDamage(def, tier, stats, mods, simOwned, 1, undefined, 0, 1, slotBonus);
   if (def.summon) dmg *= 1 + mods.summonDamagePct;
   const t = tierOf(def, tier);
   const scaling = Object.entries(t.scaling)
     .map(([k, c]) => `${STAT_META[k as keyof Stats].label}×${Math.round((c as number) * 100)}%`)
     .join(' ');
   const isDevice = !!def.device;
+  const effAspd = stats.attackSpeedPct + (slotBonus?.attackSpeedPct ?? 0) + (isCursed ? 0.1 : 0);
   const interval = isDevice
     ? t.cooldown / (def.device!.type === 'turret' ? Math.max(0.2, 1 + mods.turretSpeedPct) : 1)
-    : attackInterval(t.cooldown, stats);
-  const range = effectiveRange(def, stats, tier);
+    : attackInterval(t.cooldown, { ...stats, attackSpeedPct: effAspd });
+  const range = effectiveRange(def, stats, tier, slotBonus);
   const overflow = rangeOverflowBonus(def, stats, tier);
   const dmgLabel =
     def.summon?.type === 'web' ? `每秒伤害 ${Math.round(dmg)}` : def.summon ? `每只伤害 ${Math.round(dmg)}` : def.beam ? `每次伤害 ${Math.round(dmg)}` : `伤害 ${Math.round(dmg)}`;
@@ -502,10 +530,17 @@ export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mo
   else if (def.device?.type === 'mine') timing = `每 ${interval.toFixed(1)} 秒埋一颗`;
   else timing = `间隔 ${interval.toFixed(2)} 秒 · 射程 ${Math.round(range)}${overflow > 0 ? ` (+${Math.round(overflow * 100)}%伤)` : ''}`;
   const lines: Line[] = [
-    { text: dmgLabel, color: COLOR.text },
+    { text: dmgLabel, color: isCursed ? '#e6b0ff' : COLOR.text },
     { text: scaling ? `加成 ${scaling}` : '加成 伤害%', color: COLOR.dim },
     { text: timing, color: COLOR.text },
   ];
+  if (isCursed) lines.push({ text: `✦ 紫火诅咒：伤害 +25% · 攻速 +10%${cursed && !owned ? `（诅咒 +${CURSED_OFFER_CURSE}）` : ''}`, color: '#d898ff' });
+  if (owned?.enchant) {
+    const enc = WEAPON_ENCHANTS[owned.enchant];
+    lines.push({ text: `✦ ${enc.name}：${enc.desc}`, color: enc.css });
+  }
+  if (tier >= 3) lines.push({ text: '★ 传说觉醒：暴击 +5% · 处决 ≤15% 血小怪', color: COLOR.goldText });
+  if (slotBonus) lines.push({ text: `六足：${slotBonus.summary}`, color: COLOR.good });
   const special = weaponSpecial(def, tier, mods, owned);
   if (special) lines.push({ text: special, color: COLOR.special });
   return lines;

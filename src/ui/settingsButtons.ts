@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { bgm } from '../audio/bgm';
 import { sfx } from '../audio/sfx';
 import { exportSaveCode, importSaveCode } from '../core/save';
 import { damageNumbersLabel, getSettings, nextDamageNumbers, nextVolume, updateSettings, volumeLabel } from '../core/settings';
@@ -31,10 +30,7 @@ export function addSettingsButtons(
         rowY0,
         `音效：${volumeLabel(s.volume)}`,
         () => {
-          const v = nextVolume(getSettings().volume);
-          updateSettings({ volume: v });
-          sfx.setVolume(v);
-          bgm.setVolume(v);
+          updateSettings({ volume: nextVolume(getSettings().volume) });
           build();
         },
         { width: bw, height: bh, fontSize: 17, primary: false },
@@ -45,9 +41,7 @@ export function addSettingsButtons(
         rowY0,
         `音乐：${s.bgm ? '开' : '关'}`,
         () => {
-          const next = !getSettings().bgm;
-          updateSettings({ bgm: next });
-          bgm.setEnabled(next);
+          updateSettings({ bgm: !getSettings().bgm });
           build();
         },
         { width: bw, height: bh, fontSize: 17, primary: false },

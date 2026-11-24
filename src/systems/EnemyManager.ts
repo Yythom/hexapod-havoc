@@ -53,6 +53,17 @@ interface Strike {
   damage: number;
 }
 
+/** 地面延迟斩击（镰刃螳虫 V 字斩 / 曜石甲像 X 斩） */
+interface GroundSlash {
+  x: number;
+  y: number;
+  angle: number;
+  length: number;
+  width: number;
+  t: number;
+  damage: number;
+}
+
 /** 怪物需要从战斗场景拿到的东西 */
 export interface EnemyHost {
   readonly px: number;
@@ -66,6 +77,10 @@ export interface EnemyHost {
   readonly curse: number;
   /** 每日挑战等特殊词条给怪物的移速倍率 */
   readonly enemySpeedMult?: number;
+  /** 爆裂派对：气囊虫自爆/被击杀对周围敌群造成强力连锁伤害 */
+  readonly boomParty?: boolean;
+  /** 落雷劈中水洼导电回调 */
+  onLightningStrike?(x: number, y: number, damage: number): void;
   /** 对玩家造成伤害（走闪避、甲壳、无敌时间） */
   hurtPlayer(damage: number): void;
   shoot(x: number, y: number, angle: number, speed: number, damage: number, kind?: EnemyShotKind): void;
@@ -78,10 +93,19 @@ export class Enemy {
   def!: EnemyDef;
   index = -1;
   hp = 0;
+  /** 最后一次命中是否为暴击（猎手战利品暴击击杀判定用） */
+  lastHitCrit = false;
+  /** 最后一次命中是否为近战武器（棘球毒虫亡语近战截断判定用） */
+  lastHitMelee = false;
+  /** 多阶段精英的当前血量阶段（曜石甲像 0→1→2） */
+  phase = 0;
   maxHp = 0;
   damage = 0;
   skillDamage = 0;
   speed = 0;
+  baseSpeed = 0;
+  /** 是否受到狂化鸣蝉（Buffer）强化：血量/移速/伤害提升且全身泛红光环 */
+  buffed = false;
   radius = 10;
   baseScale = 1;
   x = 0;
@@ -134,6 +158,10 @@ export class Enemy {
   frozen = 0;
   freezeImmune = 0;
   vulnTime = 0;
+  /** 踩进雨天/露珠水洼后的潮湿剩余时间（受冰/电/元素伤 +25%，移速 -10%） */
+  wetTime = 0;
+  /** 紫火诅咒变异怪（血厚、微强、击杀双倍花蜜 + 额外宝箱率） */
+  cursed = false;
 
   constructor(scene: Phaser.Scene, texture: string) {
     this.sprite = scene.add.image(0, 0, texture).setDepth(DEPTH.enemy).setVisible(false);
@@ -151,7 +179,9 @@ export class EnemyManager {
   onPoisonDamage: ((damage: number) => void) | null = null;
   private readonly pool: Enemy[] = [];
   private readonly buf: Enemy[] = [];
+  private readonly supportBuf: Enemy[] = [];
   private readonly strikes: Strike[] = [];
+  private readonly slashes: GroundSlash[] = [];
   /** 冻住的怪身上的冰壳 */
   private readonly iceG: Phaser.GameObjects.Graphics;
 
@@ -173,9 +203,14 @@ export class EnemyManager {
     e.def = def;
     const curseMult = 1 + Math.max(0, this.host.curse) * 0.01;
     e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult;
+    e.lastHitCrit = false;
+    e.lastHitMelee = false;
+    e.phase = 0;
     e.damage = enemyDamage(def, wave) * mult * curseMult;
     e.skillDamage = enemySkillDamage(def, wave) * mult * curseMult;
     e.speed = def.speed * (def.boss || def.elite ? 1 : Phaser.Math.FloatBetween(0.92, 1.08)) * (this.host.enemySpeedMult ?? 1);
+    e.baseSpeed = e.speed;
+    e.buffed = false;
     e.storm = false;
     e.timer3 = 0;
     e.affix = null;
@@ -194,7 +229,22 @@ export class EnemyManager {
     e.wobble = Math.random() * Math.PI * 2;
     e.heading = Math.random() * Math.PI * 2;
     e.state = 0;
-    e.timer = def.behavior === 'ranged' ? 1 + Math.random() * 1.5 : def.behavior === 'elite' ? 2 : def.behavior === 'summoner' ? 2.5 : 1.2;
+    e.timer =
+      def.behavior === 'egg'
+        ? 5.0
+        : def.behavior === 'ranged'
+          ? 1 + Math.random() * 1.5
+          : def.behavior === 'slasher'
+            ? 1.4 + Math.random() * 0.7
+            : def.behavior === 'lamprey'
+              ? 0.8 + Math.random() * 0.4
+              : def.behavior === 'spitter'
+                ? 1.1 + Math.random() * 0.8
+                : def.behavior === 'elite' || def.behavior === 'elite_gargoyle'
+                  ? 1.8
+                  : def.behavior === 'summoner'
+                    ? 2.5
+                    : 1.2;
     e.timer2 = 0;
     e.count = 0;
     e.enraged = false;
@@ -204,6 +254,25 @@ export class EnemyManager {
     e.burnTime = e.burnDps = e.burnTick = e.burnAcc = 0;
     e.ice = e.iceTime = e.frozen = e.freezeImmune = 0;
     e.vulnTime = 0;
+    e.wetTime = 0;
+    e.cursed = false;
+    if (
+      this.host.curse > 0 &&
+      !def.boss &&
+      def.behavior !== 'tree' &&
+      def.behavior !== 'lootbug' &&
+      def.behavior !== 'egg' &&
+      def.behavior !== 'curse_slug' &&
+      Math.random() < Math.min(0.45, 0.06 + this.host.curse * 0.025)
+    ) {
+      e.cursed = true;
+      e.maxHp = e.hp = e.maxHp * 2.0;
+      e.speed *= 1.15;
+      e.baseSpeed = e.speed;
+      e.damage *= 1.25;
+      e.skillDamage *= 1.25;
+      e.baseScale *= 1.14;
+    }
     e.active = true;
     e.sprite
       .setTexture(def.texture)
@@ -229,6 +298,7 @@ export class EnemyManager {
 
   update(dt: number): void {
     this.updateStrikes(dt);
+    this.updateSlashes(dt);
     this.iceG.clear();
     const grid = this.grid;
     grid.clear();
@@ -245,12 +315,12 @@ export class EnemyManager {
       const frozen = e.frozen > 0;
       const [vx0, vy0] = e.age >= SPAWN_POP && !frozen ? this.behave(e, dt) : [0, 0];
       if (!e.active) continue;
-      const slow = (e.slowTime > 0 ? e.slowMult : 1) * (1 - ICE_SLOW * e.ice);
+      const slow = (e.slowTime > 0 ? e.slowMult : 1) * (1 - ICE_SLOW * e.ice) * (e.wetTime > 0 ? 0.9 : 1);
       let vx = vx0 * slow;
       let vy = vy0 * slow;
 
-      // 互相推开，避免叠成一坨（Boss 和蜜树不被推）
-      if (!e.def.boss && e.def.behavior !== 'tree') {
+      // 互相推开，避免叠成一坨（Boss、蜜树和魔卵不被推）
+      if (!e.def.boss && e.def.behavior !== 'tree' && e.def.behavior !== 'egg') {
         let sx = 0;
         let sy = 0;
         for (const o of grid.query(e.x, e.y, e.radius + MAX_ENEMY_RADIUS, this.buf)) {
@@ -278,9 +348,15 @@ export class EnemyManager {
       e.kx *= decay;
       e.ky *= decay;
 
-      e.x = Phaser.Math.Clamp(e.x + vx * dt, EDGE, WORLD_WIDTH - EDGE);
-      e.y = Phaser.Math.Clamp(e.y + vy * dt, EDGE, WORLD_HEIGHT - EDGE);
-      if (!frozen && e.def.behavior !== 'tree') {
+      const nx = e.x + vx * dt;
+      const ny = e.y + vy * dt;
+      if (e.def.behavior === 'mummy') {
+        if (nx <= EDGE || nx >= WORLD_WIDTH - EDGE) e.kx = -e.kx * 0.85;
+        if (ny <= EDGE || ny >= WORLD_HEIGHT - EDGE) e.ky = -e.ky * 0.85;
+      }
+      e.x = Phaser.Math.Clamp(nx, EDGE, WORLD_WIDTH - EDGE);
+      e.y = Phaser.Math.Clamp(ny, EDGE, WORLD_HEIGHT - EDGE);
+      if (!frozen && e.def.behavior !== 'tree' && e.def.behavior !== 'egg') {
         const face = Math.hypot(vx0, vy0) > 1 ? Math.atan2(vy0, vx0) : Math.atan2(this.host.py - e.y, this.host.px - e.x);
         e.heading = Phaser.Math.Angle.RotateTo(e.heading, face, (e.def.boss ? 3 : 8) * dt);
       }
@@ -289,7 +365,7 @@ export class EnemyManager {
   }
 
   /** 造成伤害，返回是否击杀 */
-  hit(e: Enemy, damage: number, crit: boolean, dirX: number, dirY: number, knockback: number, kind: HitKind = 'normal'): boolean {
+  hit(e: Enemy, damage: number, crit: boolean, dirX: number, dirY: number, knockback: number, kind: HitKind = 'normal', melee = false): boolean {
     if (!e.active) return false;
     // 易伤、余烬：受到的伤害增加
     const mods = this.host.mods;
@@ -306,14 +382,33 @@ export class EnemyManager {
       e.hp -= damage;
     }
     if (kind === 'normal') {
+      e.lastHitCrit = crit;
+      e.lastHitMelee = melee;
       e.flash = 0.07;
       // 受击挤压弹跳：暴击/精英/Boss/重击更 Q 弹，增强打击实感
       const amp = crit ? 0.3 : e.def.elite || e.def.boss ? 0.22 : knockback >= 110 ? 0.18 : 0.12;
       e.squash = 0.16;
       e.squashAmp = Math.max(e.squashAmp, amp);
       const resist = e.def.knockbackResist ?? 0;
-      e.kx += dirX * knockback * (1 - resist);
-      e.ky += dirY * knockback * (1 - resist);
+      let kxDir = dirX;
+      let kyDir = dirY;
+      if (e.def.behavior === 'mummy' && knockback > 20) {
+        // 滚球毛虫（Mummy）：高击退会带轻微台球斜弹角并飙出尘花
+        const jitter = (Math.random() - 0.5) * 0.65;
+        const c = Math.cos(jitter);
+        const sn = Math.sin(jitter);
+        kxDir = dirX * c - dirY * sn;
+        kyDir = dirX * sn + dirY * c;
+        this.fx.burst(e.x, e.y, 0xead8a8, 3, 120, 0.65);
+      }
+      const kbScale = 1 - resist;
+      e.kx += kxDir * knockback * kbScale;
+      e.ky += kyDir * knockback * kbScale;
+      const kLen = Math.hypot(e.kx, e.ky);
+      if (kLen > 780) {
+        e.kx = (e.kx / kLen) * 780;
+        e.ky = (e.ky / kLen) * 780;
+      }
       this.fx.number(e.x, e.y - e.radius - 6, damage, crit ? 'crit' : 'normal');
       sfx.play(crit ? 'crit' : 'hit');
       this.onDamaged?.(e, damage, crit);
@@ -397,6 +492,7 @@ export class EnemyManager {
   /** 波次结束：所有敌人消散，不掉落 */
   clearAll(): void {
     this.strikes.length = 0;
+    this.slashes.length = 0;
     this.iceG.clear();
     for (let i = this.active.length - 1; i >= 0; i--) {
       const e = this.active[i];
@@ -435,11 +531,26 @@ export class EnemyManager {
       this.spreadBurn(e);
       if (this.host.mods.burnExplode > 0 && !isTree) this.explodeBurn(e);
     }
+    if (e.def.behavior === 'puffer') {
+      // 棘球毒虫（原版河豚）：远程/毒烧击杀 8 向爆出慢速弹幕，近战劈死精准截断不爆！
+      if (e.lastHitMelee) {
+        this.fx.ring(e.x, e.y, e.radius + 16, 0x78f4d8);
+      } else {
+        const baseA = Math.random() * Math.PI * 2;
+        for (let k = 0; k < 8; k++) {
+          const a = baseA + (k / 8) * Math.PI * 2;
+          this.host.shoot(e.x, e.y, a, 155, e.skillDamage, 'orb');
+        }
+        this.fx.ring(e.x, e.y, 48, 0xff3878);
+        sfx.play('spit');
+      }
+    }
     const split = e.def.splitInto;
     if (split) {
+      if (e.def.id === 'spawner') this.fx.ring(e.x, e.y, 44, 0xd458d8);
       for (let k = 0; k < split.count; k++) {
         const a = (k / split.count) * Math.PI * 2 + Math.random();
-        this.spawnChild(split.id, e.x + Math.cos(a) * 12, e.y + Math.sin(a) * 12);
+        this.spawnChild(split.id, e.x + Math.cos(a) * 14, e.y + Math.sin(a) * 14);
       }
     }
     this.onKilled?.(e);
@@ -502,7 +613,45 @@ export class EnemyManager {
       .setDepth(DEPTH.text - 1);
   }
 
-  /** 雷暴落雷：预警结束时劈下，玩家在圈里就受伤 */
+  /** 登记一条延迟劈落的地面斩击带（同步创建红色地面预警带） */
+  private queueGroundSlash(x: number, y: number, angle: number, length: number, width: number, delay: number, damage: number): void {
+    this.slashes.push({ x, y, angle, length, width, t: delay, damage });
+    this.tel.line(x, y, angle, length, width, delay);
+  }
+
+  /** 地面斩击结算：计时归零时沿线爆发猩红刀光，玩家踩在斩击带内即受伤 */
+  private updateSlashes(dt: number): void {
+    const h = this.host;
+    for (let i = this.slashes.length - 1; i >= 0; i--) {
+      const s = this.slashes[i];
+      s.t -= dt;
+      if (s.t > 0) continue;
+      this.slashes.splice(i, 1);
+      const c = Math.cos(s.angle);
+      const sn = Math.sin(s.angle);
+      const x1 = s.x + c * s.length;
+      const y1 = s.y + sn * s.length;
+      const mx = (s.x + x1) * 0.5;
+      const my = (s.y + y1) * 0.5;
+      this.fx.hitSlash(mx, my, s.angle, 0xff3b58, Math.max(1.2, s.length / 115));
+      this.fx.burst(s.x, s.y, 0xff5468, 4, 110, 0.7);
+      this.fx.burst(x1, y1, 0xff5468, 4, 110, 0.7);
+      sfx.play('spit');
+      // 点到线段最近距离判定
+      const vx = x1 - s.x;
+      const vy = y1 - s.y;
+      const len2 = vx * vx + vy * vy || 1;
+      const proj = Phaser.Math.Clamp(((h.px - s.x) * vx + (h.py - s.y) * vy) / len2, 0, 1);
+      const cx = s.x + vx * proj;
+      const cy = s.y + vy * proj;
+      const hitR = s.width * 0.5 + h.pr * 0.85;
+      if ((h.px - cx) ** 2 + (h.py - cy) ** 2 <= hitR * hitR) {
+        h.hurtPlayer(s.damage);
+      }
+    }
+  }
+
+  /** 雷暴落雷：预警结束时劈下，玩家在圈里就受伤，同时可引怪借天雷劈杀 */
   private updateStrikes(dt: number): void {
     const h = this.host;
     for (let i = this.strikes.length - 1; i >= 0; i--) {
@@ -517,12 +666,23 @@ export class EnemyManager {
       const dy = h.py - s.y;
       const rr = s.r + h.pr;
       if (dx * dx + dy * dy < rr * rr) h.hurtPlayer(s.damage);
+      const enemyStrikeDmg = Math.max(12, Math.round(s.damage * 4.2));
+      for (const e of this.grid.query(s.x, s.y, s.r + MAX_ENEMY_RADIUS, this.buf).slice()) {
+        if (!e.active || e.def.behavior === 'tree') continue;
+        const ex = e.x - s.x;
+        const ey = e.y - s.y;
+        if (ex * ex + ey * ey > (s.r + e.radius) ** 2) continue;
+        const d = Math.hypot(ex, ey) || 1;
+        this.hit(e, e.def.boss ? Math.round(enemyStrikeDmg * 0.4) : enemyStrikeDmg, false, ex / d, ey / d, 180);
+      }
+      h.onLightningStrike?.(s.x, s.y, enemyStrikeDmg);
     }
   }
 
   private updateStatus(e: Enemy, dt: number): void {
     if (e.affix === 'regen' && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * REGEN_RATE * dt);
     if (e.slowTime > 0) e.slowTime -= dt;
+    if (e.wetTime > 0) e.wetTime = Math.max(0, e.wetTime - dt);
     if (e.frozen > 0) {
       e.frozen -= dt;
       if (e.frozen <= 0) {
@@ -581,10 +741,21 @@ export class EnemyManager {
     const s = e.sprite;
     s.setPosition(e.x, e.y);
     const isTree = e.def.behavior === 'tree';
+    const isEgg = e.def.behavior === 'egg';
     const wob = e.frozen > 0 || isTree ? 0 : e.def.boss ? 0.03 : 0.14;
-    s.setRotation(isTree ? 0 : e.heading + Math.sin(e.age * 16 + e.wobble) * wob);
+    if (isEgg) {
+      const urgency = Phaser.Math.Clamp(1 - e.timer / 5, 0, 1);
+      s.setRotation(Math.sin(e.age * (12 + urgency * 28) + e.wobble) * (0.04 + urgency * 0.14));
+    } else {
+      s.setRotation(isTree ? 0 : e.heading + Math.sin(e.age * 16 + e.wobble) * wob);
+    }
     let scale = e.baseScale;
     if (e.age < SPAWN_POP) scale *= Phaser.Math.Easing.Back.Out(e.age / SPAWN_POP);
+    if (e.buffed) scale *= 1.16;
+    if (isEgg) {
+      const urgency = Phaser.Math.Clamp(1 - e.timer / 5, 0, 1);
+      scale *= 1 + urgency * 0.18 + Math.sin(e.age * (8 + urgency * 18)) * 0.06;
+    }
     if (e.def.behavior === 'bomber' && e.state === 1) scale *= 1 + (1 - e.timer) * 0.6;
     if (e.def.behavior === 'boss' && e.state === 21) scale *= 1 + Math.sin((1 - e.timer / 0.35) * Math.PI) * 0.25;
     if (e.squash > 0) {
@@ -609,16 +780,62 @@ export class EnemyManager {
       s.setTint(0xffb4c8);
     } else if (e.slowTime > 0 || e.ice > 0) {
       s.setTint(0xc0d8ff);
-    } else if (e.def.behavior === 'charger' && e.state === 1) {
+    } else if ((e.def.behavior === 'charger' || e.def.behavior === 'lamprey') && e.state === 1) {
       s.setTint(0xff9a8a);
+    } else if (e.buffed) {
+      s.setTint(0xff7878);
+    } else if (e.def.behavior === 'elite_gargoyle' && e.phase >= 2) {
+      s.setTint(0xff8ca8);
     } else if (e.affix && (e.affix !== 'shield' || e.shieldHp > 0)) {
       s.setTint(AFFIX_LABEL[e.affix].tint);
+    } else if (e.cursed) {
+      s.setTint(0xd08cff);
     } else {
       s.clearTint();
     }
     e.label?.setPosition(e.x, e.y - e.radius - 16);
+    if (e.buffed) {
+      // 土豆兄弟经典 Buffer 特征：被强化的敌人周身带醒目赤红轮廓圈
+      const g = this.iceG;
+      g.lineStyle(2.4, 0xff3b44, 0.85);
+      g.strokeCircle(e.x, e.y, e.radius * 1.18 + 3);
+    }
+    if (e.cursed) {
+      const g = this.iceG;
+      g.lineStyle(2.4, 0xc058ff, 0.86);
+      g.strokeCircle(e.x, e.y, e.radius + (e.buffed ? 8 : 4) + Math.sin(e.age * 8) * 1.4);
+      if (Math.random() < dt * 7) this.fx.burst(e.x, e.y, 0xc854ff, 1, 48, 0.52);
+    }
+    if (isEgg) {
+      // 魔卵 5 秒孵化倒计时圆弧环
+      const g = this.iceG;
+      const prog = Phaser.Math.Clamp(1 - e.timer / 5, 0, 1);
+      const r = e.radius + 7;
+      g.lineStyle(3.2, 0x050507, 0.72);
+      g.strokeCircle(e.x, e.y, r);
+      g.lineStyle(2.4, prog > 0.65 ? 0xff3b48 : 0xffc848, 0.96);
+      g.beginPath();
+      g.arc(e.x, e.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog, false);
+      g.strokePath();
+    }
+    if (e.def.behavior === 'curse_slug') {
+      const g = this.iceG;
+      const pulse = 0.7 + 0.3 * Math.sin(e.age * 6 + e.wobble);
+      g.lineStyle(2.0, 0xb65cff, 0.78 * pulse);
+      g.strokeCircle(e.x, e.y, e.radius + 5);
+    }
+    if (e.def.behavior === 'elite_gargoyle' && e.phase > 0) {
+      const g = this.iceG;
+      g.lineStyle(2.6, e.phase >= 2 ? 0xff3858 : 0xd058ff, 0.86);
+      g.strokeCircle(e.x, e.y, e.radius + 6);
+    }
+    if (e.wetTime > 0) {
+      const g = this.iceG;
+      g.lineStyle(1.4, 0x62d8ff, 0.65);
+      g.strokeCircle(e.x, e.y, e.radius + 2);
+    }
     if (e.frozen > 0) this.drawIce(e);
-    if (e.def.behavior === 'lootbug' || (isTree && e.hp < e.maxHp)) {
+    if (e.def.behavior === 'lootbug' || isEgg || (isTree && e.hp < e.maxHp)) {
       const g = this.iceG;
       const bw = 28;
       const bh = 4;
@@ -626,7 +843,7 @@ export class EnemyManager {
       const by = e.y - e.radius - 10;
       g.fillStyle(0x050507, 0.85);
       g.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-      g.fillStyle(e.def.id === 'boomshroom' ? 0xff6288 : isTree ? 0x62d858 : 0xffd038, 1);
+      g.fillStyle(isEgg ? 0xff6a78 : e.def.id === 'boomshroom' ? 0xff6288 : e.def.id === 'deworb' ? 0x62e2ff : isTree ? 0x62d858 : 0xffd038, 1);
       g.fillRect(bx, by, Math.max(2, bw * Math.max(0, e.hp / e.maxHp)), bh);
     }
   }
@@ -721,12 +938,22 @@ export class EnemyManager {
         }
         e.timer -= dt;
         if (e.timer <= 0) {
-          // 自爆：不掉落
-          const rr = 90 + h.pr;
+          // 自爆：对玩家与周围敌人同样有冲击（爆裂派对下友伤翻 3 倍）
+          const r = 90;
+          const rr = r + h.pr;
           const px = h.px - e.x;
           const py = h.py - e.y;
           if (px * px + py * py < rr * rr) h.hurtPlayer(e.skillDamage);
-          this.fx.explosion(e.x, e.y, 90, 0xff7858, 1);
+          const splashDmg = Math.max(8, Math.round(e.maxHp * (h.boomParty ? 2.4 : 0.65)));
+          for (const o of this.grid.query(e.x, e.y, r + MAX_ENEMY_RADIUS, this.buf).slice()) {
+            if (!o.active || o === e || o.def.behavior === 'tree') continue;
+            const ox = o.x - e.x;
+            const oy = o.y - e.y;
+            if (ox * ox + oy * oy > (r + o.radius) ** 2) continue;
+            const od = Math.hypot(ox, oy) || 1;
+            this.hit(o, o.def.boss ? Math.round(splashDmg * 0.35) : splashDmg, false, ox / od, oy / od, 160);
+          }
+          this.fx.explosion(e.x, e.y, r, 0xff7858, 1);
           sfx.play('explode');
           this.die(e, false);
         }
@@ -747,11 +974,229 @@ export class EnemyManager {
         return [-uy * side * e.speed * 0.7, ux * side * e.speed * 0.7];
       }
 
+      case 'pursuer': {
+        // 疾影猎虫（Pursuer）：存活越久越快，最高叠到基础移速 2.4 倍，逼迫优先击杀
+        e.speed = Math.min(e.baseSpeed * 2.4, e.speed + 14 * dt);
+        if (e.speed > e.baseSpeed * 1.45 && Math.random() < dt * 10) {
+          this.fx.burst(e.x, e.y, 0xff7a34, 1, 55, 0.55);
+        }
+        return [ux * e.speed, uy * e.speed];
+      }
+
+      case 'buffer': {
+        // 狂化鸣蝉（Buffer）：远离玩家躲在虫群后方，周期给周围友军挂上狂化 Buff（血+100%/速+45%/伤+25%）
+        e.timer -= dt;
+        if (e.timer <= 0) {
+          e.timer = 2.6;
+          const R = 225;
+          const near = this.grid.query(e.x, e.y, R, this.supportBuf);
+          let applied = 0;
+          for (const ally of near) {
+            if (!ally.active || ally === e || ally.buffed) continue;
+            if (
+              ally.def.boss ||
+              ally.def.behavior === 'tree' ||
+              ally.def.behavior === 'lootbug' ||
+              ally.def.behavior === 'buffer' ||
+              ally.def.behavior === 'egg' ||
+              ally.def.behavior === 'curse_slug'
+            ) {
+              continue;
+            }
+            if ((ally.x - e.x) ** 2 + (ally.y - e.y) ** 2 > R * R) continue;
+            ally.buffed = true;
+            ally.maxHp *= 2;
+            ally.hp *= 2;
+            ally.speed *= 1.45;
+            ally.baseSpeed *= 1.45;
+            ally.damage *= 1.25;
+            ally.skillDamage *= 1.25;
+            ally.flash = 0.08;
+            applied++;
+            if (applied >= 6) break;
+          }
+          if (applied > 0) {
+            this.fx.ring(e.x, e.y, R, 0xff4048);
+            this.fx.burst(e.x, e.y, 0xff5a50, 8, 120, 0.85);
+            e.flash = 0.08;
+          }
+        }
+        if (d < 360) return [-ux * e.speed, -uy * e.speed];
+        const side = Math.sin(e.wobble) > 0 ? 1 : -1;
+        return [-uy * side * e.speed * 0.72, ux * side * e.speed * 0.72];
+      }
+
+      case 'healer': {
+        // 绿露医虫（Healer）：贴近受伤虫群，周期释放翠绿治疗波为周围友军回血
+        e.timer -= dt;
+        const R = 215;
+        if (e.timer <= 0) {
+          e.timer = 2.5;
+          const healBase = Math.round((32 + 14 * h.wave) * h.difficulty.mult);
+          const near = this.grid.query(e.x, e.y, R, this.supportBuf);
+          let healed = 0;
+          for (const ally of near) {
+            if (!ally.active || ally === e || ally.hp >= ally.maxHp) continue;
+            if (ally.def.behavior === 'tree' || ally.def.behavior === 'lootbug') continue;
+            if ((ally.x - e.x) ** 2 + (ally.y - e.y) ** 2 > R * R) continue;
+            const amount = ally.def.boss ? Math.round(healBase * 0.5) : healBase;
+            ally.hp = Math.min(ally.maxHp, ally.hp + amount);
+            this.fx.burst(ally.x, ally.y - ally.radius * 0.4, 0x5de878, 3, 65, 0.65);
+            healed++;
+          }
+          if (healed > 0) {
+            this.fx.ring(e.x, e.y, R, 0x5de878);
+            e.flash = 0.08;
+          }
+        }
+        // 优先靠近附近血量最低的友军，同时保持与玩家的安全距离
+        let target: Enemy | null = null;
+        let bestRatio = 0.99;
+        for (const ally of this.grid.query(e.x, e.y, 340, this.supportBuf)) {
+          if (!ally.active || ally === e || ally.def.behavior === 'tree' || ally.def.behavior === 'lootbug') continue;
+          const ratio = ally.hp / Math.max(1, ally.maxHp);
+          if (ratio < bestRatio) {
+            bestRatio = ratio;
+            target = ally;
+          }
+        }
+        if (d < 210) return [-ux * e.speed, -uy * e.speed];
+        if (target) {
+          const tx = target.x - e.x;
+          const ty = target.y - e.y;
+          const td = Math.hypot(tx, ty) || 1;
+          if (td > 75) return [(tx / td) * e.speed, (ty / td) * e.speed];
+        }
+        const side = Math.sin(e.wobble) > 0 ? 1 : -1;
+        return [-uy * side * e.speed * 0.65, ux * side * e.speed * 0.65];
+      }
+
+      case 'egg': {
+        // 镰斩魔卵：原地 5 秒倒计时，打不爆就破壳孵出高回报的镰刃螳虫
+        e.timer -= dt;
+        if (e.timer <= 0) {
+          const ex = e.x;
+          const ey = e.y;
+          this.fx.ring(ex, ey, 44, 0xff5a68);
+          this.fx.burst(ex, ey, 0xffa858, 12, 160, 0.9);
+          sfx.play('warn');
+          this.die(e, false);
+          this.spawnChild('slasher', ex, ey);
+        }
+        return [0, 0];
+      }
+
+      case 'slasher': {
+        // 镰刃螳虫：中距游走，在玩家脚下两侧画 V 字形地面红带预警斩击，专克原地站桩
+        e.timer -= dt;
+        if (e.timer <= 0 && d < 460) {
+          e.timer = 2.65;
+          const halfLen = 100;
+          const len = halfLen * 2;
+          const spread = 0.66; // ±38° 交叉 V/X 斩封走位
+          for (const sign of [-1, 1]) {
+            const a = ang + sign * spread;
+            const sx = h.px - Math.cos(a) * halfLen;
+            const sy = h.py - Math.sin(a) * halfLen;
+            this.queueGroundSlash(sx, sy, a, len, 28, 0.8, e.skillDamage);
+          }
+          e.flash = 0.08;
+          sfx.play('warn');
+        }
+        if (d < 150) return [-ux * e.speed, -uy * e.speed];
+        if (d > 275) return [ux * e.speed, uy * e.speed];
+        const side = Math.sin(e.wobble) > 0 ? 1 : -1;
+        return [-uy * side * e.speed * 0.68, ux * side * e.speed * 0.68];
+      }
+
+      case 'puffer': {
+        // 棘球毒虫：摇摆追击，非近战击杀在 die() 中 8 向爆弹幕
+        const a = ang + Math.sin(e.age * 2.4 + e.wobble) * 0.35;
+        return [Math.cos(a) * e.speed, Math.sin(a) * e.speed];
+      }
+
+      case 'lamprey': {
+        // 噬蜜飞鳗（诱饵甜果专属突袭怪）：冲锋并在冲刺途中向左右两侧甩出弹幕
+        e.timer -= dt;
+        if (e.state === 0) {
+          if (e.timer <= 0 && d < 360) {
+            e.state = 1;
+            e.timer = 0.48;
+            e.dirX = ux;
+            e.dirY = uy;
+            this.tel.line(e.x, e.y, ang, 230, 26, 0.48);
+            sfx.play('warn');
+          }
+          return [ux * e.speed, uy * e.speed];
+        }
+        if (e.state === 1) {
+          if (e.timer <= 0) {
+            e.state = 2;
+            e.timer = 0.56;
+            e.timer2 = 0.12;
+          }
+          return [0, 0];
+        }
+        e.timer2 -= dt;
+        if (e.timer2 <= 0) {
+          e.timer2 = 0.17;
+          const dashAng = Math.atan2(e.dirY, e.dirX);
+          h.shoot(e.x, e.y, dashAng + Math.PI / 2, 165, e.skillDamage, 'orb');
+          h.shoot(e.x, e.y, dashAng - Math.PI / 2, 165, e.skillDamage, 'orb');
+          sfx.play('spit');
+        }
+        if (e.timer <= 0) {
+          e.state = 0;
+          e.timer = 1.45;
+        }
+        const ds = e.def.dashSpeed ?? 390;
+        return [e.dirX * ds, e.dirY * ds];
+      }
+
+      case 'spitter': {
+        // 吐酸幼虫（腐巢母虫亡语爆出）：游走散射弹幕小怪
+        e.timer -= dt;
+        if (e.timer <= 0 && d < 440) {
+          e.timer = 2.2;
+          const jitter = (Math.random() - 0.5) * 0.32;
+          h.shoot(e.x, e.y, ang + jitter, 210, e.skillDamage, 'orb');
+          e.flash = 0.06;
+          sfx.play('spit');
+        }
+        const a = ang + Math.sin(e.age * 2.6 + e.wobble) * 1.1;
+        if (d < 165) return [-ux * e.speed, -uy * e.speed];
+        if (d > 310) return [ux * e.speed, uy * e.speed];
+        return [Math.cos(a) * e.speed * 0.85, Math.sin(a) * e.speed * 0.85];
+      }
+
+      case 'curse_slug': {
+        // 厄运紫蛞蝓（Sea Pig）：温顺游走并轻度避开玩家，击杀永久 +1 诅咒与额外花蜜
+        let fx = Math.cos(e.age * 0.9 + e.wobble) * 0.7;
+        let fy = Math.sin(e.age * 0.9 + e.wobble) * 0.7;
+        if (d < 175) {
+          fx -= ux * 1.1;
+          fy -= uy * 1.1;
+        }
+        if (e.x < 160) fx += 0.9;
+        else if (e.x > WORLD_WIDTH - 160) fx -= 0.9;
+        if (e.y < 160) fy += 0.9;
+        else if (e.y > WORLD_HEIGHT - 160) fy -= 0.9;
+        const fl = Math.hypot(fx, fy) || 1;
+        return [(fx / fl) * e.speed, (fy / fl) * e.speed];
+      }
+
+      case 'mummy':
+        // 滚球毛虫（Mummy）：稳步滚向玩家，超高负击退抗性带来台球弹射机制
+        return [ux * e.speed, uy * e.speed];
+
       case 'elite':
         return this.behaveElite(e, dt, ux, uy, ang, d);
 
       case 'elite_hornet':
         return this.behaveHornetElite(e, dt, ux, uy, ang, d);
+
+      case 'elite_gargoyle':
+        return this.behaveGargoyleElite(e, dt, ux, uy, ang, d);
 
       case 'boss':
         return this.behaveBoss(e, dt, ux, uy, ang, d);
@@ -897,6 +1342,128 @@ export class EnemyManager {
         }
         const ds = e.def.dashSpeed ?? 420;
         return [e.dirX * ds, e.dirY * ds];
+      }
+    }
+  }
+
+  /** 曜石甲像（三阶段血量突变精英）：100%→60% 游走慢环弹 → 60%→30% 追击12向弹+X斩 → <30% 狂暴密集扇形雨+16向环弹 */
+  private behaveGargoyleElite(e: Enemy, dt: number, ux: number, uy: number, ang: number, d: number): [number, number] {
+    const h = this.host;
+    const hpRatio = e.hp / Math.max(1, e.maxHp);
+    if (e.phase === 0 && hpRatio <= 0.6) {
+      e.phase = 1;
+      e.speed = e.baseSpeed * 1.25;
+      this.fx.number(e.x, e.y - 46, '石甲裂变！', 'crit');
+      this.fx.ring(e.x, e.y, 110, 0xd058ff);
+      shake(this.scene, 140, 0.006);
+      sfx.play('warn');
+    }
+    if (e.phase < 2 && hpRatio <= 0.3) {
+      e.phase = 2;
+      e.speed = e.baseSpeed * 1.45;
+      this.fx.number(e.x, e.y - 46, '残血狂乱！', 'crit');
+      this.fx.ring(e.x, e.y, 130, 0xff3858);
+      shake(this.scene, 180, 0.008);
+      sfx.play('bossRoar');
+    }
+
+    e.timer -= dt;
+    switch (e.state) {
+      case 0: {
+        if (e.timer <= 0) {
+          e.count++;
+          e.tx = ang;
+          if (e.phase === 0) {
+            // 阶段 1：蓄力 8 向慢速环形弹幕
+            e.state = 1;
+            e.timer = 0.65;
+            this.tel.circle(e.x, e.y, 76, 0.65);
+          } else if (e.phase === 1) {
+            // 阶段 2：交替 12 向环形弹幕 & 玩家脚下 X 形地面交叉斩击
+            e.state = 1;
+            e.timer = 0.62;
+            if (e.count % 2 === 0) {
+              this.tel.circle(e.x, e.y, 84, 0.62);
+            } else {
+              const halfLen = 110;
+              for (const offset of [Math.PI / 4, -Math.PI / 4]) {
+                const a = ang + offset;
+                this.queueGroundSlash(h.px - Math.cos(a) * halfLen, h.py - Math.sin(a) * halfLen, a, halfLen * 2, 30, 0.78, e.skillDamage * 1.15);
+              }
+            }
+          } else {
+            // 阶段 3（<30%）：狂暴交替 7 发密集扇形二连射 & 16 向环形弹幕雨
+            e.state = 1;
+            e.timer = 0.52;
+            if (e.count % 2 === 0) {
+              this.tel.circle(e.x, e.y, 92, 0.52);
+            } else {
+              this.tel.fan(e.x, e.y, 220, ang, 0.68, 0.52);
+            }
+          }
+          sfx.play('warn');
+          return [0, 0];
+        }
+        if (e.phase === 0) {
+          const side = Math.sin(e.wobble + e.count) >= 0 ? 1 : -1;
+          if (d < 165) return [-ux * e.speed, -uy * e.speed];
+          if (d > 270) return [ux * e.speed, uy * e.speed];
+          return [-uy * side * e.speed * 0.85, ux * side * e.speed * 0.85];
+        }
+        return [ux * e.speed, uy * e.speed];
+      }
+      case 1: {
+        if (e.timer <= 0) {
+          if (e.phase === 0) {
+            for (let k = 0; k < 8; k++) {
+              h.shoot(e.x, e.y, e.tx + (k / 8) * Math.PI * 2, 185, e.skillDamage, 'orb');
+            }
+            this.fx.ring(e.x, e.y, 64, 0xd888ff);
+            sfx.play('spit');
+            e.state = 0;
+            e.timer = 2.1;
+          } else if (e.phase === 1) {
+            if (e.count % 2 === 0) {
+              for (let k = 0; k < 12; k++) {
+                h.shoot(e.x, e.y, e.tx + (k / 12) * Math.PI * 2, 205, e.skillDamage, 'orb');
+              }
+              this.fx.ring(e.x, e.y, 74, 0xd058ff);
+              sfx.play('spit');
+            }
+            e.state = 0;
+            e.timer = 1.75;
+          } else {
+            if (e.count % 2 === 0) {
+              for (let k = 0; k < 16; k++) {
+                h.shoot(e.x, e.y, e.tx + (k / 16) * Math.PI * 2, 215, e.skillDamage, 'orb');
+              }
+              this.fx.ring(e.x, e.y, 82, 0xff3858);
+              sfx.play('spit');
+              e.state = 0;
+              e.timer = 1.45;
+            } else {
+              for (let k = -3; k <= 3; k++) {
+                h.shoot(e.x, e.y, e.tx + k * 0.2, 275, e.skillDamage, 'stinger');
+              }
+              sfx.play('spit');
+              e.state = 2;
+              e.timer = 0.28;
+            }
+          }
+        }
+        return [0, 0];
+      }
+      default: {
+        // 阶段 3 扇形散弹雨第二连发
+        if (e.timer <= 0) {
+          for (let k = -3; k <= 3; k++) {
+            h.shoot(e.x, e.y, ang + k * 0.22 + 0.08, 255, e.skillDamage, 'orb');
+          }
+          sfx.play('spit');
+          e.state = 0;
+          e.timer = 1.35;
+        }
+        return [ux * e.speed * 0.45, uy * e.speed * 0.45];
       }
     }
   }

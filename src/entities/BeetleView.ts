@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { UI_WEAPON_RES, weaponTex } from '../art/icons';
+import { SHELL_SKINS, type ShellSkinId } from '../core/save';
 
 type P = readonly [number, number];
 
@@ -148,6 +149,13 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.add([shadow, this.legs, this.shell, this.aura]);
     scene.add.existing(this);
     this.drawLegs();
+  }
+
+  /** 应用局外图鉴解锁的炫彩甲壳涂装（不影响数值） */
+  setShellSkin(skin?: ShellSkinId): void {
+    const info = skin ? SHELL_SKINS[skin] : null;
+    if (info?.tint) this.shell.setTint(info.tint);
+    else this.shell.clearTint();
   }
 
   /** 更新角色身上的实时视觉状态（护盾气泡、加速风环、丝网减速、琥珀狂热） */

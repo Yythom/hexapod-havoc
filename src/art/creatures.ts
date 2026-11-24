@@ -404,6 +404,24 @@ export function generateCreatures(scene: Phaser.Scene): void {
     SPRITE_RES,
   );
 
+  // 露珠冰球（打爆释放大范围冰冻水浪 + 潮湿水洼）42×42
+  bake2D(
+    scene,
+    'deworb',
+    42,
+    42,
+    (ctx) => {
+      cContactShadow(ctx, 21, 31, 15, 8, 0.38);
+      cCelCircle(ctx, 21, 21, 14.5, '#5cc8f8', '#2268a0', '#c8f6ff', OUT, 2.6);
+      cCircle(ctx, 16, 15, 4.2, '#ffffff');
+      cCircle(ctx, 26, 25, 2.2, '#e0fbff');
+      // 冰晶内芯星芒
+      cLine(ctx, [21, 13, 21, 29], '#e8fbff', 1.8);
+      cLine(ctx, [13, 21, 29, 21], '#e8fbff', 1.8);
+    },
+    SPRITE_RES,
+  );
+
   // 泰坦兜虫（第二只最终 Boss / 无尽里程碑 Boss：重铠黑金独角巨兽）108×92
   bake2D(
     scene,
@@ -446,6 +464,323 @@ export function generateCreatures(scene: Phaser.Scene): void {
       // 炽热红金怒眼
       cComicEye(ctx, 81, 38.5, 4.4, '#ff5436', '#fff29c', 0.3, DARK);
       cComicEye(ctx, 81, 53.5, 4.4, '#ff5436', '#fff29c', -0.3, DARK);
+    },
+    SPRITE_RES,
+  );
+
+  // 狂化鸣蝉（Buffer 强化辅助怪）42×36：赤红金纹发光声囊鸣蝉
+  bake2D(
+    scene,
+    'buffer',
+    42,
+    36,
+    (ctx) => {
+      cContactShadow(ctx, 20, 20, 16, 11, 0.4);
+      // 半透明红金振膜双翅
+      for (const s of [-1, 1]) {
+        cEllipse(ctx, 18, 18 + s * 9.2, 11, 4.6, 'rgba(255, 198, 156, 0.72)', OUT, 1.8, s * 0.42);
+      }
+      legs(ctx, '#7a1c1c', 1.6, 18, [
+        [23, 19, 21, 25, 18, 29],
+        [27, 19, 29, 25, 32, 28],
+      ]);
+      // 发光赤红鼓膜大腹（发出狂化声波的核心）
+      cCelEllipse(ctx, 14, 18, 10.6, 8.2, '#e8343c', '#821018', '#ff9488', OUT, 2.6);
+      cCircle(ctx, 13, 18, 4.4, '#ffd44c', OUT, 1.6);
+      cCircle(ctx, 13, 18, 2.0, '#fff7c2');
+      // 胸节 + 宽头红金怒眼
+      cCelEllipse(ctx, 26, 18, 5.6, 6.2, '#b8222a', '#5e0e14', '#f26c68', OUT, 2.4);
+      cCelCircle(ctx, 33, 18, 5.8, '#dc2c34', '#761018', '#ff8a80', OUT, 2.5);
+      cComicEye(ctx, 35, 14.5, 2.4, '#fff29c', '#050507', 0.35, OUT);
+      cComicEye(ctx, 35, 21.5, 2.4, '#fff29c', '#050507', -0.35, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 绿露医虫（Healer 治疗辅助怪）38×34：圆润翠绿医疗甲虫 + 发光绿十字背甲
+  bake2D(
+    scene,
+    'healer',
+    38,
+    34,
+    (ctx) => {
+      cContactShadow(ctx, 19, 19, 15, 12, 0.4);
+      legs(ctx, '#1e6e42', 1.7, 17, [
+        [22, 16, 25, 9, 29, 5.5],
+        [18, 16, 18, 8.5, 16, 4.5],
+        [14, 17, 10, 11, 6, 9],
+      ]);
+      cCelEllipse(ctx, 16, 17, 11.4, 9.6, '#38c870', '#166e3a', '#9af4b6', OUT, 2.6);
+      // 背甲白色医疗十字标识
+      cLine(ctx, [16, 11.2, 16, 22.8], OUT, 5.2);
+      cLine(ctx, [10.2, 17, 21.8, 17], OUT, 5.2);
+      cLine(ctx, [16, 11.8, 16, 22.2], '#f4fff6', 3.0);
+      cLine(ctx, [10.8, 17, 21.2, 17], '#f4fff6', 3.0);
+      cCelCircle(ctx, 29.2, 17, 5.6, '#2cb060', '#125a30', '#86eaa4', OUT, 2.4);
+      cComicEye(ctx, 31.2, 14.4, 2.2, '#ffffff', '#050507', 0.25, OUT);
+      cComicEye(ctx, 31.2, 19.6, 2.2, '#ffffff', '#050507', -0.25, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 疾影猎虫（Pursuer 越追越快）40×30：暗紫炽橙修长疾行虎虫
+  bake2D(
+    scene,
+    'pursuer',
+    40,
+    30,
+    (ctx) => {
+      cContactShadow(ctx, 19, 17, 15, 9, 0.4);
+      legs(ctx, '#4c2058', 1.6, 15, [
+        [24, 15, 29, 7, 35, 4],
+        [19, 15, 19, 6.5, 15, 3.5],
+        [14, 15, 9, 8.5, 4, 6.5],
+      ]);
+      cCelEllipse(ctx, 14, 15, 10.6, 6.2, '#5a2678', '#2a0e3c', '#9a58c4', OUT, 2.5);
+      // 炽橙速度疾风纹
+      cPoly(ctx, [9, 15, 16, 11.2, 19, 15, 16, 18.8], '#ff8828', OUT, 1.4);
+      cCelEllipse(ctx, 25, 15, 5.2, 4.8, '#461a60', '#200a30', '#8446aa', OUT, 2.3);
+      cCelCircle(ctx, 31.6, 15, 5.0, '#6a2e8c', '#321048', '#b06cd6', OUT, 2.4);
+      // 向前突出的橘红猎牙
+      cPoly(ctx, [35, 12.2, 39.6, 10.2, 36.8, 14.2], '#ff6828', OUT, 1.4);
+      cPoly(ctx, [35, 17.8, 39.6, 19.8, 36.8, 15.8], '#ff6828', OUT, 1.4);
+      cComicEye(ctx, 33.2, 12.4, 2.1, '#ffe478', '#cc1820', 0.4, OUT);
+      cComicEye(ctx, 33.2, 17.6, 2.1, '#ffe478', '#cc1820', -0.4, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 镰斩魔卵（Slasher Egg：5 秒内不打爆会孵化镰刃螳虫）38×42
+  bake2D(
+    scene,
+    'slasher_egg',
+    38,
+    42,
+    (ctx) => {
+      cContactShadow(ctx, 19, 32, 14, 7.5, 0.45);
+      // 黏液卵托
+      cEllipse(ctx, 19, 31, 13.5, 5.2, '#5a1e2e', OUT, 2.2);
+      // 脉动暗红虫卵壳
+      cCelEllipse(ctx, 19, 20, 12.2, 15.2, '#b82e48', '#5c1022', '#ff809a', OUT, 2.8);
+      // 裂纹与内部发光橙黄镰纹
+      cLine(ctx, [12, 16, 17, 21, 14, 27], '#1a060c', 2.0);
+      cLine(ctx, [25, 13, 21, 19, 26, 24], '#1a060c', 2.0);
+      cCircle(ctx, 19, 19, 4.2, '#ffae2b', OUT, 1.4);
+      cCircle(ctx, 18.2, 18, 1.7, '#fff6c2');
+    },
+    SPRITE_RES,
+  );
+
+  // 镰刃螳虫（Slasher：中距地面 V 字斩击）48×42
+  bake2D(
+    scene,
+    'slasher',
+    48,
+    42,
+    (ctx) => {
+      cContactShadow(ctx, 22, 23, 18, 12, 0.42);
+      legs(ctx, '#6e1828', 1.8, 21, [
+        [24, 21, 21, 29, 16, 35],
+        [18, 21, 13, 28, 7, 32],
+      ]);
+      // 猩红双镰前肢
+      for (const s of [-1, 1]) {
+        const y = (v: number) => 21 + (v - 21) * s;
+        cPoly(ctx, [28, y(16), 39, y(5), 46.5, y(12), 36, y(18)], '#ff4054', OUT, 2.4);
+        cPoly(ctx, [32, y(15), 40, y(8.5), 43.5, y(12), 36, y(16.5)], '#ffd8c8');
+      }
+      // 甲壳躯干
+      cCelEllipse(ctx, 15, 21, 11.4, 7.6, '#961e34', '#4a0c18', '#e65c74', OUT, 2.6);
+      cCelEllipse(ctx, 27, 21, 6.2, 6.0, '#b82840', '#5a101e', '#f4788c', OUT, 2.4);
+      // 锐利三角头与黄眼
+      cPoly(ctx, [29, 14.5, 40, 21, 29, 27.5], '#c82e46', OUT, 2.4);
+      cComicEye(ctx, 32.8, 17.5, 2.4, '#ffe878', '#050507', 0.4, OUT);
+      cComicEye(ctx, 32.8, 24.5, 2.4, '#ffe878', '#050507', -0.4, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 棘球毒虫（Puffer：亡语 8 向炸弹幕，近战劈死可截断）42×42
+  bake2D(
+    scene,
+    'puffer',
+    42,
+    42,
+    (ctx) => {
+      cContactShadow(ctx, 21, 24, 16, 13, 0.42);
+      // 8 根外放尖刺
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        cPoly(
+          ctx,
+          [21 + c * 11 - s * 3.2, 21 + s * 11 + c * 3.2, 21 + c * 19.5, 21 + s * 19.5, 21 + c * 11 + s * 3.2, 21 + s * 11 - c * 3.2],
+          '#ff6896',
+          OUT,
+          2.0,
+        );
+      }
+      // 鼓胀紫红毒囊圆体
+      cCelCircle(ctx, 21, 21, 12.6, '#c8346e', '#681238', '#ff8cb8', OUT, 2.8);
+      cCircle(ctx, 16, 17, 2.6, '#ffde66', OUT, 1.2);
+      cCircle(ctx, 16, 25, 2.2, '#ffde66', OUT, 1.2);
+      cComicEye(ctx, 26.5, 16.6, 2.8, '#ffffff', '#050507', 0.2, OUT);
+      cComicEye(ctx, 26.5, 25.4, 2.8, '#ffffff', '#050507', -0.2, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 噬蜜飞鳗（Lamprey：诱饵甜果专属突袭怪，冲锋并向两侧甩弹）46×34
+  bake2D(
+    scene,
+    'lamprey',
+    46,
+    34,
+    (ctx) => {
+      cContactShadow(ctx, 22, 19, 18, 10, 0.4);
+      // 侧翼毒腺鳍
+      for (const s of [-1, 1]) {
+        cPoly(ctx, [18, 17 + s * 5, 25, 17 + s * 14.5, 31, 17 + s * 6], '#ff4c6e', OUT, 2.0);
+      }
+      // 蜿蜒鳗尾 + 躯干
+      cCelEllipse(ctx, 10, 17, 7.6, 4.6, '#52266e', '#260e38', '#985cb8', OUT, 2.3);
+      cCelEllipse(ctx, 21, 17, 9.6, 6.8, '#6e2e8c', '#36124a', '#b66ed8', OUT, 2.6);
+      // 锯齿圆口噬咬头
+      cCelCircle(ctx, 33.5, 17, 7.2, '#e63a52', '#7a1224', '#ff8a98', OUT, 2.6);
+      cPoly(ctx, [39, 13.5, 44.5, 15.5, 39.5, 17, 44.5, 18.5, 39, 20.5], '#fff4c8', OUT, 1.5);
+      cComicEye(ctx, 32.5, 13.0, 2.2, '#ffe868', '#050507', 0.38, OUT);
+      cComicEye(ctx, 32.5, 21.0, 2.2, '#ffe868', '#050507', -0.38, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 腐巢母虫（Spawner：慢速臃肿，死后炸出 3 只吐酸幼虫）52×44
+  bake2D(
+    scene,
+    'spawner',
+    52,
+    44,
+    (ctx) => {
+      cContactShadow(ctx, 24, 25, 20, 14, 0.44);
+      legs(ctx, '#465a24', 2.0, 22, [
+        [30, 22, 34, 31, 39, 36],
+        [22, 22, 21, 32, 16, 37],
+        [14, 22, 10, 30, 5, 33],
+      ]);
+      // 背满发光毒卵囊的巨腹
+      cCelEllipse(ctx, 18, 22, 14.5, 12.2, '#5c7a2e', '#2c4012', '#9cc656', OUT, 2.8);
+      for (const [ox, oy, or] of [
+        [12, 16, 4.4],
+        [20, 14, 4.0],
+        [14, 27, 4.2],
+        [22, 27, 3.8],
+      ]) {
+        cCelCircle(ctx, ox, oy, or, '#d458d8', '#6e1e74', '#ffafff', OUT, 1.8);
+      }
+      cCelCircle(ctx, 37.5, 22, 7.2, '#6a8a36', '#344a16', '#aad466', OUT, 2.6);
+      cComicEye(ctx, 40.5, 18.8, 2.4, '#f8ff9c', '#050507', 0.25, OUT);
+      cComicEye(ctx, 40.5, 25.2, 2.4, '#f8ff9c', '#050507', -0.25, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 吐酸幼虫（Spitter：腐巢爆出的游走散射弹幕小怪）30×24
+  bake2D(
+    scene,
+    'spitter',
+    30,
+    24,
+    (ctx) => {
+      cContactShadow(ctx, 15, 14, 11, 7, 0.36);
+      legs(ctx, '#5a1e64', 1.4, 12, [
+        [17, 12, 19, 18, 22, 20],
+        [12, 12, 10, 18, 7, 20],
+      ]);
+      cCelEllipse(ctx, 11, 12, 7.6, 5.8, '#c84ad4', '#681a72', '#ffa6ff', OUT, 2.2);
+      cCelCircle(ctx, 21.5, 12, 5.0, '#9c36a8', '#4e1458', '#e68ef0', OUT, 2.2);
+      cCircle(ctx, 26.8, 12, 2.2, '#ff3e7e', OUT, 1.2);
+      cComicEye(ctx, 22.8, 9.6, 1.8, '#ffffff', '#050507', 0.2, OUT);
+      cComicEye(ctx, 22.8, 14.4, 1.8, '#ffffff', '#050507', -0.2, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 厄运紫蛞蝓（Curse Slug / Sea Pig：击杀永久 +1 诅咒与额外花蜜）44×32
+  bake2D(
+    scene,
+    'curse_slug',
+    44,
+    32,
+    (ctx) => {
+      cContactShadow(ctx, 22, 19, 17, 10, 0.4);
+      // 发光紫雾触须与背鳍
+      for (const s of [-1, 1]) {
+        cLine(ctx, [33, 16 + s * 4, 40.5, 16 + s * 9.5], OUT, 3.2);
+        cLine(ctx, [33, 16 + s * 4, 40.5, 16 + s * 9.5], '#e078ff', 1.6);
+        cCircle(ctx, 40.5, 16 + s * 9.5, 2.3, '#f6c8ff', OUT, 1.2);
+      }
+      // 软萌半透明深紫肉体
+      cCelEllipse(ctx, 18, 16, 14.8, 9.2, '#8b32d8', '#3e106e', '#d998ff', OUT, 2.6);
+      cCelCircle(ctx, 31, 16, 6.8, '#9e42ec', '#4a147c', '#e6b2ff', OUT, 2.5);
+      // 背部神秘诅咒符文眼
+      cPoly(ctx, [12, 16, 17.5, 11.8, 23, 16, 17.5, 20.2], '#24083c', OUT, 1.4);
+      cCircle(ctx, 17.5, 16, 2.4, '#ff48b8');
+      cComicEye(ctx, 34, 13.2, 2.2, '#ffe8ff', '#2a0846', 0, OUT);
+      cComicEye(ctx, 34, 18.8, 2.2, '#ffe8ff', '#2a0846', 0, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 滚球毛虫（Mummy：负击退抗性，超吃击退像台球一样弹射）42×40
+  bake2D(
+    scene,
+    'mummy',
+    42,
+    40,
+    (ctx) => {
+      cContactShadow(ctx, 21, 23, 16, 13, 0.42);
+      // 绷带绒毛滚球躯体
+      cCelCircle(ctx, 21, 20, 14.6, '#d8c498', '#7e6844', '#fff6dc', OUT, 2.8);
+      // 交叉绷带缠绕纹
+      cLine(ctx, [9, 14, 33, 19], '#6e5838', 2.4);
+      cLine(ctx, [10, 26, 32, 21], '#6e5838', 2.4);
+      cLine(ctx, [16, 7, 22, 33], '#6e5838', 2.0);
+      // 绷带缝隙里瞪圆的荧光青眼
+      cEllipse(ctx, 27, 20, 4.6, 8.2, '#1c120a', OUT, 1.8);
+      cComicEye(ctx, 27.4, 16.4, 2.4, '#8effe8', '#050507', 0.2, OUT);
+      cComicEye(ctx, 27.4, 23.6, 2.4, '#8effe8', '#050507', -0.2, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 曜石甲像（Gargoyle Elite：三阶段血量突变精英）68×58
+  bake2D(
+    scene,
+    'gargoyle_elite',
+    68,
+    58,
+    (ctx) => {
+      cContactShadow(ctx, 33, 33, 27, 18, 0.48);
+      // 展开的双层黑曜石蝠翼
+      for (const s of [-1, 1]) {
+        const y = (v: number) => 29 + (v - 29) * s;
+        cPoly(ctx, [26, y(22), 14, y(5), 34, y(9), 42, y(19)], '#4c465e', OUT, 2.8);
+        cPoly(ctx, [27, y(20), 19, y(9), 33, y(12), 38, y(19)], '#7c7498');
+      }
+      // 重石甲躯干 + 发光熔紫裂纹核心
+      cCelEllipse(ctx, 25, 29, 15.5, 12.6, '#58526a', '#262234', '#9a92b4', OUT, 3.2);
+      cPoly(ctx, [19, 29, 25, 22, 31, 29, 25, 36], '#ff3e7e', OUT, 1.8);
+      cCircle(ctx, 25, 29, 3.2, '#ffe89c');
+      // 犄角石雕头部
+      cCelCircle(ctx, 44, 29, 10.2, '#625c76', '#2a263a', '#a69ec2', OUT, 3.0);
+      for (const s of [-1, 1]) {
+        const y = (v: number) => 29 + (v - 29) * s;
+        cPoly(ctx, [46, y(21), 62, y(13), 55, y(24)], '#3a344c', OUT, 2.4);
+      }
+      // 炽热紫红怒眼
+      cComicEye(ctx, 48.5, 24.4, 3.1, '#ff4874', '#fff29c', 0.38, OUT);
+      cComicEye(ctx, 48.5, 33.6, 3.1, '#ff4874', '#fff29c', -0.38, OUT);
     },
     SPRITE_RES,
   );

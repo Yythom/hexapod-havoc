@@ -15,7 +15,8 @@
     "@fontsource/lilita-one": "^5.3.0",
     "@fontsource/noto-sans-sc": "^5.3.1",
     "@fontsource/zcool-kuaile": "^5.3.0",
-    "phaser": "3.90.0"
+    "phaser": "3.90.0",
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
     "typescript": "5.9.3",

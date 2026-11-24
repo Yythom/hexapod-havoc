@@ -1,6 +1,7 @@
 import { CAMERA_ZOOM, GAME_HEIGHT } from '../config';
 import type { Mods } from '../data/items';
 import { tierOf, type WeaponDef } from '../data/weapons';
+import type { SlotBonus } from './legSynergy';
 import type { OwnedWeapon } from './RunState';
 import type { Stats } from './stats';
 
@@ -8,8 +9,8 @@ import type { Stats } from './stats';
 export const MAX_SCREEN_RANGE = Math.floor(GAME_HEIGHT / (2 * CAMERA_ZOOM)) - 38;
 
 /** 武器在当前属性下的实际射程（任何加成都不超过屏幕边界上限） */
-export function effectiveRange(def: WeaponDef, stats: Stats, tier = 0): number {
-  const base = tierOf(def, tier).range;
+export function effectiveRange(def: WeaponDef, stats: Stats, tier = 0, slotBonus?: SlotBonus | null): number {
+  const base = tierOf(def, tier).range + (slotBonus?.range ?? 0);
   const bonus = def.kind === 'melee' ? stats.range * 0.5 : def.summon || def.device ? 0 : stats.range;
   return Math.max(40, Math.min(MAX_SCREEN_RANGE, base + bonus));
 }
@@ -42,6 +43,7 @@ export function weaponDamage(
   targetHpRatio?: number,
   emptySlots = 0,
   copies = 1,
+  slotBonus?: SlotBonus | null,
 ): number {
   const t = tierOf(def, tier);
   let flat = t.damage + growthBonus(def, owned);
@@ -52,8 +54,9 @@ export function weaponDamage(
     const k = stat === 'melee' || stat === 'ranged' ? 1 + mods.flatBonusPct : 1;
     flat += (stats[stat] ?? 0) * coef * k;
   }
-  const dmgPctMult = Math.max(0.2, 1 + stats.damagePct);
+  const dmgPctMult = Math.max(0.2, 1 + stats.damagePct + (slotBonus?.damagePct ?? 0));
   let dmg = flat * dmgPctMult * (1 + rangeOverflowBonus(def, stats, tier));
+  if (owned?.cursed) dmg *= 1.25;
   if (def.kind === 'ranged') dmg *= Math.max(0, 1 + mods.rangedDamagePct);
   if (def.kind !== 'device') dmg *= Math.max(0, 1 + mods.nonDeviceDamagePct);
   dmg *= Math.max(0, 1 + mods.weaponDamagePct) * mult;
@@ -65,18 +68,19 @@ export function weaponDamage(
   return dmg;
 }
 
-/** 暴击倍率（螳螂的近战暴击倍率加成） */
+/** 暴击倍率（螳螂近战暴击倍率 + 精准 6 件套全局暴击倍率） */
 export function critMultiplier(def: WeaponDef, mods: Mods, tier = 0): number {
-  return tierOf(def, tier).critMultiplier + (def.kind === 'melee' ? mods.meleeCritBonus : 0);
+  return tierOf(def, tier).critMultiplier + (def.kind === 'melee' ? mods.meleeCritBonus : 0) + mods.critMultBonus;
 }
 
-/** 武器自带的吸取几率（每次命中回 1 血） */
-export function weaponLifesteal(def: WeaponDef, tier: number): number {
-  return Math.max(0, tierOf(def, tier).lifesteal);
+/** 武器自带的吸取几率（每次命中回 1 血；含嗜血附魔） */
+export function weaponLifesteal(def: WeaponDef, tier: number, owned?: OwnedWeapon | null): number {
+  return Math.max(0, tierOf(def, tier).lifesteal + (owned?.enchant === 'vamp' ? 0.06 : 0));
 }
 
-export function weaponCritChance(def: WeaponDef, tier: number, stats: Stats): number {
-  return Math.max(0, stats.critChance + tierOf(def, tier).critChance);
+export function weaponCritChance(def: WeaponDef, tier: number, stats: Stats, slotBonus?: SlotBonus | null): number {
+  const legendaryBonus = tier >= 3 ? 0.05 : 0;
+  return Math.max(0, stats.critChance + tierOf(def, tier).critChance + (slotBonus?.critChance ?? 0) + legendaryBonus);
 }
 
 export function rollDamage(
@@ -89,9 +93,11 @@ export function rollDamage(
   targetHpRatio?: number,
   emptySlots = 0,
   copies = 1,
+  slotBonus?: SlotBonus | null,
+  forceCrit = false,
 ): { damage: number; crit: boolean } {
-  let dmg = weaponDamage(def, tier, stats, mods, owned, mult, targetHpRatio, emptySlots, copies);
-  const crit = Math.random() < weaponCritChance(def, tier, stats);
+  let dmg = weaponDamage(def, tier, stats, mods, owned, mult, targetHpRatio, emptySlots, copies, slotBonus);
+  const crit = forceCrit || Math.random() < weaponCritChance(def, tier, stats, slotBonus);
   if (crit) dmg *= critMultiplier(def, mods, tier);
   return { damage: Math.max(1, Math.round(dmg)), crit };
 }

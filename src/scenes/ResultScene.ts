@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { bgm } from '../audio/bgm';
 import { weaponTex } from '../art/icons';
 import { DISPLAY_FONT, GAME_HEIGHT, GAME_WIDTH } from '../config';
+import { CHALLENGES, type ChallengeId } from '../core/challenges';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { WAVES } from '../data/waves';
@@ -134,6 +135,9 @@ export class ResultScene extends Phaser.Scene {
     this.add.image(diffPill.x - diffPill.width / 2 + 20, badgeY, `weather-${r.difficulty}`).setDisplaySize(18, 18);
     if (r.daily) {
       pill(this, leftCx, badgeY + 34, `★ 每日挑战 ${r.daily}`, 0x3b2c10, COLOR.gold, COLOR.goldText, 12, 12, 22);
+    } else if (r.challenge) {
+      const ch = CHALLENGES[r.challenge as ChallengeId];
+      pill(this, leftCx, badgeY + 34, `🏆 挑战 · ${ch?.name ?? r.challenge}`, 0x2a1842, 0xc068ff, '#e4b8ff', 12, 12, 22);
     }
 
     // 竖向分割线
@@ -145,8 +149,9 @@ export class ResultScene extends Phaser.Scene {
     sep.strokePath();
 
     // 右侧：2×2 切角战绩卡片（错峰弹入 + 数字滚动计数）
-    const waveLabel = r.endless ? `第 ${r.wave} 波` : `${r.wave} / ${WAVES.length}`;
-    const waveFmt = (n: number) => (r.endless ? `第 ${n} 波` : `${n} / ${WAVES.length}`);
+    const targetWaves = r.maxWaves ?? WAVES.length;
+    const waveLabel = r.endless ? `第 ${r.wave} 波` : `${r.wave} / ${targetWaves}`;
+    const waveFmt = (n: number) => (r.endless ? `第 ${n} 波` : `${n} / ${targetWaves}`);
     const stats = [
       { title: r.endless ? '无尽波次' : '到达波次', value: waveLabel, countTo: r.wave, fmt: waveFmt, color: r.win ? COLOR.good : COLOR.text, accent: r.win ? 0x5de862 : COLOR.border },
       { title: '最终等级', value: `LV.${r.level}`, countTo: r.level, fmt: (n: number) => `LV.${n}`, color: '#74d6ff', accent: 0x5cb6f0 },
@@ -213,6 +218,10 @@ export class ResultScene extends Phaser.Scene {
     if (r.newDifficulty) news.push(`${character.name} 解锁新难度：${DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, r.difficulty + 1)].name}`);
     if (r.newEndlessRecord) news.push(`无尽新纪录！${character.name} 到达第 ${r.wave} 波`);
     if (r.newDailyBest && r.daily) news.push(`刷新今日每日挑战最佳成绩！`);
+    if (r.newChallengeCleared && r.challenge) {
+      const ch = CHALLENGES[r.challenge as ChallengeId];
+      news.push(`首次通关主题挑战「${ch?.name ?? r.challenge}」！`);
+    }
     for (const id of r.unlocked) news.push(`解锁新角色：${CHARACTERS[id].name}`);
     if (news.length > 0) {
       divider(this, gx0, py + 244, cw * 2 + gap, COLOR.gold, 0.65);

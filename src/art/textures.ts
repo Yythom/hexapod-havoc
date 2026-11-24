@@ -409,6 +409,20 @@ function nectar(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
+  // 敌方爆裂毒球弹（河豚/吐酸幼虫/噬蜜飞鳗/曜石甲像环形弹幕用：高对比黑边亮红紫球）20×20 @ 2x
+  bake2D(
+    scene,
+    'enemy-orb',
+    20,
+    20,
+    (ctx) => {
+      cSoftEllipse(ctx, 10, 10, 9.2, 9.2, 'rgba(255,46,122,0.42)', 'rgba(255,46,122,0)');
+      cCircle(ctx, 10, 10, 6.6, '#ff2e6a', '#0a0408', 2.2);
+      cCircle(ctx, 10, 10, 3.6, '#ff9ac8');
+      cCircle(ctx, 8.2, 8.0, 1.8, '#ffffff');
+    },
+    SPRITE_RES,
+  );
 }
 
 /** 刷怪预警：隆起的裂土堆 + 脉冲感红色预警圈。44×30 @ 2x。 */

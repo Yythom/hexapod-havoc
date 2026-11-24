@@ -2,12 +2,25 @@ import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH } from '../config';
 import type { RunSetup } from '../core/RunState';
-import { bestCleared, bestEndlessWave, isUnlocked, loadSave, maxDifficulty, rememberChoice } from '../core/save';
+import { CUSTOM_MUTATOR_ORDER, DAILY_MUTATORS, type DailyMutatorId } from '../core/daily';
+import {
+  bestCleared,
+  bestEndlessWave,
+  codexMilestones,
+  isUnlocked,
+  loadSave,
+  maxDifficulty,
+  rememberChoice,
+  setShellSkin,
+  SHELL_SKIN_ORDER,
+  SHELL_SKINS,
+  toggleBanishItem,
+} from '../core/save';
 import { weaponDamage } from '../core/combat';
 import { BASE_STATS, type Stats } from '../core/stats';
 import { CHARACTER_ORDER, CHARACTERS, unlockText } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
-import { ZERO_MODS, type Mods } from '../data/items';
+import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
 import { weaponTex } from '../art/icons';
 import { SPRITE_RES } from '../art/draw';
 import { CLASS_LABEL, KIND_LABEL, TIERS, WEAPONS } from '../data/weapons';
@@ -55,7 +68,9 @@ export class CharacterSelectScene extends Phaser.Scene {
   private character = '';
   private difficulty = 0;
   private weapon = '';
+  private customMutators: DailyMutatorId[] = [];
   private root: Container | null = null;
+  private modal: Container | null = null;
   private beetles: BeetleView[] = [];
   private weatherFx!: WeatherAmbience;
   private animateDetail = false;
@@ -68,6 +83,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     setupUICamera(this);
     const last = loadSave().last;
     this.root = null;
+    this.modal = null;
+    this.customMutators = [];
     this.beetles = [];
     this.animateDetail = false;
     this.character = isUnlocked(last.character) ? last.character : CHARACTER_ORDER[0];
@@ -77,8 +94,13 @@ export class CharacterSelectScene extends Phaser.Scene {
 
     warmBackdrop(this, W, H);
     this.weatherFx = new WeatherAmbience(this, 0, this.difficulty);
-    this.input.keyboard!.on('keydown-ENTER', () => this.start());
-    this.input.keyboard!.on('keydown-ESC', () => transitionTo(this, 'Menu'));
+    this.input.keyboard!.on('keydown-ENTER', () => {
+      if (!this.modal) this.start();
+    });
+    this.input.keyboard!.on('keydown-ESC', () => {
+      if (this.modal) this.closeModal();
+      else transitionTo(this, 'Menu');
+    });
     this.render();
     fadeInScene(this);
   }
@@ -118,6 +140,18 @@ export class CharacterSelectScene extends Phaser.Scene {
     const title = displayLabel(this, CARD_X0, 35, '出战准备', 30, COLOR.text).setOrigin(0, 0.5);
     root.add(title);
     root.add(label(this, CARD_X0 + title.width + 16, 36, '选择战虫、天气难度与初始武器', 15, COLOR.dim).setOrigin(0, 0.5));
+    const save = loadSave();
+    const customTagCount = this.customMutators.length + save.banishedItems.length + (save.shellSkin !== 'default' ? 1 : 0);
+    root.add(
+      createButton(
+        this,
+        W - 434,
+        35,
+        customTagCount > 0 ? `⚙ 局前定制 (${customTagCount})` : '⚙ 词条/禁用/涂装',
+        () => this.openCustomModal('mutators'),
+        { width: 186, height: 42, fontSize: 16, primary: false, variant: customTagCount > 0 ? 'emerald' : undefined },
+      ),
+    );
     root.add(
       createButton(this, W - 252, 35, '🎲 随机搭配', () => this.randomizeChoice(), {
         width: 148,
@@ -186,6 +220,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     card.add(g);
 
     const beetle = new BeetleView(this, 0, -10, c.shell).setScale(1.05).setRotation(-Math.PI / 2);
+    beetle.setShellSkin(loadSave().shellSkin);
     if (!unlocked) beetle.setAlpha(0.4);
     card.add(beetle);
     this.beetles.push(beetle);
@@ -258,24 +293,26 @@ export class CharacterSelectScene extends Phaser.Scene {
     dRoot.add(label(this, lx, y, '角色加成', 16, COLOR.goldText, true).setOrigin(0, 0));
     y += 24;
     for (const t of c.pros) {
-      const txt = label(this, lx + 4, y, nbsp(`+ ${t}`), 15, COLOR.good, false, wrapW - 4).setOrigin(0, 0).setAlign('left');
+      const txt = label(this, lx + 4, y, nbsp(`+ ${t}`), 14, COLOR.good, false, wrapW - 4).setOrigin(0, 0).setAlign('left');
       dRoot.add(txt);
-      y += txt.height + 5;
+      y += txt.height + 4;
     }
+    const dashTxt = label(this, lx + 4, y, `⚡ 冲刺：${c.dashTrait}`, 13.5, '#7ce8ff', false, wrapW - 4).setOrigin(0, 0).setAlign('left');
+    dRoot.add(dashTxt);
+    y += dashTxt.height + 6;
 
-    y += 10;
-    dRoot.add(label(this, lx, y, '角色限制', 16, COLOR.goldText, true).setOrigin(0, 0));
-    y += 24;
+    dRoot.add(label(this, lx, y, '角色限制', 15, COLOR.goldText, true).setOrigin(0, 0));
+    y += 22;
     if (c.cons.length) {
       for (const t of c.cons) {
-        const txt = label(this, lx + 4, y, nbsp(`− ${t}`), 15, COLOR.bad, false, wrapW - 4).setOrigin(0, 0).setAlign('left');
+        const txt = label(this, lx + 4, y, nbsp(`− ${t}`), 14, COLOR.bad, false, wrapW - 4).setOrigin(0, 0).setAlign('left');
         dRoot.add(txt);
-        y += txt.height + 5;
+        y += txt.height + 4;
       }
     } else {
-      const none = label(this, lx + 4, y, '无特殊限制', 15, COLOR.dim).setOrigin(0, 0).setAlign('left');
+      const none = label(this, lx + 4, y, '无特殊限制', 14, COLOR.dim).setOrigin(0, 0).setAlign('left');
       dRoot.add(none);
-      y += none.height + 5;
+      y += none.height + 4;
     }
 
     const wy = Math.min(CARD_Y + h - 226, Math.max(CARD_Y + 278, y + 14));
@@ -490,9 +527,185 @@ export class CharacterSelectScene extends Phaser.Scene {
     });
   }
 
+  private closeModal(): void {
+    this.modal?.destroy();
+    this.modal = null;
+  }
+
+  /** 局前定制弹窗：自定义词条 / 商店禁用池（Banish）/ 炫彩甲壳涂装 */
+  private openCustomModal(tab: 'mutators' | 'banish' | 'skins'): void {
+    this.closeModal();
+    const save = loadSave();
+    const ms = codexMilestones(save);
+    const c = this.add.container(0, 0).setDepth(100);
+    const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.78).setOrigin(0).setInteractive();
+    dim.on('pointerup', () => this.closeModal());
+    const pw = 880;
+    const ph = 540;
+    const px = W / 2 - pw / 2;
+    const py = H / 2 - ph / 2;
+    const blocker = this.add.zone(px, py, pw, ph).setOrigin(0).setInteractive();
+    c.add([dim, panel(this, px, py, pw, ph, COLOR.gold, COLOR.panel, 2, COLOR.gold), blocker]);
+    c.add(displayLabel(this, W / 2, py + 36, '⚙ 局前定制', 26, COLOR.goldText).setOrigin(0.5));
+
+    // 三个子标签
+    const tabs: { id: 'mutators' | 'banish' | 'skins'; label: string }[] = [
+      { id: 'mutators', label: `自定义词条 (${this.customMutators.length}/3)` },
+      { id: 'banish', label: `商店禁用池 (${save.banishedItems.length}/${ms.banishCap})` },
+      { id: 'skins', label: `甲壳涂装 (${ms.unlockedSkins.length}/${SHELL_SKIN_ORDER.length})` },
+    ];
+    tabs.forEach((t, idx) => {
+      c.add(
+        createButton(
+          this,
+          px + 170 + idx * 270,
+          py + 82,
+          t.label,
+          () => {
+            sfx.play('click');
+            this.openCustomModal(t.id);
+          },
+          { width: 250, height: 38, fontSize: 15, primary: tab === t.id },
+        ),
+      );
+    });
+    c.add(divider(this, px + 28, py + 110, pw - 56, COLOR.border, 0.6));
+
+    if (tab === 'mutators') {
+      c.add(label(this, W / 2, py + 128, '自由勾选 0~3 条趣味词条改变本局规则（不限制角色解锁）', 13.5, COLOR.dim).setOrigin(0.5));
+      const cols = 2;
+      const cw = 398;
+      const ch = 62;
+      CUSTOM_MUTATOR_ORDER.forEach((mid, i) => {
+        const def = DAILY_MUTATORS[mid];
+        const on = this.customMutators.includes(mid);
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const bx = px + 34 + col * (cw + 16);
+        const by = py + 148 + row * (ch + 10);
+        const bg = this.add.graphics();
+        drawChamferPlate(bg, bx, by, cw, ch, {
+          fill: on ? 0x1d3326 : COLOR.panelDeep,
+          border: on ? 0x5de862 : COLOR.borderSoft,
+          borderWidth: on ? 2 : 1.4,
+          cutBig: 7,
+          cutSmall: 3,
+          inkWidth: 2.2,
+        });
+        c.add(bg);
+        c.add(label(this, bx + 14, by + 16, `${on ? '✓ ' : ''}${def.name}`, 15, on ? COLOR.good : COLOR.text, true).setOrigin(0, 0.5));
+        c.add(label(this, bx + 14, by + 40, def.desc, 12.5, COLOR.dim, false, cw - 24).setOrigin(0, 0.5).setAlign('left'));
+        const z = this.tapZone(bx, by, cw, ch, () => {
+          if (on) {
+            this.customMutators = this.customMutators.filter((x) => x !== mid);
+          } else if (this.customMutators.length < 3) {
+            this.customMutators = [...this.customMutators, mid];
+          }
+          sfx.play('click');
+          this.render();
+          this.openCustomModal('mutators');
+        });
+        c.add(z);
+      });
+    } else if (tab === 'banish') {
+      c.add(
+        label(
+          this,
+          W / 2,
+          py + 128,
+          ms.banishCap === 0
+            ? `图鉴累计收录 15 种武器/道具后解锁首个禁用槽（当前 ${ms.seenEntries}/15）`
+            : `点击勾选不想在商店刷出的道具（已禁用 ${save.banishedItems.length}/${ms.banishCap}）`,
+          13.5,
+          ms.banishCap === 0 ? COLOR.goldText : COLOR.dim,
+        ).setOrigin(0.5),
+      );
+      const list = Object.values(ITEMS).filter((d) => d.rarity <= 1).slice(0, 24);
+      const cols = 6;
+      const cw = 132;
+      const ch = 76;
+      list.forEach((def, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const bx = px + 28 + col * (cw + 8);
+        const by = py + 150 + row * (ch + 8);
+        const banned = save.banishedItems.includes(def.id);
+        const bg = this.add.graphics();
+        drawChamferPlate(bg, bx, by, cw, ch, {
+          fill: banned ? 0x38161a : COLOR.panelDeep,
+          border: banned ? 0xff5a5a : COLOR.borderSoft,
+          borderWidth: banned ? 2 : 1.2,
+          cutBig: 6,
+          cutSmall: 3,
+          inkWidth: 2,
+        });
+        c.add(bg);
+        c.add(this.add.image(bx + 26, by + 38, def.icon).setDisplaySize(34, 34).setAlpha(banned ? 0.45 : 1));
+        c.add(label(this, bx + 48, by + 26, def.name.slice(0, 5), 13, banned ? '#ff8a8a' : COLOR.text, true).setOrigin(0, 0.5));
+        c.add(label(this, bx + 48, by + 48, banned ? '✕ 已禁用' : '允许刷出', 11, banned ? COLOR.bad : COLOR.dim).setOrigin(0, 0.5));
+        const z = this.tapZone(bx, by, cw, ch, () => {
+          if (toggleBanishItem(def.id)) {
+            sfx.play('click');
+            this.render();
+            this.openCustomModal('banish');
+          }
+        });
+        c.add(z);
+      });
+    } else {
+      c.add(label(this, W / 2, py + 128, '通过通关与图鉴里程碑解锁炫彩甲壳涂装（纯视觉纪念，不影响数值）', 13.5, COLOR.dim).setOrigin(0.5));
+      const cw = 156;
+      const ch = 220;
+      const gx0 = px + (pw - (SHELL_SKIN_ORDER.length * cw + (SHELL_SKIN_ORDER.length - 1) * 12)) / 2;
+      SHELL_SKIN_ORDER.forEach((sid, idx) => {
+        const info = SHELL_SKINS[sid];
+        const unlocked = ms.unlockedSkins.includes(sid);
+        const active = save.shellSkin === sid;
+        const bx = gx0 + idx * (cw + 12);
+        const by = py + 166;
+        const bg = this.add.graphics();
+        drawChamferPlate(bg, bx, by, cw, ch, {
+          fill: active ? 0x262a34 : COLOR.panelDeep,
+          border: active ? COLOR.gold : unlocked ? COLOR.border : COLOR.borderSoft,
+          borderWidth: active ? 2.4 : 1.5,
+          cutBig: 8,
+          cutSmall: 3,
+          inkWidth: 2.2,
+        });
+        c.add(bg);
+        const preview = new BeetleView(this, bx + cw / 2, by + 76, CHARACTERS[this.character].shell).setScale(1.3).setRotation(-Math.PI / 2);
+        preview.setShellSkin(sid);
+        if (!unlocked) preview.setAlpha(0.35);
+        c.add(preview);
+        c.add(label(this, bx + cw / 2, by + 136, info.name, 16, unlocked ? info.css : COLOR.dim, true).setOrigin(0.5));
+        c.add(label(this, bx + cw / 2, by + 168, unlocked ? (active ? '★ 使用中' : '点击装备') : info.req, 11.5, active ? COLOR.good : COLOR.dim, false, cw - 16).setOrigin(0.5));
+        if (unlocked) {
+          const z = this.tapZone(bx, by, cw, ch, () => {
+            setShellSkin(sid);
+            sfx.play('click');
+            this.render();
+            this.openCustomModal('skins');
+          });
+          c.add(z);
+        }
+      });
+    }
+
+    c.add(createButton(this, W / 2, py + ph - 34, '完成', () => this.closeModal(), { width: 180, height: 44, fontSize: 18 }));
+    this.modal = c;
+  }
+
   private start(): void {
     if (!isUnlocked(this.character)) return;
-    const setup: RunSetup = { character: this.character, difficulty: this.difficulty, weapon: this.weapon };
+    const save = loadSave();
+    const setup: RunSetup = {
+      character: this.character,
+      difficulty: this.difficulty,
+      weapon: this.weapon,
+      mutators: this.customMutators.length > 0 ? [...this.customMutators] : undefined,
+      banished: save.banishedItems.length > 0 ? [...save.banishedItems] : undefined,
+      shellSkin: save.shellSkin,
+    };
     rememberChoice(setup.character, setup.difficulty, setup.weapon);
     this.registry.set('setup', setup);
     transitionTo(this, 'Game', setup);

@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
+import { SPRITE_RES } from '../art/draw';
 import { bgm } from '../audio/bgm';
 import { DISPLAY_FONT, FONT_FAMILY, fontPx, GAME_HEIGHT, GAME_WIDTH, IS_COARSE_POINTER } from '../config';
-import { UI_WEAPON_RES, weaponTex } from '../art/icons';
+import { CHALLENGE_ORDER, CHALLENGES, type ChallengeId } from '../core/challenges';
 import { DAILY_MUTATORS, getDailyChallenge } from '../core/daily';
 import { getDailyBest, loadActiveRun, loadSave } from '../core/save';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
-import { TIERS, WEAPONS } from '../data/weapons';
+import { WEAPONS } from '../data/weapons';
 import { BeetleView } from '../entities/BeetleView';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { createButton, slantPoints } from '../ui/Button';
@@ -34,41 +35,26 @@ interface SwayGrass {
   phase: number;
 }
 
-interface HaloWeapon {
-  baseAngle: number;
-  rx: number;
-  ry: number;
+interface AmbientBug {
+  img: Phaser.GameObjects.Image;
+  x: number;
+  y: number;
+  angle: number;
+  speed: number;
+  wobbleAmp: number;
+  wobbleSpeed: number;
   phase: number;
-  scale: number;
-  groundShadow: Phaser.GameObjects.Ellipse;
-  spriteShadow: Phaser.GameObjects.Image;
-  sprite: Phaser.GameObjects.Image;
-  aura: Phaser.GameObjects.Image;
 }
 
-/** 菜单展示 6 把不同武器（仿土豆兄弟：环绕主角身体外侧悬浮，不贴脸、无多余底座框） */
-const SHOWCASE: [string, number][] = [
-  ['w-mandible', 2],
-  ['w-slingshot', 1],
-  ['w-scythe', 3],
-  ['w-acorn', 1],
-  ['w-acid', 2],
-  ['w-dewsniper', 3],
-];
-
-const HERO_X = 900;
-const HERO_Y = 368;
-const HALO_RX = 148;
-const HALO_RY = 136;
-/** 土豆兄弟风格：左右两翼各 3 把悬浮武器对称环抱主角，完全避开正上方钳角与正下方 */
-const HALO_ANGLES = [-0.82, 0, 0.82, Math.PI - 0.82, Math.PI, Math.PI + 0.82];
+const CX = GAME_WIDTH / 2;
+const CY = GAME_HEIGHT / 2;
 
 export class MenuScene extends Phaser.Scene {
-  private beetle!: BeetleView;
   private groundImg!: Phaser.GameObjects.Image;
+  private sunrays: Phaser.GameObjects.Image | null = null;
   private motes: DustMote[] = [];
   private grass: SwayGrass[] = [];
-  private halo: HaloWeapon[] = [];
+  private bugs: AmbientBug[] = [];
   private weatherFx!: WeatherAmbience;
   private px = 0;
   private py = 0;
@@ -88,120 +74,112 @@ export class MenuScene extends Phaser.Scene {
     this.py = 0;
     this.motes = [];
     this.grass = [];
-    this.halo = [];
+    this.bugs = [];
+    this.sunrays = null;
 
-    // 1. 背景：将战场中央树桩对准右侧主角舞台（非对称三分法构图）
-    this.groundImg = this.add.image(HERO_X, HERO_Y + 6, 'ground');
+    // 1. 背景：后院中央老树桩居中铺底，营造完整沉浸式微距空间
+    this.groundImg = this.add.image(CX, CY + 22, 'ground');
 
-    // 左侧深色电影暗角渐变 + 右侧舞台聚光
+    // 电影级暗角压底 + 居中暖光呼吸光晕
     const shade = this.add.graphics();
-    shade.fillStyle(0x0b0c0e, 0.56);
+    shade.fillStyle(0x090b0d, 0.58);
     shade.fillRect(0, 0, W, H);
-    shade.fillStyle(0x08090b, 0.58);
-    shade.fillRect(0, 0, 560, H);
+    // 上下左右柔和暗边（四层递进，不生硬）
+    for (let i = 0; i < 4; i++) {
+      const a = 0.12 + i * 0.05;
+      const stripX = 180 - i * 38;
+      const stripY = 120 - i * 24;
+      shade.fillStyle(0x050608, a);
+      shade.fillRect(0, 0, stripX, H);
+      shade.fillRect(W - stripX, 0, stripX, H);
+      shade.fillRect(0, 0, W, stripY);
+      shade.fillRect(0, H - stripY, W, stripY);
+    }
+    // 树桩与标题背后极克制的暖金聚光
     for (let i = 5; i >= 1; i--) {
       const k = i / 5;
-      shade.fillStyle(0xffd268, 0.036 * (1.2 - k * 0.5));
-      shade.fillEllipse(HERO_X, HERO_Y, 540 * k, 380 * k);
+      shade.fillStyle(0xffd268, 0.032 * (1.25 - k * 0.5));
+      shade.fillEllipse(CX, 240, 620 * k, 360 * k);
     }
-    this.add.tileSprite(0, 0, W, H, 'ui-grunge-tile').setOrigin(0).setAlpha(0.72);
+    this.add.tileSprite(0, 0, W, H, 'ui-grunge-tile').setOrigin(0).setAlpha(0.76);
+
+    this.sunrays = this.add
+      .image(CX, 220, 'ui-sunrays')
+      .setScale(1.65)
+      .setTint(0xffd97a)
+      .setAlpha(0.085)
+      .setDepth(2);
 
     // 2. 实时天气光影氛围（按上次选的天气难度预览）
     const save = loadSave();
     this.weatherFx = new WeatherAmbience(this, 4, save.last.difficulty);
 
-    // 3. 飘浮尘埃微粒
-    for (let i = 0; i < 24; i++) {
+    // 3. 暗处偶现的 1:1 原比例背景小虫剪影（只沿外围草地穿梭，营造活着的后院氛围，绝不抢戏）
+    const spawnBug = (i: number): AmbientBug => {
+      const isMosquito = i % 2 === 1;
+      const side = i % 4;
+      const x = side === 0 ? Phaser.Math.Between(60, 280) : side === 1 ? Phaser.Math.Between(W - 280, W - 60) : Phaser.Math.Between(120, W - 120);
+      const y = side === 2 ? Phaser.Math.Between(48, 150) : side === 3 ? Phaser.Math.Between(H - 150, H - 48) : Phaser.Math.Between(90, H - 90);
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const img = this.add
+        .image(x, y, isMosquito ? 'mosquito' : 'ant')
+        .setScale((isMosquito ? 0.86 : 0.94) / SPRITE_RES)
+        .setRotation(angle)
+        .setTint(isMosquito ? 0x7e877a : 0x6e685c)
+        .setAlpha(isMosquito ? 0.36 : 0.44)
+        .setDepth(5);
+      return {
+        img,
+        x,
+        y,
+        angle,
+        speed: isMosquito ? Phaser.Math.FloatBetween(42, 64) : Phaser.Math.FloatBetween(24, 38),
+        wobbleAmp: isMosquito ? 1.5 : 0.55,
+        wobbleSpeed: isMosquito ? 3.2 : 1.7,
+        phase: Math.random() * Math.PI * 2,
+      };
+    };
+    for (let i = 0; i < 6; i++) this.bugs.push(spawnBug(i));
+
+    // 4. 飘浮萤火虫与微尘光粒
+    for (let i = 0; i < 32; i++) {
       const x = Phaser.Math.Between(40, W - 40);
       const y = Phaser.Math.Between(40, H - 40);
+      const warm = i % 3 !== 2;
       const img = this.add
         .image(x, y, 'dot')
-        .setTint(i % 3 === 0 ? 0xffd460 : 0xc8ccc0)
-        .setScale(Phaser.Math.FloatBetween(0.24, 0.55))
+        .setTint(warm ? 0xffd86b : 0xc8d2be)
+        .setScale(Phaser.Math.FloatBetween(0.22, warm ? 0.58 : 0.42))
         .setAlpha(0.32)
-        .setDepth(5);
+        .setDepth(6);
       this.motes.push({
         img,
         x,
         y,
-        vx: Phaser.Math.FloatBetween(-10, 10),
-        vy: Phaser.Math.FloatBetween(-12, -3),
+        vx: Phaser.Math.FloatBetween(-11, 11),
+        vy: Phaser.Math.FloatBetween(-14, -4),
         phase: Math.random() * Math.PI * 2,
-        baseAlpha: Phaser.Math.FloatBetween(0.16, 0.44),
+        baseAlpha: Phaser.Math.FloatBetween(0.18, warm ? 0.52 : 0.34),
       });
     }
 
-    // 4. 右侧特写主角舞台：居中巨型锹甲 + 土豆兄弟风格环绕悬浮武器（大尺寸、干净黑墨武器 + 地面投影）
-    this.beetle = new BeetleView(this, HERO_X, HERO_Y, 'beetle-stag')
-      .setScale(2.85)
-      .setRotation(-Math.PI * 0.62)
-      .setDepth(8);
-
-    const wScale = 3.05 / UI_WEAPON_RES;
-    SHOWCASE.forEach(([tex, tier], i) => {
-      const baseAngle = HALO_ANGLES[i];
-      const wx = HERO_X + Math.cos(baseAngle) * HALO_RX;
-      const wy = HERO_Y + Math.sin(baseAngle) * HALO_RY;
-      const tCol = TIERS[tier].color;
-
-      // 地面悬浮接触投影（位于武器正下方地面上，体现真正离地浮空感）
-      const groundShadow = this.add
-        .ellipse(wx + 2, wy + 24, 54, 18, 0x050507, 0.44)
-        .setDepth(6);
-
-      // 极轻品质微光晕（无圆框无贴纸硬边）
-      const aura = this.add
-        .image(wx, wy, 'dot')
-        .setTint(tCol)
-        .setScale(2.8)
-        .setAlpha(tier >= 2 ? 0.16 : 0.08)
-        .setDepth(7);
-
-      const cleanKey = weaponTex(tex, 0, true);
-      const spriteShadow = this.add
-        .image(wx + 3, wy + 5, cleanKey)
-        .setScale(wScale)
-        .setRotation(baseAngle)
-        .setFlipY(Math.cos(baseAngle) < 0)
-        .setTint(0x050507)
-        .setAlpha(0.32)
-        .setDepth(9);
-      const sprite = this.add
-        .image(wx, wy, cleanKey)
-        .setScale(wScale)
-        .setRotation(baseAngle)
-        .setFlipY(Math.cos(baseAngle) < 0)
-        .setDepth(10);
-
-      this.halo.push({
-        baseAngle,
-        rx: HALO_RX,
-        ry: HALO_RY,
-        phase: i * 1.1,
-        scale: wScale,
-        groundShadow,
-        spriteShadow,
-        sprite,
-        aura,
-      });
-    });
-
     // 5. 微距前景草叶剪影（四角框景 + 鼠标视差，营造 1cm 昆虫视角景深）
     const addGrass = (x: number, y: number, key: string, ox: number, oy: number, sx: number, sy: number, amp: number, phase: number, parallax: number) => {
-      const img = this.add.image(x, y, key).setOrigin(ox, oy).setScale(sx, sy).setDepth(25).setAlpha(0.88);
-      this.grass.push({ img, baseX: x, baseY: y, parallax, amp, speed: 1.1, phase });
+      const img = this.add.image(x, y, key).setOrigin(ox, oy).setScale(sx, sy).setDepth(25).setAlpha(0.9);
+      this.grass.push({ img, baseX: x, baseY: y, parallax, amp, speed: 1.05, phase });
     };
-    addGrass(-18, -14, 'ui-macro-grass-tl', 0, 0, 0.58, 0.58, 0.022, 0, 15);
-    addGrass(W + 18, -14, 'ui-macro-grass-tl', 0, 0, -0.48, 0.48, -0.02, 1.3, 12);
-    addGrass(W + 18, H + 16, 'ui-macro-grass-br', 1, 1, 0.62, 0.62, 0.024, 2.1, 16);
-    addGrass(-18, H + 16, 'ui-macro-grass-br', 1, 1, -0.5, 0.5, -0.022, 3.4, 13);
+    addGrass(-18, -14, 'ui-macro-grass-tl', 0, 0, 0.62, 0.62, 0.022, 0, 15);
+    addGrass(W + 18, -14, 'ui-macro-grass-tl', 0, 0, -0.54, 0.54, -0.02, 1.3, 13);
+    addGrass(W + 18, H + 16, 'ui-macro-grass-br', 1, 1, 0.66, 0.66, 0.024, 2.1, 16);
+    addGrass(-18, H + 16, 'ui-macro-grass-br', 1, 1, -0.56, 0.56, -0.022, 3.4, 14);
 
-    // 6. 左侧封面级标题与行动堆栈（非对称冲击构图）
-    const LX = 104;
-    // 微倾红金序列斜切徽条
-    const tagBg = this.add.graphics().setDepth(15).setPosition(LX, 132).setRotation(-0.025);
+    // 6. 极简居中封面标题与行动按钮栈
+    const tagW = 312;
+    const tagH = 30;
+    const tagY = 116;
+    const tagBg = this.add.graphics().setDepth(15).setPosition(CX, tagY).setRotation(-0.015);
     const traceSlant = (ox: number, oy: number) => {
-      const pts = slantPoints(ox, oy, 304, 30, 12);
+      const pts = slantPoints(-tagW / 2 + ox, -tagH / 2 + oy, tagW, tagH, 12);
       tagBg.beginPath();
       tagBg.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) tagBg.lineTo(pts[i].x, pts[i].y);
@@ -216,10 +194,10 @@ export class MenuScene extends Phaser.Scene {
     tagBg.fillStyle(0xffc940, 0.95);
     tagBg.fillPoints(
       [
-        { x: 10, y: 2.5 },
-        { x: 17, y: 2.5 },
-        { x: 7, y: 27.5 },
-        { x: 0, y: 27.5 },
+        { x: -tagW / 2 + 10, y: -tagH / 2 + 2.5 },
+        { x: -tagW / 2 + 17, y: -tagH / 2 + 2.5 },
+        { x: -tagW / 2 + 7, y: tagH / 2 - 2.5 },
+        { x: -tagW / 2, y: tagH / 2 - 2.5 },
       ],
       true,
     );
@@ -227,50 +205,50 @@ export class MenuScene extends Phaser.Scene {
     traceSlant(0, 0);
     tagBg.strokePath();
     this.add
-      .text(LX + 155, 147, 'HEXAPOD HAVOC · 后院虫潮生存', {
+      .text(CX + 2, tagY, 'HEXAPOD HAVOC · 后院虫潮生存', {
         fontFamily: DISPLAY_FONT,
         fontSize: '14px',
         fontStyle: 'bold',
         color: '#fff8ec',
       })
       .setOrigin(0.5)
-      .setRotation(-0.025)
+      .setRotation(-0.015)
       .setDepth(16);
 
     // 标题背后极克制的琥珀斜切光影条
     const titleBack = this.add.graphics().setDepth(14);
-    titleBack.fillStyle(0xf0b238, 0.08);
-    titleBack.fillPoints(slantPoints(LX - 10, 212, 390, 62, 18), true);
+    titleBack.fillStyle(0xf0b238, 0.075);
+    titleBack.fillPoints(slantPoints(CX - 230, 180, 460, 68, 20), true);
 
     const titleObj = this.add
-      .text(LX - 4, 218, '六足战虫', {
+      .text(CX, 202, '六足战虫', {
         fontFamily: DISPLAY_FONT,
-        fontSize: '98px',
+        fontSize: '108px',
         fontStyle: 'bold',
         color: '#f4f3ee',
         stroke: '#050507',
-        strokeThickness: 18,
+        strokeThickness: 20,
         shadow: { offsetX: 6, offsetY: 8, color: '#050507', blur: 0, fill: true, stroke: true },
       })
-      .setOrigin(0, 0.5)
+      .setOrigin(0.5)
       .setDepth(16);
     const titleGrad = titleObj.context.createLinearGradient(0, 0, 0, titleObj.height);
     titleGrad.addColorStop(0, '#fffef9');
     titleGrad.addColorStop(0.58, '#f4f0e4');
     titleGrad.addColorStop(1, '#ffd573');
     titleObj.setFill(titleGrad);
-    this.tweens.add({ targets: titleObj, y: 223, duration: 2400, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    this.tweens.add({ targets: titleObj, y: 207, duration: 2500, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
 
     this.add
-      .text(LX + 2, 294, '六条腿，六把武器，守住后院最后一截树桩。', {
+      .text(CX, 282, '六条腿，六把武器，守住后院最后一截树桩。', {
         fontFamily: FONT_FAMILY,
-        fontSize: '17px',
+        fontSize: '18px',
         fontStyle: 'bold',
-        color: '#c4c5cf',
+        color: '#cbcdd6',
         stroke: '#050507',
-        strokeThickness: 4,
+        strokeThickness: 5,
       })
-      .setOrigin(0, 0.5)
+      .setOrigin(0.5)
       .setDepth(16);
 
     const savedRun = loadActiveRun();
@@ -279,10 +257,14 @@ export class MenuScene extends Phaser.Scene {
       if (savedRun) transitionTo(this, 'Game', { resume: savedRun });
     };
 
-    const primaryY = savedRun ? 372 : 396;
-    const ctaRing = this.add.graphics().setPosition(LX + 160, primaryY).setDepth(28);
+    const primaryW = 344;
+    const halfW = 166;
+    const halfOffset = 89;
+    const primaryY = savedRun ? 356 : 374;
+
+    const ctaRing = this.add.graphics().setPosition(CX, primaryY).setDepth(28);
     ctaRing.lineStyle(3, savedRun ? 0x5de862 : 0xffd44c, 0.55);
-    const ringPts = slantPoints(-159, -35, 318, 70, 15);
+    const ringPts = slantPoints(-primaryW / 2, -35, primaryW, 70, 15);
     ctaRing.beginPath();
     ctaRing.moveTo(ringPts[0].x, ringPts[0].y);
     for (let i = 1; i < ringPts.length; i++) ctaRing.lineTo(ringPts[i].x, ringPts[i].y);
@@ -302,15 +284,15 @@ export class MenuScene extends Phaser.Scene {
     if (savedRun) {
       const charName = CHARACTERS[savedRun.setup.character]?.name ?? '';
       const waveTag = savedRun.endless ? `无尽第 ${savedRun.wave + 1} 波` : `第 ${savedRun.wave + 1} 波`;
-      createButton(this, LX + 160, primaryY, `继续 · ${waveTag} ▶`, resume, {
-        width: 318,
-        height: 68,
+      createButton(this, CX, primaryY, `继续 · ${waveTag} ▶`, resume, {
+        width: primaryW,
+        height: 66,
         fontSize: 25,
         shape: 'slant',
         variant: 'emerald',
       }).setDepth(30);
       this.add
-        .text(LX + 14, primaryY + 46, `上次进度：${charName} · 已通第 ${savedRun.wave} 波`, {
+        .text(CX, primaryY + 45, `上次进度：${charName} · 已通第 ${savedRun.wave} 波`, {
           fontFamily: FONT_FAMILY,
           fontSize: '13px',
           fontStyle: 'bold',
@@ -318,50 +300,64 @@ export class MenuScene extends Phaser.Scene {
           stroke: '#050507',
           strokeThickness: 3,
         })
-        .setOrigin(0, 0.5)
+        .setOrigin(0.5)
         .setDepth(30);
-      createButton(this, LX + 82, 464, '开始新局 ▶', start, { width: 162, height: 50, fontSize: 20, shape: 'slant' }).setDepth(30);
-      createButton(this, LX + 250, 464, '★ 每日挑战', () => this.openDailyModal(), {
-        width: 158,
-        height: 50,
-        fontSize: 19,
-        primary: false,
-        shape: 'slant',
-      }).setDepth(30);
-      createButton(this, LX + 82, 524, '后院图鉴', () => transitionTo(this, 'Codex'), {
-        width: 162,
+      createButton(this, CX - halfOffset, 444, '开始新局 ▶', start, { width: halfW, height: 46, fontSize: 19, shape: 'slant' }).setDepth(30);
+      createButton(this, CX + halfOffset, 444, '★ 每日挑战', () => this.openDailyModal(), {
+        width: halfW,
         height: 46,
         fontSize: 18,
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, LX + 250, 524, '游戏设置', () => this.openSettings(), {
-        width: 158,
-        height: 46,
-        fontSize: 18,
+      createButton(this, CX - 116, 502, '🏆 挑战关', () => this.openChallengeModal(), {
+        width: 108,
+        height: 44,
+        fontSize: 16,
+        primary: false,
+        shape: 'slant',
+      }).setDepth(30);
+      createButton(this, CX, 502, '后院图鉴', () => transitionTo(this, 'Codex'), {
+        width: 108,
+        height: 44,
+        fontSize: 16,
+        primary: false,
+        shape: 'slant',
+      }).setDepth(30);
+      createButton(this, CX + 116, 502, '设置', () => this.openSettings(), {
+        width: 108,
+        height: 44,
+        fontSize: 16,
         primary: false,
         shape: 'slant',
         leftIcon: 'ui-gear',
       }).setDepth(30);
     } else {
-      createButton(this, LX + 160, primaryY, '开始战斗 ▶', start, { width: 318, height: 70, fontSize: 28, shape: 'slant' }).setDepth(30);
-      createButton(this, LX + 160, 468, '★ 每日挑战', () => this.openDailyModal(), {
-        width: 318,
+      createButton(this, CX, primaryY, '开始战斗 ▶', start, { width: primaryW, height: 68, fontSize: 28, shape: 'slant' }).setDepth(30);
+      createButton(this, CX - halfOffset, 448, '★ 每日挑战', () => this.openDailyModal(), {
+        width: halfW,
         height: 48,
-        fontSize: 20,
+        fontSize: 19,
         primary: false,
         shape: 'slant',
         variant: 'emerald',
       }).setDepth(30);
-      createButton(this, LX + 80, 526, '后院图鉴', () => transitionTo(this, 'Codex'), {
-        width: 158,
+      createButton(this, CX + halfOffset, 448, '🏆 主题挑战', () => this.openChallengeModal(), {
+        width: halfW,
+        height: 48,
+        fontSize: 19,
+        primary: false,
+        shape: 'slant',
+      }).setDepth(30);
+      createButton(this, CX - halfOffset, 508, '后院图鉴', () => transitionTo(this, 'Codex'), {
+        width: halfW,
         height: 46,
         fontSize: 18,
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, LX + 250, 526, '游戏设置', () => this.openSettings(), {
-        width: 158,
+      createButton(this, CX + halfOffset, 508, '游戏设置', () => this.openSettings(), {
+        width: halfW,
         height: 46,
         fontSize: 18,
         primary: false,
@@ -370,16 +366,17 @@ export class MenuScene extends Phaser.Scene {
       }).setDepth(30);
     }
 
-    // 7. 生涯战绩印记 & 操作提示（切角铭牌）
-    const statY = 584;
+    // 7. 生涯战绩印记 & 底部操作提示（居中切角铭牌）
+    const statY = 582;
     if (save.runs > 0) {
       const statStr = `已出战 ${save.runs} 局  ·  守住树桩 ${save.wins} 次`;
       const st = this.add
-        .text(LX + 14, statY, statStr, { fontFamily: FONT_FAMILY, fontSize: '14px', fontStyle: 'bold', color: '#ffd44c' })
-        .setOrigin(0, 0.5)
+        .text(CX, statY, statStr, { fontFamily: FONT_FAMILY, fontSize: '14px', fontStyle: 'bold', color: '#ffd44c' })
+        .setOrigin(0.5)
         .setDepth(31);
+      const sw = st.width + 32;
       const sg = this.add.graphics().setDepth(30);
-      drawChamferPlate(sg, LX, statY - 15, st.width + 28, 30, {
+      drawChamferPlate(sg, CX - sw / 2, statY - 15, sw, 30, {
         fill: 0x1b1c22,
         border: 0x564624,
         borderWidth: 1.5,
@@ -395,14 +392,14 @@ export class MenuScene extends Phaser.Scene {
       ? '拖动移动 · 右下角按钮冲刺 · 武器自动开火'
       : 'WASD 移动 · Space 轻冲刺 · 按住左键集火 · P 暂停';
     const hintText = this.add
-      .text(LX + 14, H - 36, hint, { fontFamily: FONT_FAMILY, fontSize: fontPx(14), fontStyle: 'bold', color: '#c4c5ce' })
-      .setOrigin(0, 0.5)
+      .text(CX, H - 36, hint, { fontFamily: FONT_FAMILY, fontSize: fontPx(14), fontStyle: 'bold', color: '#c4c5ce' })
+      .setOrigin(0.5)
       .setDepth(31);
-    const hw = hintText.width + 28;
+    const hw = hintText.width + 32;
     const hintBg = this.add.graphics().setDepth(30);
-    drawChamferPlate(hintBg, LX, H - 50, hw, 28, {
+    drawChamferPlate(hintBg, CX - hw / 2, H - 50, hw, 28, {
       fill: 0x18191e,
-      fillAlpha: 0.96,
+      fillAlpha: 0.94,
       border: COLOR.borderSoft,
       borderWidth: 1.4,
       shadowX: 3,
@@ -507,6 +504,86 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: c, alpha: 1, duration: 120 });
   }
 
+  /** 主题挑战关弹窗：6 个 10 波短局特殊规则挑战 */
+  private openChallengeModal(): void {
+    const W = GAME_WIDTH;
+    const H = GAME_HEIGHT;
+    const save = loadSave();
+    const cleared = new Set(save.challengesCleared);
+
+    const c = this.add.container(0, 0).setDepth(100);
+    const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.78).setOrigin(0).setInteractive();
+    const pw = 960;
+    const ph = 560;
+    const px = W / 2 - pw / 2;
+    const py = H / 2 - ph / 2;
+    c.add([
+      dim,
+      panel(this, px, py, pw, ph, COLOR.gold, COLOR.panel, 2, COLOR.gold),
+      displayLabel(this, W / 2, py + 38, `🏆 主题挑战模式 (${cleared.size}/${CHALLENGE_ORDER.length})`, 28, COLOR.goldText).setOrigin(0.5),
+      label(this, W / 2, py + 68, '10 波快节奏特殊规则挑战，第 10 波迎来 Boss 决战（无需预先解锁角色）', 13, COLOR.dim).setOrigin(0.5),
+      divider(this, px + 32, py + 84, pw - 64, COLOR.gold, 0.55),
+    ]);
+
+    const cols = 3;
+    const cw = 286;
+    const ch = 186;
+    const gapX = 18;
+    const gapY = 16;
+    const gx0 = px + (pw - (cols * cw + (cols - 1) * gapX)) / 2;
+    const gy0 = py + 98;
+
+    CHALLENGE_ORDER.forEach((cid: ChallengeId, i) => {
+      const def = CHALLENGES[cid];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const cx = gx0 + col * (cw + gapX);
+      const cy = gy0 + row * (ch + gapY);
+      const done = cleared.has(cid);
+      const box = this.add.graphics();
+      drawChamferPlate(box, cx, cy, cw, ch, {
+        fill: COLOR.panelDeep,
+        border: done ? 0x5de862 : def.accent,
+        borderWidth: 1.8,
+        accentTop: def.accent,
+        headerH: 0,
+        cutBig: 8,
+        cutSmall: 3,
+        inkWidth: 2.4,
+      });
+      c.add(box);
+      c.add(label(this, cx + 14, cy + 16, def.name, 18, def.css, true).setOrigin(0, 0));
+      if (done) {
+        c.add(pill(this, cx + cw - 40, cy + 25, '★ 通关', 0x164a22, 0x5de862, '#c8ffd0', 11, 7, 20));
+      }
+      c.add(label(this, cx + 14, cy + 44, `${CHARACTERS[def.character].name} · ${def.tagline}`, 12.5, COLOR.goldText, true).setOrigin(0, 0));
+      c.add(label(this, cx + 14, cy + 68, def.desc, 12.5, '#d4d6de', false, cw - 28).setOrigin(0, 0).setAlign('left'));
+      c.add(
+        createButton(
+          this,
+          cx + cw / 2,
+          cy + ch - 28,
+          done ? '再次挑战 ▶' : '开始挑战 ▶',
+          () => {
+            transitionTo(this, 'Game', {
+              character: def.character,
+              difficulty: def.difficulty,
+              weapon: def.weapon,
+              challenge: cid,
+              mutators: [...def.mutators],
+              shellSkin: save.shellSkin,
+            });
+          },
+          { width: cw - 28, height: 36, fontSize: 15, variant: done ? 'emerald' : undefined },
+        ),
+      );
+    });
+
+    c.add(createButton(this, W / 2, py + ph - 36, '返回主菜单', () => c.destroy(), { width: 200, height: 46, fontSize: 18, primary: false }));
+    c.setAlpha(0);
+    this.tweens.add({ targets: c, alpha: 1, duration: 120 });
+  }
+
   /** 设置弹窗 */
   private openSettings(): void {
     const W = GAME_WIDTH;
@@ -537,10 +614,9 @@ export class MenuScene extends Phaser.Scene {
     const dt = delta / 1000;
     this.elapsed += dt;
     this.weatherFx.update(dt);
-    this.beetle.animate(dt, 0.45);
-    this.beetle.rotation = -Math.PI * 0.62 + Math.sin(this.elapsed * 0.85) * 0.07;
+    if (this.sunrays) this.sunrays.rotation += dt * 0.045;
 
-    // 武器随鼠标指针实时瞄准互动 + 微距景深视差
+    // 微距景深视差
     const p = this.input.activePointer;
     const pt = uiPointer(p);
     const hasPointer = p.x > 0 || p.y > 0;
@@ -550,26 +626,28 @@ export class MenuScene extends Phaser.Scene {
     this.px += (targetPx - this.px) * lerpK;
     this.py += (targetPy - this.py) * lerpK;
 
-    this.groundImg.setPosition(HERO_X - this.px * 4, HERO_Y + 6 - this.py * 3);
-    this.beetle.setPosition(HERO_X - this.px * 7, HERO_Y - this.py * 5);
-    const haloCx = HERO_X - this.px * 7;
-    const haloCy = HERO_Y - this.py * 5;
+    this.groundImg.setPosition(CX - this.px * 5, CY + 22 - this.py * 3.5);
 
-    for (const h of this.halo) {
-      const sx = haloCx + Math.cos(h.baseAngle) * h.rx;
-      const sy = haloCy + Math.sin(h.baseAngle) * h.ry;
-      const wave = Math.sin(this.elapsed * 2.3 + h.phase);
-      const bob = wave * 5;
-      const aim = hasPointer
-        ? Math.atan2(pt.y - (sy + bob), pt.x - sx)
-        : h.baseAngle + Math.sin(this.elapsed * 1.35 + h.phase) * 0.08;
-      const flipY = Math.cos(aim) < 0;
-
-      h.groundShadow.setPosition(sx + 2, sy + 24).setScale(1 - wave * 0.08, 1 - wave * 0.05);
-      h.aura.setPosition(sx, sy + bob);
-      h.sprite.setPosition(sx, sy + bob).setRotation(aim).setFlipY(flipY).setScale(h.scale);
-      h.spriteShadow.setPosition(sx + 3, sy + bob + 5).setRotation(aim).setFlipY(flipY).setScale(h.scale);
+    // 外围暗处 1:1 小虫自然漫游（避开屏幕正中标题按钮区，出界平滑绕回）
+    for (const b of this.bugs) {
+      b.angle += Math.sin(this.elapsed * b.wobbleSpeed + b.phase) * b.wobbleAmp * dt;
+      // 柔和避开中央封面文字与按钮区域
+      const dx = b.x - CX;
+      const dy = b.y - (CY + 10);
+      if (Math.abs(dx) < 290 && Math.abs(dy) < 210) {
+        const away = Math.atan2(dy, dx);
+        const diff = Phaser.Math.Angle.Wrap(away - b.angle);
+        b.angle += Phaser.Math.Clamp(diff, -2.2 * dt, 2.2 * dt);
+      }
+      b.x += Math.cos(b.angle) * b.speed * dt;
+      b.y += Math.sin(b.angle) * b.speed * dt;
+      if (b.x < -36) b.x = GAME_WIDTH + 32;
+      if (b.x > GAME_WIDTH + 36) b.x = -32;
+      if (b.y < -36) b.y = GAME_HEIGHT + 32;
+      if (b.y > GAME_HEIGHT + 36) b.y = -32;
+      b.img.setPosition(b.x - this.px * 6, b.y - this.py * 4).setRotation(b.angle);
     }
+
     for (const g of this.grass) {
       g.img.setPosition(g.baseX + this.px * g.parallax, g.baseY + this.py * (g.parallax * 0.7));
       g.img.rotation = Math.sin(this.elapsed * g.speed + g.phase) * g.amp;
