@@ -129,6 +129,19 @@ export class Summons {
         const crit = Math.random() < g.crit;
         const dmg = Math.max(1, Math.round(g.damage * (crit ? g.critMultiplier : 1)));
         enemies.hit(target, dmg, crit, dx / d, dy / d, g.knockback);
+        // 蚁后的工蚁：攻击带小范围溅射，否则单体随从清不动后期虫群
+        if (g.texture === 'workerant') {
+          const splashR = 36;
+          for (const o of enemies.grid.query(target.x, target.y, splashR + MAX_ENEMY_RADIUS, this.buf)) {
+            if (!o.active || o === target || o.age < SPAWN_POP) continue;
+            const ox = o.x - target.x;
+            const oy = o.y - target.y;
+            if (ox * ox + oy * oy > (splashR + o.radius) ** 2) continue;
+            const sd = Math.max(1, Math.round(dmg * 0.5));
+            const dd = Math.hypot(ox, oy) || 1;
+            enemies.hit(o, sd, false, ox / dd, oy / dd, g.knockback * 0.5);
+          }
+        }
         a.cd = g.interval;
       }
       a.heading = Phaser.Math.Angle.RotateTo(a.heading, Math.atan2(dy, dx), 10 * dt);

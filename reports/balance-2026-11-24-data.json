@@ -1,0 +1,90 @@
+{
+  "generated": "2026-11-24",
+  "method": "13 chars x 5 difficulties x 1 run; fixed PRNG seed per (character, run); bot mode 'smart', contracts on, shop on; headlessStep 60Hz. d0/d4 from sweep 1, d1/d2/d3 from sweep 2 (same seeds).",
+  "known_d0_d4": {
+    "d0": {
+      "stag": {"reached": 20, "win": true},
+      "rhino": {"reached": 18, "win": false},
+      "bombardier": {"reached": 10, "win": false},
+      "ladybug": {"reached": 17, "win": false},
+      "spider": {"reached": 11, "win": false},
+      "mantis": {"reached": 16, "win": false},
+      "antqueen": {"reached": 9, "win": false},
+      "tiger": {"reached": 7, "win": false},
+      "cicada": {"reached": 20, "win": true},
+      "caterpillar": {"reached": 20, "win": true},
+      "mosquito": {"reached": 11, "win": false},
+      "dungbeetle": {"reached": 7, "win": false},
+      "termite": {"reached": 12, "win": false}
+    },
+    "d4": {
+      "stag": {"reached": 8, "win": false},
+      "rhino": {"reached": 10, "win": false},
+      "bombardier": {"reached": 7, "win": false},
+      "ladybug": {"reached": 6, "win": false},
+      "spider": {"reached": 15, "win": false},
+      "mantis": {"reached": 17, "win": false},
+      "antqueen": {"reached": 7, "win": false},
+      "tiger": {"reached": 17, "win": false},
+      "cicada": {"reached": 15, "win": false},
+      "caterpillar": {"reached": 13, "win": false},
+      "mosquito": {"reached": 20, "win": true},
+      "dungbeetle": {"reached": 14, "win": false},
+      "termite": {"reached": 7, "win": false}
+    },
+    "aggregate": {
+      "d0": {"n": 13, "wins": 3, "avgReached": 13.7, "avgItems": 124.3, "avgCurse": 41.5, "avgLevel": 40.3, "avgMaxHp": 56.7, "avgArmor": 39.6, "avgSpeed": -8.5},
+      "d4": {"n": 13, "wins": 1, "avgReached": 12.0, "avgItems": 119.0, "avgCurse": 41.2, "avgLevel": 40.2, "avgMaxHp": 61.1, "avgArmor": 38.6, "avgSpeed": -17.5}
+    }
+  },
+  "sweep2_d1_d2_d3": {
+    "aggregate": {
+      "d1": {"n": 13, "wins": 2, "avgReached": 12.4, "avgItems": 99.8, "avgCurse": 37.7, "avgLevel": 34.6, "avgMaxHp": 64.7, "avgArmor": 34.6, "avgSpeed": -11.2},
+      "d2": {"n": 13, "wins": 4, "avgReached": 13.9, "avgItems": 115.7, "avgCurse": 45.2, "avgLevel": 41.9, "avgMaxHp": 58.8, "avgArmor": 32.5, "avgSpeed": -6.8},
+      "d3": {"n": 13, "wins": 3, "avgReached": 12.8, "avgItems": 125.3, "avgCurse": 48.0, "avgLevel": 44.7, "avgMaxHp": 56.9, "avgArmor": 36.6, "avgSpeed": -10.5}
+    },
+    "runs_columns": ["character", "difficulty", "reached", "win", "items", "curse", "level", "maxHp", "armor", "dodgePct", "speedPct", "damagePct", "attackSpeedPct"],
+    "runs": [
+      ["stag",2,20,1,254,93,81,70,66,40,-31,463,103],
+      ["rhino",2,20,1,258,121,84,116,73,30,-45,565,190],
+      ["bombardier",2,13,0,23,0,14,60,5,0,5,56,15],
+      ["ladybug",2,11,0,79,28,23,48,10,6,17,171,100],
+      ["spider",2,16,0,126,42,52,65,34,21,-21,230,167],
+      ["mantis",2,10,0,60,30,21,18,10,3,-8,141,86],
+      ["antqueen",2,7,0,10,0,7,30,2,3,10,13,6],
+      ["tiger",2,11,0,78,36,26,44,21,4,43,141,45],
+      ["cicada",2,11,0,66,22,20,66,8,-1,7,132,21],
+      ["caterpillar",2,20,1,239,91,83,83,81,0,-41,492,243],
+      ["mosquito",2,12,0,31,8,19,38,16,25,7,70,10],
+      ["dungbeetle",2,10,0,36,5,15,49,9,3,3,52,21],
+      ["termite",2,20,1,244,112,100,77,88,40,-35,492,116],
+      ["stag",1,20,1,250,98,80,84,73,38,-28,454,229],
+      ["rhino",1,9,0,23,4,12,62,3,0,-3,10,26],
+      ["bombardier",1,10,0,19,3,12,43,8,0,0,21,27],
+      ["ladybug",1,20,1,242,94,77,87,73,53,-30,501,223],
+      ["spider",1,18,0,187,69,47,95,70,37,-34,343,106],
+      ["mantis",1,11,0,26,1,15,39,3,3,0,63,2],
+      ["antqueen",1,3,0,3,0,4,42,1,0,0,0,5],
+      ["tiger",1,10,0,15,4,12,23,2,4,39,59,17],
+      ["cicada",1,13,0,126,64,48,119,48,19,-22,335,94],
+      ["caterpillar",1,6,0,6,4,9,34,10,0,3,5,20],
+      ["mosquito",1,18,0,236,56,65,57,84,41,-33,442,148],
+      ["dungbeetle",1,17,0,158,84,59,134,74,20,-51,397,176],
+      ["termite",1,6,0,6,9,10,23,1,0,13,23,0],
+      ["stag",3,9,0,32,9,17,43,9,3,12,38,28],
+      ["rhino",3,16,0,254,69,72,74,80,40,-31,457,189],
+      ["bombardier",3,7,0,16,4,11,40,4,6,0,18,11],
+      ["ladybug",3,20,1,249,100,90,68,74,38,-21,471,148],
+      ["spider",3,20,1,247,124,98,83,80,38,-29,515,311],
+      ["mantis",3,11,0,36,3,16,43,2,-6,-15,149,87],
+      ["antqueen",3,4,0,5,0,5,37,0,0,5,5,5],
+      ["tiger",3,16,0,238,97,65,66,66,39,-12,437,144],
+      ["cicada",3,20,1,256,124,98,90,80,38,-31,514,324],
+      ["caterpillar",3,6,0,8,3,9,38,7,0,12,30,15],
+      ["mosquito",3,14,0,36,8,17,31,4,6,5,150,56],
+      ["dungbeetle",3,17,0,243,83,74,103,70,41,-36,395,173],
+      ["termite",3,7,0,9,0,9,24,0,0,5,31,15]
+    ]
+  },
+  "totals": {"runs": 65, "wins": 13, "winRate": 0.2}
+}

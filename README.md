@@ -27,6 +27,17 @@ __bot.stop()           // 结束模拟，回到菜单
 
 模拟期间存档处于沙盒模式，胜负和解锁不会写进浏览器里的真实存档。
 
+### 完整平衡回归（无头 Chrome）
+
+```bash
+npm run test:balance                    # 13 角色 × 5 难度 × 1 局
+npm run test:balance -- --runs=3        # 每格 3 局
+npm run test:balance -- --diffs=0,4 --runs=5
+CHROME_PATH=/path/to/chrome npm run test:balance   # 自定义浏览器
+```
+
+脚本会用 `hmr:false` 起 Vite、启动无头 Chrome、逐场景驱动 `__bot`，结果写到 `reports/balance-sweep-*.json`，并在终端打印每档难度的通关率/平均波次/道具/诅咒/等级。固定种子按「角色 + 轮次」生成，便于复现。
+
 ## 操作
 
 - 电脑：WASD / 方向键移动，P 或 Esc 暂停，Enter 确认

@@ -154,6 +154,10 @@ export class GameScene extends Phaser.Scene {
   private bossEnemy: Enemy | null = null;
   /** Boss 被击杀：等本帧各系统更新完再结束波次，避免在遍历怪物时清空列表 */
   private bossDown = false;
+  /** Boss 狂暴：60 秒后伤害按秒提升，防止低 DPS 构筑无限拖 Boss 战 */
+  private bossBaseDamage = 0;
+  private bossBaseSkill = 0;
+  private bossEnraged = false;
   /** 蘑菇圈计时、雷击残枝攻击计数 */
   private fairyTimer = 0;
   private attackCount = 0;
@@ -1548,8 +1552,24 @@ export class GameScene extends Phaser.Scene {
         this.bossEnemy.maxHp = Math.round(this.bossEnemy.maxHp * 0.44);
         this.bossEnemy.hp = this.bossEnemy.maxHp;
       }
+      this.bossBaseDamage = this.bossEnemy.damage;
+      this.bossBaseSkill = this.bossEnemy.skillDamage;
+      this.bossEnraged = false;
     }
     const b = this.bossEnemy;
+    // 最终 Boss 没有时间限制：60 秒后进入狂暴，伤害每秒 +3%，把僵局变成失败
+    if (this.currentWaveDef(run.wave).duration === null && run.phase === 'combat') {
+      const over = this.elapsed - 60;
+      if (over > 0) {
+        if (!this.bossEnraged) {
+          this.bossEnraged = true;
+          bus.emit(EVT.WAVE_EVENT, '☠ 巢穴之主狂暴：Boss 伤害持续提升！', '#ff6a5a');
+        }
+        const k = 1 + over * 0.03;
+        b.damage = this.bossBaseDamage * k;
+        b.skillDamage = this.bossBaseSkill * k;
+      }
+    }
     run.boss = { name: b.def.name, hp: Math.max(0, b.hp), maxHp: b.maxHp };
   }
 

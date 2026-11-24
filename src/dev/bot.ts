@@ -296,6 +296,15 @@ export function installBot(game: Phaser.Game): void {
       const r = run();
       return { wave: r.wave, phase: r.phase, hp: r.hp, level: r.level, weapons: r.weapons, items: r.items, stats: r.stats };
     },
+    /** 手动推进 n 帧（平衡扫描器用来跨过 cleanup / 波间过渡） */
+    advance(n = 1) {
+      for (let i = 0; i < n; i++) frame();
+      return phase();
+    },
+    /** 当前阶段（combat / cleanup / intermission / dead / victory） */
+    phase() {
+      return phase();
+    },
   };
   Object.assign(window, { __bot: api, __game: game, __weapons: WEAPONS });
 }

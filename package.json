@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:math": "node scripts/run-math-tests.mjs"
+    "test:math": "node scripts/run-math-tests.mjs",
+    "test:balance": "node scripts/balance-sweep.mjs"
   },
   "dependencies": {
     "@fontsource/lilita-one": "^5.3.0",
@@ -19,6 +20,7 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "puppeteer-core": "^25.18.1",
     "typescript": "5.9.3",
     "vite": "7.3.8"
   }
