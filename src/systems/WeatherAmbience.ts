@@ -17,17 +17,28 @@ interface Ripple {
 }
 
 interface CloudBlob {
-  x: number;
-  y: number;
-  rx: number;
-  ry: number;
+  sprite: Phaser.GameObjects.Image;
   vx: number;
-  alpha: number;
+  rx: number;
+}
+
+function ensureSoftCloudTexture(scene: Phaser.Scene): void {
+  if (scene.textures.exists('weather-soft-cloud')) return;
+  const tex = scene.textures.createCanvas('weather-soft-cloud', 128, 128);
+  if (!tex) return;
+  const ctx = tex.getContext();
+  const g = ctx.createRadialGradient(64, 64, 6, 64, 64, 62);
+  g.addColorStop(0, 'rgba(6, 10, 18, 0.22)');
+  g.addColorStop(0.55, 'rgba(6, 10, 18, 0.09)');
+  g.addColorStop(1, 'rgba(6, 10, 18, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  tex.refresh();
 }
 
 /**
- * 动态天气氛围层（晴天斑驳树影 / 阴天流动云影 / 小雨涟漪 / 暴雨狂风 / 雷暴闪电）：
- * 既用于战斗 HUD 底层，也可在主菜单与选人界面实时预览 5 档天气的电影级光影氛围。
+ * 动态天气氛围层（晴天暖阳色调 / 阴天柔和流动云影 / 小雨涟漪 / 暴雨狂风 / 雷暴闪电）：
+ * 既用于战斗 HUD 底层，也可在主菜单与选人界面实时预览 5 档天气光影氛围。
  */
 export class WeatherAmbience {
   private readonly container: Phaser.GameObjects.Container;
@@ -35,7 +46,6 @@ export class WeatherAmbience {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly flashRect: Phaser.GameObjects.Rectangle;
   private weather = 0;
-  private elapsed = 0;
   private lightningCd = 3.5;
   private flashAlpha = 0;
   private drops: RainDrop[] = [];
@@ -49,10 +59,29 @@ export class WeatherAmbience {
     private readonly w = GAME_WIDTH,
     private readonly h = GAME_HEIGHT,
   ) {
+    ensureSoftCloudTexture(scene);
     this.tintRect = scene.add.rectangle(0, 0, w, h, 0x000000, 0).setOrigin(0);
     this.gfx = scene.add.graphics();
     this.flashRect = scene.add.rectangle(0, 0, w, h, 0xd8ecff, 0).setOrigin(0);
-    this.container = scene.add.container(0, 0, [this.tintRect, this.gfx, this.flashRect]).setDepth(depth);
+    const items: Phaser.GameObjects.GameObject[] = [this.tintRect, this.gfx];
+
+    for (let i = 0; i < 6; i++) {
+      const rx = Phaser.Math.Between(210, 360);
+      const ry = Phaser.Math.Between(120, 210);
+      const sprite = scene.add
+        .image(Math.random() * w, Phaser.Math.Between(60, h - 60), 'weather-soft-cloud')
+        .setDisplaySize(rx * 2, ry * 2)
+        .setAlpha(Phaser.Math.FloatBetween(0.45, 0.8))
+        .setVisible(false);
+      items.push(sprite);
+      this.clouds.push({
+        sprite,
+        vx: Phaser.Math.FloatBetween(14, 28),
+        rx,
+      });
+    }
+    items.push(this.flashRect);
+    this.container = scene.add.container(0, 0, items).setDepth(depth);
 
     for (let i = 0; i < 95; i++) {
       this.drops.push({
@@ -61,16 +90,6 @@ export class WeatherAmbience {
         len: Phaser.Math.Between(16, 30),
         speed: Phaser.Math.Between(620, 920),
         alpha: Phaser.Math.FloatBetween(0.16, 0.38),
-      });
-    }
-    for (let i = 0; i < 6; i++) {
-      this.clouds.push({
-        x: Math.random() * w,
-        y: Phaser.Math.Between(60, h - 60),
-        rx: Phaser.Math.Between(210, 360),
-        ry: Phaser.Math.Between(120, 210),
-        vx: Phaser.Math.FloatBetween(14, 28),
-        alpha: Phaser.Math.FloatBetween(0.08, 0.15),
       });
     }
 
@@ -82,10 +101,11 @@ export class WeatherAmbience {
     this.ripples.length = 0;
     this.flashAlpha = 0;
     this.flashRect.setAlpha(0);
+    for (const c of this.clouds) c.sprite.setVisible(this.weather === 1);
 
     // 全局轻氛围色调（保持战斗高可读性，绝不过暗）
     if (this.weather === 0) {
-      this.tintRect.setFillStyle(0xffe090, 0.03);
+      this.tintRect.setFillStyle(0xffe090, 0.025);
     } else if (this.weather === 1) {
       this.tintRect.setFillStyle(0x283444, 0.12);
     } else if (this.weather === 2) {
@@ -103,43 +123,18 @@ export class WeatherAmbience {
   }
 
   update(dt: number): void {
-    this.elapsed += dt;
     const g = this.gfx;
     g.clear();
 
     if (this.weather === 0) {
-      // 晴天：柔和斜射林间日光束 + 缓缓移动的斑驳阳光斑
-      const sway = Math.sin(this.elapsed * 0.45) * 28;
-      g.fillStyle(0xffe498, 0.038);
-      g.fillPoints(
-        [
-          new Phaser.Math.Vector2(140 + sway, 0),
-          new Phaser.Math.Vector2(340 + sway, 0),
-          new Phaser.Math.Vector2(760 + sway * 1.4, this.h),
-          new Phaser.Math.Vector2(480 + sway * 1.4, this.h),
-        ],
-        true,
-      );
-      g.fillStyle(0xfff0b8, 0.028);
-      g.fillPoints(
-        [
-          new Phaser.Math.Vector2(680 - sway, 0),
-          new Phaser.Math.Vector2(860 - sway, 0),
-          new Phaser.Math.Vector2(1240 - sway * 1.2, this.h),
-          new Phaser.Math.Vector2(1010 - sway * 1.2, this.h),
-        ],
-        true,
-      );
       return;
     }
 
     if (this.weather === 1) {
-      // 阴天：飘过的云影
+      // 阴天：柔和径向渐变云影缓慢飘过
       for (const c of this.clouds) {
-        c.x += c.vx * dt;
-        if (c.x - c.rx > this.w) c.x = -c.rx;
-        g.fillStyle(0x060a10, c.alpha);
-        g.fillEllipse(c.x, c.y, c.rx * 2, c.ry * 2);
+        c.sprite.x += c.vx * dt;
+        if (c.sprite.x - c.rx > this.w) c.sprite.x = -c.rx;
       }
       return;
     }

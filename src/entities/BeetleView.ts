@@ -117,17 +117,23 @@ export class BeetleView extends Phaser.GameObjects.Container {
   private readonly shell: Phaser.GameObjects.Image;
   private readonly plan: BodyPlan;
   private readonly weaponSprites: (Phaser.GameObjects.Image | null)[] = new Array(MAX_SLOTS).fill(null);
+  private readonly weaponShadows: (Phaser.GameObjects.Ellipse | null)[] = new Array(MAX_SLOTS).fill(null);
+  private readonly weaponActive: boolean[] = new Array(MAX_SLOTS).fill(false);
   private readonly weaponKick: number[] = new Array(MAX_SLOTS).fill(0);
-  /** 品质越高，挂在腿上的武器越大 */
+  private readonly weaponKickDur: number[] = new Array(MAX_SLOTS).fill(0.12);
+  private readonly weaponKickMag: number[] = new Array(MAX_SLOTS).fill(6);
+  /** 品质越高，悬浮在周身的武器略大一点 */
   private readonly weaponScale: number[] = new Array(MAX_SLOTS).fill(1);
   /** 近战武器刺出去的距离 */
   private readonly weaponExtend: number[] = new Array(MAX_SLOTS).fill(0);
+  private weaponsVisible = true;
   private walkPhase = 0;
   private walkAmount = 0;
   private auraTime = 0;
   private hasShield = false;
   private hasHaste = false;
   private hasSlow = false;
+  private hasFrenzy = false;
   /** 当前武器槽数量：超过腿数时长出额外肢体 */
   private slotCount = 0;
 
@@ -144,23 +150,45 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.drawLegs();
   }
 
-  /** 更新角色身上的实时视觉状态（护盾气泡、加速风环、丝网减速） */
-  setStatus(shield: boolean, haste: boolean, slow: boolean): void {
+  /** 更新角色身上的实时视觉状态（护盾气泡、加速风环、丝网减速、琥珀狂热） */
+  setStatus(shield: boolean, haste: boolean, slow: boolean, frenzy = false): void {
     this.hasShield = shield;
     this.hasHaste = haste;
     this.hasSlow = slow;
+    this.hasFrenzy = frenzy;
+  }
+
+  /** 设置局内周身悬浮武器是否显示（设置项：隐藏武器） */
+  setWeaponsVisible(visible: boolean): void {
+    if (this.weaponsVisible === visible) return;
+    this.weaponsVisible = visible;
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      const show = visible && this.weaponActive[i];
+      this.weaponSprites[i]?.setVisible(show);
+      this.weaponShadows[i]?.setVisible(show);
+    }
   }
 
   setWeapon(slot: number, texture: string | null, tier = 0, hiRes = false): void {
     let sprite = this.weaponSprites[slot];
+    let shadow = this.weaponShadows[slot];
     const texScale = hiRes ? UI_WEAPON_RES : SPRITE_RES;
-    this.weaponScale[slot] = (1 + 0.12 * tier) / texScale;
+    this.weaponScale[slot] = (1 + 0.08 * tier) / texScale;
     this.weaponExtend[slot] = 0;
     if (!texture) {
+      this.weaponActive[slot] = false;
       sprite?.setVisible(false);
+      shadow?.setVisible(false);
       return;
     }
-    const key = weaponTex(texture, tier, hiRes);
+    this.weaponActive[slot] = true;
+    // 统一使用干净黑墨原画，避免高品阶 UI 卡片贴纸边框与横切色带糊在甲虫身上
+    const key = weaponTex(texture, 0, hiRes);
+    if (!shadow) {
+      shadow = this.scene.add.ellipse(0, 0, 17, 6.5, 0x050507, 0.36);
+      this.weaponShadows[slot] = shadow;
+      this.addAt(shadow, 1);
+    }
     if (!sprite) {
       sprite = this.scene.add.image(0, 0, key);
       this.weaponSprites[slot] = sprite;
@@ -168,16 +196,23 @@ export class BeetleView extends Phaser.GameObjects.Container {
       // 保持状态光环在最顶层
       this.bringToTop(this.aura);
     }
-    sprite.setTexture(key).setVisible(true);
+    const show = this.weaponsVisible;
+    shadow.setVisible(show);
+    sprite.setTexture(key).setVisible(show);
     this.placeWeapon(slot);
   }
 
-  /** 让武器朝向世界坐标下的某个角度；kick > 0 时有开火的后坐放大 */
-  setWeaponAim(slot: number, worldAngle: number, kick = 0): void {
+  /** 让武器朝向世界坐标下的某个角度；kick > 0 时触发沿枪管反方向的物理后坐回弹 */
+  setWeaponAim(slot: number, worldAngle: number, kick = 0, recoilMag = 6): void {
     const sprite = this.weaponSprites[slot];
     if (!sprite) return;
     sprite.rotation = worldAngle - this.rotation;
-    if (kick > 0) this.weaponKick[slot] = kick;
+    sprite.setFlipY(Math.cos(worldAngle) < 0);
+    if (kick > 0) {
+      this.weaponKick[slot] = kick;
+      this.weaponKickDur[slot] = kick;
+      this.weaponKickMag[slot] = recoilMag;
+    }
   }
 
   /** 武器槽数量；超过腿数的部分长在尾巴上 */
@@ -238,16 +273,63 @@ export class BeetleView extends Phaser.GameObjects.Container {
 
   private tipLocal(slot: number): [number, number] {
     const L = this.legAt(slot);
-    return [L.tip[0] + this.legOffset(L.group), L.tip[1] * L.side];
+    // 将武器从腿尖外推到甲虫轮廓之外，形成土豆兄弟风格周身悬浮武器环
+    const tx = L.tip[0];
+    const ty = L.tip[1] * L.side;
+    const len = Math.hypot(tx, ty) || 1;
+    const extraRing = Math.max(0, slot - this.plan.legs.length) * 0.45;
+    const rx = 44 + extraRing * 6;
+    const ry = 40 + extraRing * 6;
+    return [(tx / len) * rx, (ty / len) * ry];
   }
 
   private placeWeapon(slot: number): void {
     const sprite = this.weaponSprites[slot];
-    if (!sprite || !sprite.visible) return;
-    const [x, y] = this.tipLocal(slot);
+    if (!sprite || !this.weaponActive[slot] || !this.weaponsVisible) return;
+    const [bx, by] = this.tipLocal(slot);
     const ext = this.weaponExtend[slot];
-    sprite.setPosition(x + Math.cos(sprite.rotation) * ext, y + Math.sin(sprite.rotation) * ext);
-    sprite.setScale(this.weaponScale[slot] * (1 + this.weaponKick[slot] * 3));
+    // 真实沿枪管反方向的物理后坐回弹：瞬时猛缩 -> 弹性微过冲回位 + 轻微轴向压缩
+    const kick = this.weaponKick[slot];
+    let recoil = 0;
+    let punch = 0;
+    if (kick > 0) {
+      const dur = Math.max(0.04, this.weaponKickDur[slot]);
+      const p = 1 - kick / dur;
+      const mag = this.weaponKickMag[slot];
+      if (p < 0.18) {
+        const k = p / 0.18;
+        recoil = -mag * (0.45 + 0.55 * k);
+        punch = 0.6 + 0.4 * k;
+      } else {
+        const k = (p - 0.18) / 0.82;
+        // 阻尼弹性回位（带约 12% 的柔和前冲收束）
+        const ease = 1 - Math.pow(1 - k, 2.4);
+        const overshoot = Math.sin(k * Math.PI) * 0.14 * mag;
+        recoil = -mag * (1 - ease) + overshoot;
+        punch = (1 - k) * (1 - k);
+      }
+    }
+    const wave = Math.sin(this.auraTime * 2.5 + slot * 1.15);
+    const bob = Math.abs(ext) > 1 || kick > 0.01 ? 0 : wave * 1.8;
+    // 在世界竖直方向做轻盈悬浮呼吸，同时把投影始终落在武器正下方地面
+    const c = Math.cos(this.rotation);
+    const s = Math.sin(this.rotation);
+    const bobLx = bob * s;
+    const bobLy = bob * c;
+    const reach = ext + recoil;
+    const wx = bx + Math.cos(sprite.rotation) * reach + bobLx;
+    const wy = by + Math.sin(sprite.rotation) * reach + bobLy;
+    sprite.setPosition(wx, wy);
+    const baseSc = this.weaponScale[slot];
+    sprite.setScale(baseSc * (1 - punch * 0.14), baseSc * (1 + punch * 0.1));
+
+    const shadow = this.weaponShadows[slot];
+    if (shadow) {
+      const shOffY = 7;
+      shadow.setPosition(bx + Math.cos(sprite.rotation) * reach + shOffY * s, by + Math.sin(sprite.rotation) * reach + shOffY * c);
+      shadow.setRotation(-this.rotation);
+      shadow.setScale(1 - wave * 0.08, 1 - wave * 0.05);
+    }
   }
 
   private drawAura(): void {
@@ -273,6 +355,18 @@ export class BeetleView extends Phaser.GameObjects.Container {
       g.strokePath();
       g.beginPath();
       g.arc(0, 0, 26, a + Math.PI, a + Math.PI + 1.6);
+      g.strokePath();
+    }
+    if (this.hasFrenzy) {
+      const a = this.auraTime * 9;
+      g.fillStyle(0xffb828, 0.12);
+      g.fillCircle(0, 0, 29);
+      g.lineStyle(2.6, 0xffd44c, 0.85);
+      g.beginPath();
+      g.arc(0, 0, 29, a, a + 1.3);
+      g.strokePath();
+      g.beginPath();
+      g.arc(0, 0, 29, a + Math.PI, a + Math.PI + 1.3);
       g.strokePath();
     }
     if (this.hasSlow) {

@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
+import { bgm } from '../audio/bgm';
 import { sfx } from '../audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH, IS_COARSE_POINTER, NUM_FONT } from '../config';
 import { bus, EVT } from '../core/bus';
 import { levelRerollCost, rollUpgrades, type UpgradeOption } from '../core/progression';
 import type { RunState } from '../core/RunState';
+import { recordItemSeen, recordWeaponSeen, saveActiveRun } from '../core/save';
 import { checkUnlocks } from '../core/unlocks';
 import { CHARACTERS } from '../data/characters';
 import {
@@ -23,19 +25,21 @@ import {
   type Offer,
 } from '../core/shop';
 import { activeSets, classCounts, SET_THRESHOLDS, SETS } from '../core/sets';
-import { formatStat, formatStatDelta, STAT_META } from '../core/stats';
+import { formatStat, formatStatDelta, STAT_KEYS, STAT_META, type Stats } from '../core/stats';
 import { ITEMS, type ItemDef } from '../data/items';
 import { TIER_ROMAN, weaponTex } from '../art/icons';
 import { SPRITE_RES } from '../art/draw';
 import { CLASS_LABEL, TIERS, WEAPONS, type WeaponClass } from '../data/weapons';
 import { createButton, drawKeycap } from '../ui/Button';
-import { setupUICamera } from '../ui/camera';
+import { fadeInScene, setupUICamera } from '../ui/camera';
 import {
   COLOR,
   CLASS_STYLE,
   cardTitle,
+  createStatsPanel,
   displayLabel,
   divider,
+  drawChamferPlate,
   itemLines,
   label,
   layoutLines,
@@ -48,6 +52,7 @@ import {
   weaponLines,
   weaponTypeLine,
   type Line,
+  type StatsPanelHandle,
 } from '../ui/widgets';
 
 const W = GAME_WIDTH;
@@ -85,31 +90,63 @@ export class IntermissionScene extends Phaser.Scene {
   private spinRays: Phaser.GameObjects.Image[] = [];
   private toasts: string[] = [];
   private toastBusy = false;
+  private statsHandle: StatsPanelHandle | null = null;
+  private weaponHoverTip: Container | null = null;
+  private prevNectar = -1;
+  private prevStats: Stats | null = null;
+  private changedSlot = -1;
+  private animateOffers = true;
 
   constructor() {
     super('Intermission');
   }
 
-  create(): void {
+  create(data?: { resumed?: boolean }): void {
     setupUICamera(this);
+    this.input.mouse?.disableContextMenu();
     this.run = this.registry.get('run') as RunState;
     this.root = null;
     this.popup = null;
     this.upgrades = [];
     this.chestItem = '';
     this.shopRerolls = 0;
-    this.shopReady = false;
+    this.shopReady = !!(data?.resumed && this.run.offers.length === this.run.shopOfferCount);
     this.spinRays = [];
     this.toasts = [];
     this.toastBusy = false;
+    this.statsHandle = null;
+    this.prevNectar = this.run.nectar;
+    this.prevStats = { ...this.run.stats };
+    this.changedSlot = -1;
+    this.animateOffers = true;
 
     warmBackdrop(this, W, H);
+    bgm.setMode('shop');
     const kb = this.input.keyboard!;
-    kb.on('keydown-ENTER', () => {
-      if (this.page === 'shop' && !this.popup) this.finish();
+    const confirmKey = () => {
+      if (this.popup) return;
+      if (this.page === 'shop') this.finish();
+      else if (this.page === 'chest') this.takeChest();
+    };
+    kb.on('keydown-ENTER', confirmKey);
+    kb.on('keydown-SPACE', confirmKey);
+    kb.on('keydown-R', () => {
+      if (this.popup) return;
+      if (this.page === 'shop') this.rerollShop();
+      else if (this.page === 'level') this.rerollUpgrades();
     });
+    const pickSlot = (idx: number) => {
+      if (this.popup) return;
+      if (this.page === 'shop') this.buy(idx);
+      else if (this.page === 'level' && this.upgrades[idx]) this.chooseUpgrade(this.upgrades[idx]);
+    };
+    kb.on('keydown-ONE', () => pickSlot(0));
+    kb.on('keydown-TWO', () => pickSlot(1));
+    kb.on('keydown-THREE', () => pickSlot(2));
+    kb.on('keydown-FOUR', () => pickSlot(3));
     kb.on('keydown-ESC', () => this.closePopup());
     this.nextPage();
+    fadeInScene(this);
   }
 
   update(_time: number, delta: number): void {
@@ -121,7 +158,7 @@ export class IntermissionScene extends Phaser.Scene {
     const run = this.run;
     if (run.pendingLevelUps > 0) {
       this.page = 'level';
-      this.upgrades = rollUpgrades(run.wave, run.stats.luck);
+      this.upgrades = rollUpgrades(run.wave, run.stats.luck, 4, run);
     } else if (run.chests > 0) {
       this.page = 'chest';
       this.chestItem = rollChestItem(run);
@@ -132,44 +169,78 @@ export class IntermissionScene extends Phaser.Scene {
         this.shopReady = true;
       }
     }
+    this.animateOffers = true;
     this.render();
   }
 
   private render(): void {
     for (const id of checkUnlocks(this.run)) this.toast(`解锁新角色：${CHARACTERS[id].name}`);
+    saveActiveRun(this.run.serialize());
     this.closePopup();
     this.root?.destroy();
     this.spinRays = [];
+    this.statsHandle = null;
+    this.weaponHoverTip = null;
     const root = this.add.container(0, 0);
     this.root = root;
 
     if (PHONE) {
       root.add(createButton(this, PHONE_BTN_X, 492, '属性', () => this.statsPopup(), { width: 220, height: 56, fontSize: 22, primary: false }));
     } else {
-      root.add(statsPanel(this, RIGHT_X, CARD_Y, RIGHT_W, 474, this.run.stats));
+      this.statsHandle = createStatsPanel(this, RIGHT_X, CARD_Y, RIGHT_W, 474, this.run.stats);
+      root.add(this.statsHandle.container);
+      if (this.prevStats) {
+        const changed = STAT_KEYS.filter((k) => Math.abs(this.run.stats[k] - this.prevStats![k]) > 1e-6);
+        if (changed.length > 0) this.statsHandle.pulse(changed);
+      }
     }
+    this.prevStats = { ...this.run.stats };
 
-    // 顶部右侧花蜜计数胶囊（右对齐右侧属性面板，避免悬空）
+    // 顶部右侧花蜜计数铭牌（右对齐右侧属性面板，带扣费/加钱跳动飘字）
     const nectarText = numLabel(this, 0, 0, String(this.run.nectar), 24, COLOR.goldText).setOrigin(0, 0.5);
     const pillW = Math.max(122, Math.ceil(nectarText.width + 64));
     const pillX = RIGHT_X + RIGHT_W - pillW;
     const nBg = this.add.graphics();
-    nBg.fillStyle(COLOR.ink, 0.9);
-    nBg.fillRoundedRect(pillX + 3, 18, pillW, 38, 7);
-    nBg.fillStyle(COLOR.panelDeep, 1);
-    nBg.fillRoundedRect(pillX, 15, pillW, 38, 7);
-    nBg.lineStyle(1.6, COLOR.gold, 0.55);
-    nBg.strokeRoundedRect(pillX + 1.5, 16.5, pillW - 3, 35, 6);
-    nBg.lineStyle(2.5, COLOR.ink, 1);
-    nBg.strokeRoundedRect(pillX, 15, pillW, 38, 7);
+    drawChamferPlate(nBg, pillX, 15, pillW, 38, {
+      fill: COLOR.panelDeep,
+      border: COLOR.gold,
+      borderWidth: 1.6,
+      borderAlpha: 0.6,
+      shadowX: 3,
+      shadowY: 3,
+      cutBig: 8,
+      cutSmall: 4,
+      inkWidth: 2.5,
+    });
     root.add(nBg);
     root.add(this.add.image(pillX + 24, 34, 'nectar').setDisplaySize(24, 24));
     nectarText.setPosition(pillX + 44, 35);
     root.add(nectarText);
 
+    const nectarDelta = this.run.nectar - this.prevNectar;
+    if (this.prevNectar >= 0 && nectarDelta !== 0) {
+      nectarText.setScale(1.26);
+      this.tweens.add({ targets: nectarText, scale: 1, duration: 240, ease: 'Back.Out' });
+      const deltaStr = nectarDelta > 0 ? `+${nectarDelta}` : String(nectarDelta);
+      const deltaCol = nectarDelta > 0 ? COLOR.good : '#ff8c5a';
+      const floatTxt = numLabel(this, pillX + pillW - 14, 58, deltaStr, 18, deltaCol).setOrigin(1, 0).setDepth(120);
+      this.tweens.add({
+        targets: floatTxt,
+        y: 78,
+        alpha: 0,
+        duration: 620,
+        ease: 'Quad.Out',
+        onComplete: () => floatTxt.destroy(),
+      });
+    }
+    this.prevNectar = this.run.nectar;
+
     if (this.page === 'level') this.buildLevel(root);
     else if (this.page === 'chest') this.buildChest(root);
     else this.buildShop(root);
+
+    this.changedSlot = -1;
+    this.animateOffers = false;
   }
 
   private title(root: Container, text: string, sub = '', portrait?: string): void {
@@ -205,23 +276,22 @@ export class IntermissionScene extends Phaser.Scene {
       const bg = this.add.graphics();
       const drawCard = (hover: boolean) => {
         bg.clear();
-        bg.fillStyle(COLOR.ink, 0.92);
-        bg.fillRoundedRect(lx + 4, ly + 5, CARD_W, CARD_H, 8);
-        bg.fillStyle(hover ? COLOR.panelHi : COLOR.panel, 1);
-        bg.fillRoundedRect(lx, ly, CARD_W, CARD_H, 8);
-        bg.fillStyle(tier.color, hover ? 0.2 : 0.12);
-        bg.fillRoundedRect(lx + 2, ly + 2, CARD_W - 4, 62, { tl: 6, tr: 6, bl: 0, br: 0 });
-        bg.fillStyle(tier.color, 0.9);
-        bg.fillRect(lx + 2, ly + 2, CARD_W - 4, 4);
-        bg.lineStyle(hover ? 3 : 2, hover ? 0xffffff : tier.color, 1);
-        bg.strokeRoundedRect(lx + 1.5, ly + 1.5, CARD_W - 3, CARD_H - 3, 7);
-        bg.lineStyle(3, COLOR.ink, 1);
-        bg.strokeRoundedRect(lx, ly, CARD_W, CARD_H, 8);
+        drawChamferPlate(bg, lx, ly, CARD_W, CARD_H, {
+          fill: hover ? COLOR.panelHi : COLOR.panel,
+          border: hover ? 0xffffff : tier.color,
+          borderWidth: hover ? 2.8 : 2,
+          accentTop: tier.color,
+          headerH: 62,
+          cornerTicks: true,
+        });
       };
       drawCard(false);
       card.add(bg);
 
       card.add(pill(this, 0, ly + 34, `${tier.name}强化`, COLOR.panelDeep, tier.color, tier.css, 13, 12, 24));
+      if (!PHONE) {
+        card.add(pill(this, lx + 20, ly + 18, String(i + 1), COLOR.panelDeep, COLOR.borderSoft, COLOR.dim, 11, 6, 18));
+      }
       card.add(cardTitle(this, 0, ly + 104, STAT_META[u.stat].label, 26, COLOR.text).setOrigin(0.5));
       card.add(divider(this, lx + 26, ly + 132, CARD_W - 52, tier.color, 0.55));
       card.add(numLabel(this, 0, ly + 180, formatStatDelta(u.stat, u.value), 44, u.tier === 0 ? COLOR.good : tier.css).setOrigin(0.5));
@@ -231,17 +301,21 @@ export class IntermissionScene extends Phaser.Scene {
       const zone = this.tapZone(lx, ly, CARD_W, CARD_H, () => this.chooseUpgrade(u));
       zone.on('pointerover', () => {
         drawCard(true);
+        this.statsHandle?.preview({ [u.stat]: u.value });
         this.tweens.killTweensOf(card);
         this.tweens.add({ targets: card, y: cy - 4, angle: i % 2 === 0 ? -1.2 : 1.2, duration: 85, ease: 'Quad.Out' });
       });
       zone.on('pointerout', () => {
         drawCard(false);
+        this.statsHandle?.preview();
         this.tweens.killTweensOf(card);
         this.tweens.add({ targets: card, y: cy, angle: 0, duration: 85, ease: 'Quad.Out' });
       });
       card.add(zone);
-      card.setAlpha(0).setY(cy + 16);
-      this.tweens.add({ targets: card, alpha: 1, y: cy, delay: i * 40, duration: 150, ease: 'Back.Out' });
+      if (this.animateOffers) {
+        card.setAlpha(0).setY(cy + 16);
+        this.tweens.add({ targets: card, alpha: 1, y: cy, delay: i * 40, duration: 150, ease: 'Back.Out' });
+      }
       root.add(card);
     });
 
@@ -253,10 +327,10 @@ export class IntermissionScene extends Phaser.Scene {
     const rx = PHONE ? PHONE_BTN_X : RIGHT_X + RIGHT_W / 2;
     const bw = PHONE ? 220 : RIGHT_W;
     root.add(
-      createButton(this, rx, PHONE ? 572 : 598, `刷新  ${cost}`, () => this.rerollUpgrades(), {
+      createButton(this, rx, PHONE ? 572 : 598, PHONE ? `刷新  ${cost}` : `刷新 [R]  ${cost}`, () => this.rerollUpgrades(), {
         width: bw,
         height: 54,
-        fontSize: 21,
+        fontSize: 20,
         primary: false,
         icon: 'nectar',
         disabled: run.nectar < cost,
@@ -278,7 +352,9 @@ export class IntermissionScene extends Phaser.Scene {
     const cost = levelRerollCost(run.wave);
     if (run.nectar < cost) return;
     run.nectar -= cost;
-    this.upgrades = rollUpgrades(run.wave, run.stats.luck);
+    sfx.play('reroll');
+    this.upgrades = rollUpgrades(run.wave, run.stats.luck, 4, run);
+    this.animateOffers = true;
     this.render();
   }
 
@@ -299,8 +375,9 @@ export class IntermissionScene extends Phaser.Scene {
     this.tweens.add({ targets: chestImg, y: chestImg.y - 8, duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
 
     this.itemCard(root, CARDS_CX - CARD_W / 2, def);
+    this.statsHandle?.preview(def.stats);
     const value = chestSellValue(def.id, run.wave);
-    root.add(createButton(this, CARDS_CX - 120, 488, '拿走', () => this.takeChest(), { width: 200, height: 58 }));
+    root.add(createButton(this, CARDS_CX - 120, 488, PHONE ? '拿走' : '拿走 [Space]', () => this.takeChest(), { width: 200, height: 58, fontSize: 20 }));
     root.add(
       createButton(this, CARDS_CX + 120, 488, `分解 +${value}`, () => this.sellChest(value), {
         width: 200,
@@ -315,6 +392,7 @@ export class IntermissionScene extends Phaser.Scene {
   private takeChest(): void {
     sfx.play('chest');
     addItem(this.run, this.chestItem);
+    recordItemSeen(this.chestItem);
     this.run.chests--;
     this.nextPage();
   }
@@ -330,18 +408,25 @@ export class IntermissionScene extends Phaser.Scene {
 
   private buildShop(root: Container): void {
     const run = this.run;
+    const kills = run.waveKills > 0 ? `击杀 ${run.waveKills} · ` : '';
     const harvest = run.waveHarvest > 0 ? `（采蜜 +${run.waveHarvest}）` : '';
     const interest = run.waveInterest > 0 ? ` · 利息 +${run.waveInterest}` : '';
-    this.title(root, `商店 · 第 ${run.wave} 波`, `本波收入 +${run.waveNectar}${harvest}${interest}`, 'snail-merchant');
+    this.title(root, `商店 · 第 ${run.wave} 波`, `${kills}本波收入 +${run.waveNectar}${harvest}${interest}`, 'snail-merchant');
 
-    for (let i = 0; i < OFFER_COUNT; i++) {
-      const x = CARD_X0 + i * (CARD_W + CARD_GAP);
+    const offerCount = run.shopOfferCount;
+    const rowWidth = offerCount * CARD_W + (offerCount - 1) * CARD_GAP;
+    const fullRowWidth = OFFER_COUNT * CARD_W + (OFFER_COUNT - 1) * CARD_GAP;
+    const startX = CARD_X0 + Math.floor((fullRowWidth - rowWidth) / 2);
+    for (let i = 0; i < offerCount; i++) {
+      const x = startX + i * (CARD_W + CARD_GAP);
       const o = run.offers[i];
       if (o) {
         const cardWrap = this.add.container(0, 0);
         this.offerCard(cardWrap, x, o, i);
-        cardWrap.setAlpha(0).setY(14);
-        this.tweens.add({ targets: cardWrap, alpha: 1, y: 0, delay: i * 38, duration: 145, ease: 'Back.Out' });
+        if (this.animateOffers) {
+          cardWrap.setAlpha(0).setY(14);
+          this.tweens.add({ targets: cardWrap, alpha: 1, y: 0, delay: i * 38, duration: 145, ease: 'Back.Out' });
+        }
         root.add(cardWrap);
       } else {
         root.add(panel(this, x, CARD_Y, CARD_W, CARD_H, COLOR.borderSoft, COLOR.panelDeep, 1.5));
@@ -355,18 +440,58 @@ export class IntermissionScene extends Phaser.Scene {
     const cost = this.shopRerollCost();
     const rx = PHONE ? PHONE_BTN_X : RIGHT_X + RIGHT_W / 2;
     const bw = PHONE ? 220 : RIGHT_W;
+    const rerollLabel = cost === 0 ? (PHONE ? '免费刷新' : '免费刷新 [R]') : PHONE ? `刷新  ${cost}` : `刷新 [R]  ${cost}`;
+    const nextWaveLabel = run.endless ? `无尽 ▶ 第 ${run.wave + 1} 波` : `出发 ▶ 第 ${run.wave + 1} 波`;
     root.add(
-      createButton(this, rx, PHONE ? 572 : 598, cost === 0 ? '免费刷新' : `刷新  ${cost}`, () => this.rerollShop(), {
+      createButton(this, rx, PHONE ? 572 : 598, rerollLabel, () => this.rerollShop(), {
         width: bw,
         height: 50,
-        fontSize: 20,
+        fontSize: 19,
         primary: false,
         variant: cost === 0 ? 'emerald' : undefined,
         icon: cost === 0 ? undefined : 'nectar',
         disabled: run.nectar < cost,
       }),
     );
-    root.add(createButton(this, rx, PHONE ? 654 : 664, `出发 ▶ 第 ${run.wave + 1} 波`, () => this.finish(), { width: bw, height: 58, fontSize: 22 }));
+    root.add(createButton(this, rx, PHONE ? 654 : 664, nextWaveLabel, () => this.finish(), { width: bw, height: 58, fontSize: 21 }));
+  }
+
+  /** 判断买下该武器是否会激活新的套装羁绊或升级到下一档 */
+  private weaponSynergyGain(id: string): boolean {
+    const def = WEAPONS[id];
+    if (!def) return false;
+    const counts = classCounts(this.run.weapons);
+    for (const cls of def.classes) {
+      const next = (counts.get(cls) ?? 0) + 1;
+      if (SET_THRESHOLDS.includes(next as 2 | 3 | 4 | 5 | 6)) return true;
+    }
+    return false;
+  }
+
+  /** 计算购买该武器后的属性变化预览（含武器自带 bonusStats 与新增套装羁绊） */
+  private weaponPreviewDeltas(id: string, tier: number): Partial<Stats> {
+    const def = WEAPONS[id];
+    if (!def) return {};
+    const mode = weaponAddMode(this.run, id, tier);
+    if (mode !== 'add') return {};
+    const out: Partial<Stats> = {};
+    const add = (st?: Partial<Stats>, sign = 1) => {
+      if (!st) return;
+      for (const [k, v] of Object.entries(st) as [keyof Stats, number][]) {
+        out[k] = (out[k] ?? 0) + v * sign;
+      }
+    };
+    add(def.bonusStats, 1);
+    const curSets = new Map(activeSets(this.run.weapons).map((a) => [a.cls, a.level.stats]));
+    const simWeapons = [...this.run.weapons, { id, tier }];
+    for (const a of activeSets(simWeapons)) {
+      const prev = curSets.get(a.cls);
+      if (prev !== a.level.stats) {
+        add(prev, -1);
+        add(a.level.stats, 1);
+      }
+    }
+    return out;
   }
 
   private offerCard(root: Container, x: number, o: Offer, index: number): void {
@@ -374,11 +499,16 @@ export class IntermissionScene extends Phaser.Scene {
     if (o.kind === 'weapon') this.weaponCard(root, x, o.id, o.tier);
     else this.itemCard(root, x, ITEMS[o.id]);
 
+    if (!PHONE) {
+      root.add(pill(this, x + 16, CARD_Y + 12, String(index + 1), COLOR.panelDeep, COLOR.borderSoft, COLOR.dim, 11, 6, 18));
+    }
+
     const price = offerPrice(o, run);
     let text = String(price);
     let icon: string | undefined = 'nectar';
     let disabled = run.nectar < price;
     let isMerge = false;
+    let isSynergy = false;
     if (o.kind === 'weapon') {
       const mode = weaponAddMode(run, o.id, o.tier);
       if (mode === 'full') {
@@ -388,8 +518,39 @@ export class IntermissionScene extends Phaser.Scene {
       } else if (mode === 'merge') {
         text = `合成 ${price}`;
         isMerge = true;
+      } else {
+        isSynergy = this.weaponSynergyGain(o.id);
       }
     }
+
+    // 右上角高光角标：可合成 / 凑羁绊 / 已锁定
+    let badgeRightX = x + CARD_W - 10;
+    if (o.locked) {
+      const lockBadge = pill(this, 0, CARD_Y + 12, '已锁', 0x3b2608, COLOR.gold, COLOR.goldText, 11, 7, 20);
+      lockBadge.x = badgeRightX - lockBadge.width / 2;
+      badgeRightX -= lockBadge.width + 4;
+      root.add(lockBadge);
+    }
+    if (isMerge) {
+      const mb = pill(this, 0, CARD_Y + 12, '✦ 可合成', 0x164a22, 0x5de862, '#c8ffd0', 11, 7, 20);
+      mb.x = badgeRightX - mb.width / 2;
+      root.add(mb);
+      this.tweens.add({ targets: mb, scale: 1.07, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    } else if (isSynergy) {
+      const sb = pill(this, 0, CARD_Y + 12, '✦ 凑羁绊', 0x16384e, 0x62d8ff, '#ccf2ff', 11, 7, 20);
+      sb.x = badgeRightX - sb.width / 2;
+      root.add(sb);
+      this.tweens.add({ targets: sb, scale: 1.06, duration: 720, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    }
+
+    const hoverStats = o.kind === 'item' ? ITEMS[o.id].stats : this.weaponPreviewDeltas(o.id, o.tier);
+    if (Object.keys(hoverStats).length > 0) {
+      const hoverZone = this.add.zone(x, CARD_Y, CARD_W, CARD_H - 60).setOrigin(0).setInteractive();
+      hoverZone.on('pointerover', () => this.statsHandle?.preview(hoverStats));
+      hoverZone.on('pointerout', () => this.statsHandle?.preview());
+      root.add(hoverZone);
+    }
+
     // 购买按钮 + 底部右侧锁定按钮（土豆兄弟标准底部双键）
     const lockW = 54;
     const gap = 8;
@@ -413,8 +574,19 @@ export class IntermissionScene extends Phaser.Scene {
   }
 
   private buy(index: number): void {
+    const o = this.run.offers[index];
+    if (!o) return;
+    const isMerge = o.kind === 'weapon' && weaponAddMode(this.run, o.id, o.tier) === 'merge';
+    const before = this.run.weapons.map((w) => `${w.id}:${w.tier}`);
     if (!buyOffer(this.run, index)) return;
-    sfx.play('buy');
+    if (o.kind === 'weapon') {
+      this.changedSlot = this.run.weapons.findIndex((w, idx) => before[idx] !== `${w.id}:${w.tier}`);
+      const bought = this.run.weapons[this.changedSlot];
+      if (bought) recordWeaponSeen(bought.id, bought.tier);
+    } else {
+      recordItemSeen(o.id);
+    }
+    sfx.play(isMerge ? 'merge' : 'buy');
     this.render();
   }
 
@@ -429,7 +601,9 @@ export class IntermissionScene extends Phaser.Scene {
     if (run.nectar < cost) return;
     run.nectar -= cost;
     this.shopRerolls++;
+    sfx.play('reroll');
     refreshOffers(run);
+    this.animateOffers = true;
     this.render();
   }
 
@@ -448,6 +622,15 @@ export class IntermissionScene extends Phaser.Scene {
     }
     const step = Math.min(88, Math.floor(540 / slots));
     const size = step - 10;
+    const waveDmgTotal = run.weapons.reduce((acc, ow) => acc + (ow.waveDamage ?? 0), 0);
+    let mvpIdx = -1;
+    let bestWaveDmg = 0;
+    run.weapons.forEach((ow, idx) => {
+      if ((ow.waveDamage ?? 0) > bestWaveDmg) {
+        bestWaveDmg = ow.waveDamage ?? 0;
+        mvpIdx = idx;
+      }
+    });
     root.add(cardTitle(this, CARD_X0, LOW_Y + 10, `武器  ${run.weapons.length}/${slots}`, 19, COLOR.text).setOrigin(0, 0.5));
     root.add(divider(this, CARD_X0, LOW_Y + 24, step * slots - 10, COLOR.borderSoft, 0.7));
     for (let j = 0; j < slots; j++) {
@@ -455,23 +638,86 @@ export class IntermissionScene extends Phaser.Scene {
       const cy = LOW_Y + 70;
       const w = run.weapons[j];
       const canMerge = w ? mergePartner(run, j) >= 0 : false;
-      root.add(slotBox(this, cx, cy, size, w ? TIERS[w.tier].color : COLOR.borderSoft, canMerge, w?.tier));
+      const slotWrap = this.add.container(cx, cy);
+      slotWrap.add(slotBox(this, 0, 0, size, w ? TIERS[w.tier].color : COLOR.borderSoft, canMerge, w?.tier));
+      root.add(slotWrap);
       if (!w) continue;
-      root.add(this.fitImage(cx, cy - 3, weaponTex(WEAPONS[w.id].icon, w.tier, true), size - 18));
+      slotWrap.add(this.fitImage(0, -3, weaponTex(WEAPONS[w.id].icon, w.tier, true), size - 18));
+      if (j === mvpIdx && bestWaveDmg > 0) {
+        slotWrap.add(pill(this, -size / 2 + 17, size / 2 - 9, 'MVP', 0x523408, COLOR.gold, COLOR.goldText, 9, 5, 15));
+      }
+      const quickMerge = () => {
+        if (!mergeWeapons(run, j)) return;
+        this.changedSlot = Math.min(j, run.weapons.length - 1);
+        const merged = run.weapons[this.changedSlot];
+        if (merged) recordWeaponSeen(merged.id, merged.tier);
+        sfx.play('merge');
+        this.render();
+      };
+      const z = this.add.zone(-size / 2, -size / 2, size, size).setOrigin(0).setInteractive({ useHandCursor: true });
+      z.on('pointerup', (ptr: Phaser.Input.Pointer) => {
+        if (ptr.rightButtonReleased() && canMerge) {
+          quickMerge();
+        } else {
+          this.weaponPopup(j);
+        }
+      });
+      z.on('pointerover', () => {
+        this.tweens.killTweensOf(slotWrap);
+        this.tweens.add({ targets: slotWrap, scale: 1.07, duration: 70, ease: 'Quad.Out' });
+        this.showWeaponHoverTip(root, cx, cy - size / 2 - 18, w, waveDmgTotal, canMerge);
+      });
+      z.on('pointerout', () => {
+        this.tweens.killTweensOf(slotWrap);
+        this.tweens.add({ targets: slotWrap, scale: 1, duration: 70, ease: 'Quad.Out' });
+        this.weaponHoverTip?.destroy();
+        this.weaponHoverTip = null;
+      });
+      slotWrap.add(z);
       if (canMerge) {
-        const badge = this.add.container(cx + size / 2 - 10, cy - size / 2 + 10);
+        const badge = this.add.container(size / 2 - 10, -size / 2 + 10);
         const g = this.add.graphics();
         g.fillStyle(0x358c38, 1);
-        g.fillRoundedRect(-10, -10, 20, 20, 4);
+        g.fillRoundedRect(-11, -11, 22, 22, 4);
         g.lineStyle(2, COLOR.ink, 1);
-        g.strokeRoundedRect(-10, -10, 20, 20, 4);
-        badge.add([g, label(this, 0, 0, '合', 12, '#ffffff', true).setOrigin(0.5)]);
-        root.add(badge);
+        g.strokeRoundedRect(-11, -11, 22, 22, 4);
+        const bz = this.add.zone(-12, -12, 24, 24).setOrigin(0).setInteractive({ useHandCursor: true });
+        bz.on('pointerup', (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+          ev.stopPropagation();
+          quickMerge();
+        });
+        badge.add([g, label(this, 0, 0, '合', 12, '#ffffff', true).setOrigin(0.5), bz]);
+        slotWrap.add(badge);
         this.tweens.add({ targets: badge, scale: 1.12, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
       }
-      root.add(this.tapZone(cx - size / 2, cy - size / 2, size, size, () => this.weaponPopup(j)));
+      if (j === this.changedSlot) {
+        slotWrap.setScale(1.22);
+        this.tweens.add({ targets: slotWrap, scale: 1, duration: 280, ease: 'Back.Out' });
+        const pulse = this.add.graphics().setPosition(cx, cy);
+        pulse.lineStyle(3, TIERS[w.tier].color, 0.9);
+        pulse.strokeRect(-size / 2, -size / 2, size, size);
+        root.add(pulse);
+        this.tweens.add({ targets: pulse, scale: 1.38, alpha: 0, duration: 360, ease: 'Quad.Out', onComplete: () => pulse.destroy() });
+      }
     }
     this.setLines(root);
+  }
+
+  /** 商店底部武器槽悬停微型输出条（无需点开弹窗即可速览上波输出占比） */
+  private showWeaponHoverTip(root: Container, x: number, y: number, w: RunState['weapons'][number], waveDmgTotal: number, canMerge = false): void {
+    this.weaponHoverTip?.destroy();
+    const def = WEAPONS[w.id];
+    const wWave = Math.round(w.waveDamage ?? 0);
+    const wTotal = Math.round(w.totalDamage ?? 0);
+    const share = waveDmgTotal > 0 ? Math.round((wWave / waveDmgTotal) * 100) : 0;
+    const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+    const title = w.tier > 0 ? `${def.name} ${TIER_ROMAN[w.tier]}` : def.name;
+    const mergeHint = canMerge ? ' · 点「合」快捷升级' : '';
+    const txt = `${title} · 上波 ${fmt(wWave)}（${share}%）· 累计 ${fmt(wTotal)}${mergeHint}`;
+    const tip = pill(this, x, y, txt, 0x11131a, TIERS[w.tier].color, '#fff6dc', 12, 12, 24).setDepth(30);
+    tip.x = Phaser.Math.Clamp(x, CARD_X0 + tip.width / 2, RIGHT_X - 18 - tip.width / 2);
+    root.add(tip);
+    this.weaponHoverTip = tip;
   }
 
   private setLines(root: Container): void {
@@ -493,6 +739,22 @@ export class IntermissionScene extends Phaser.Scene {
       tagPill.x = x + tagPill.width / 2;
       root.add(tagPill);
 
+      // 羁绊阈值进度刻度点（● ● ○）
+      const targetPips = Math.min(6, next ?? Math.max(2, count));
+      const pipX0 = x + tagPill.width + 8;
+      const pipG = this.add.graphics();
+      for (let p = 0; p < targetPips; p++) {
+        const px = pipX0 + p * 8 + 3;
+        const py = y + 10;
+        const filled = p < count;
+        pipG.fillStyle(COLOR.ink, 1);
+        pipG.fillCircle(px, py, 3.6);
+        pipG.fillStyle(filled ? (on ? 0x5de862 : ts.border) : 0x2a2d36, 1);
+        pipG.fillCircle(px, py, 2.5);
+      }
+      root.add(pipG);
+      const pipsW = targetPips * 8 + 4;
+
       let info: string;
       if (twoCols) {
         info = on ? on.level.text : next ? `${next} 把生效` : '';
@@ -500,9 +762,10 @@ export class IntermissionScene extends Phaser.Scene {
         const nextText = next ? `（${next}把：${SETS[cls][SET_THRESHOLDS.indexOf(next as 2 | 3 | 4 | 5 | 6)].text}）` : '';
         info = on ? `${on.level.text}${nextText}` : nextText.replace(/^（|）$/g, '');
       }
-      const t = label(this, x + tagPill.width + 8, y + 10, info, twoCols ? 13 : 14, on ? COLOR.good : COLOR.dim).setOrigin(0, 0.5);
-      const room = (twoCols ? colW : 586 - CARD_X0) - tagPill.width - 14;
-      if (t.width > room) t.setScale(room / t.width);
+      const textX = pipX0 + pipsW;
+      const t = label(this, textX, y + 10, info, twoCols ? 13 : 14, on ? COLOR.good : COLOR.dim).setOrigin(0, 0.5);
+      const room = (twoCols ? colW : 586 - CARD_X0) - (textX - x) - 6;
+      if (t.width > room && room > 10) t.setScale(room / t.width);
       root.add(t);
     });
   }
@@ -518,17 +781,28 @@ export class IntermissionScene extends Phaser.Scene {
       const cx = 614 + (k % 6) * 64;
       const cy = LOW_Y + 60 + Math.floor(k / 6) * 64;
       const def = ITEMS[id];
-      root.add(slotBox(this, cx, cy, 56, TIERS[def.rarity].color));
-      root.add(this.add.image(cx, cy, def.icon).setDisplaySize(42, 42));
+      const itemWrap = this.add.container(cx, cy);
+      itemWrap.add(slotBox(this, 0, 0, 56, TIERS[def.rarity].color));
+      itemWrap.add(this.add.image(0, 0, def.icon).setDisplaySize(42, 42));
       const n = run.items[id];
       if (n > 1) {
-        root.add(
+        itemWrap.add(
           this.add
-            .text(cx + 24, cy + 25, `×${n}`, { fontFamily: NUM_FONT, fontSize: '14px', fontStyle: 'bold', color: '#ffffff', stroke: '#050507', strokeThickness: 4 })
+            .text(24, 25, `×${n}`, { fontFamily: NUM_FONT, fontSize: '14px', fontStyle: 'bold', color: '#ffffff', stroke: '#050507', strokeThickness: 4 })
             .setOrigin(1, 1),
         );
       }
-      root.add(this.tapZone(cx - 28, cy - 28, 56, 56, () => this.itemPopup(id)));
+      const z = this.tapZone(-28, -28, 56, 56, () => this.itemPopup(id));
+      z.on('pointerover', () => {
+        this.tweens.killTweensOf(itemWrap);
+        this.tweens.add({ targets: itemWrap, scale: 1.08, duration: 70, ease: 'Quad.Out' });
+      });
+      z.on('pointerout', () => {
+        this.tweens.killTweensOf(itemWrap);
+        this.tweens.add({ targets: itemWrap, scale: 1, duration: 70, ease: 'Quad.Out' });
+      });
+      itemWrap.add(z);
+      root.add(itemWrap);
     });
   }
 
@@ -636,7 +910,7 @@ export class IntermissionScene extends Phaser.Scene {
     const def = WEAPONS[w.id];
     const tier = TIERS[w.tier];
     const pw = Math.round(456 * POPUP_SCALE);
-    const ph = Math.round(410 * POPUP_SCALE);
+    const ph = Math.round(442 * POPUP_SCALE);
     this.openPopup(pw, ph, tier.color, (c, x, y) => {
       const cx = x + pw / 2;
       c.add(slotBox(this, cx, y + 66, 92, tier.color, w.tier >= 2, w.tier));
@@ -660,6 +934,26 @@ export class IntermissionScene extends Phaser.Scene {
       c.add(divider(this, x + 28, y + 204, pw - 56, tier.color, 0.5));
       layoutLines(this, c, cx, y + 216, weaponLines(def, w.tier, run.stats, run.mods, w), 16, pw - 48, 4);
 
+      // 每把武器伤害输出统计条（上波占比 + 累计总伤）
+      const waveSum = run.weapons.reduce((acc, ow) => acc + (ow.waveDamage ?? 0), 0);
+      const wWave = Math.round(w.waveDamage ?? 0);
+      const wTotal = Math.round(w.totalDamage ?? 0);
+      const share = waveSum > 0 ? Math.round((wWave / waveSum) * 100) : 0;
+      c.add(
+        pill(
+          this,
+          cx,
+          y + ph - 96,
+          `上波输出 ${wWave}（${share}%） · 本局累计 ${wTotal}`,
+          COLOR.panelDeep,
+          COLOR.gold,
+          COLOR.goldText,
+          13,
+          14,
+          26,
+        ),
+      );
+
       const by = y + ph - 44;
       const canMerge = mergePartner(run, j) >= 0;
       const canSell = run.weapons.length > 1;
@@ -673,7 +967,10 @@ export class IntermissionScene extends Phaser.Scene {
           mergeLabel,
           () => {
             mergeWeapons(run, j);
-            sfx.play('levelUp');
+            this.changedSlot = Math.min(j, run.weapons.length - 1);
+            const merged = run.weapons[this.changedSlot];
+            if (merged) recordWeaponSeen(merged.id, merged.tier);
+            sfx.play('merge');
             this.render();
           },
           { width: 132, height: 48, fontSize: 19, variant: canMerge ? 'emerald' : undefined, disabled: !canMerge },

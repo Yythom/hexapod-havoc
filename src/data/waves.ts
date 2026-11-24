@@ -71,12 +71,46 @@ export const WAVES: WaveDef[] = [
   wave(60, 4.2, { ant: 3, mosquito: 1.3, wasp: 0.9, spider: 0.6, slime: 0.6, gasbag: 0.7 }),
   wave(60, 4.4, { ant: 3, mosquito: 1.3, wasp: 0.9, spider: 0.7, slime: 0.7, gasbag: 0.7, queen: 0.1 }),
   wave(60, 4.6, { ant: 3, mosquito: 1.4, wasp: 1, spider: 0.7, slime: 0.7, gasbag: 0.8, queen: 0.12 }),
-  wave(60, 4.2, { ant: 3, mosquito: 1.3, wasp: 0.9, spider: 0.7, slime: 0.7, gasbag: 0.7, queen: 0.1 }, { elites: [{ enemy: 'soldier', count: 2, at: 3 }] }),
+  wave(
+    60,
+    4.2,
+    { ant: 3, mosquito: 1.3, wasp: 0.9, spider: 0.7, slime: 0.7, gasbag: 0.7, queen: 0.1 },
+    {
+      elites: [
+        { enemy: 'soldier', count: 1, at: 4 },
+        { enemy: 'hornet_elite', count: 1, at: 14 },
+      ],
+    },
+  ),
   // 16–19：虫潮
   wave(60, 5.2, { ant: 3, mosquito: 1.4, wasp: 1, spider: 0.8, slime: 0.8, gasbag: 0.8, queen: 0.12 }),
   wave(60, 5.6, { ant: 3, mosquito: 1.5, wasp: 1.1, spider: 0.8, slime: 0.8, gasbag: 0.9, queen: 0.14 }),
   wave(60, 6.0, { ant: 3, mosquito: 1.5, wasp: 1.1, spider: 0.9, slime: 0.9, gasbag: 0.9, queen: 0.15 }),
   wave(60, 6.4, { ant: 3, mosquito: 1.6, wasp: 1.2, spider: 0.9, slime: 0.9, gasbag: 1, queen: 0.16 }),
-  // 20：螳螂女王，另有少量小怪
-  { ...wave(0, 2.2, { ant: 2, mosquito: 1, wasp: 0.4 }), duration: null, boss: 'mantis' },
+  // 20：最终 Boss 波（螳螂女王 / 泰坦兜虫轮换），另有少量小怪
+  { ...wave(0, 2.2, { ant: 2, mosquito: 1, wasp: 0.4 }), duration: null, boss: 'boss_pool' },
 ];
+
+/** 获取任意波次定义：1~20 读取配置表，第 21 波起自动生成无尽递增波次 */
+export function waveDefFor(waveNum: number): WaveDef {
+  if (waveNum <= WAVES.length) return WAVES[Math.max(0, waveNum - 1)];
+  const extra = waveNum - WAVES.length;
+  const rate = Math.min(11.5, 6.6 + extra * 0.45);
+  const elites: { enemy: string; count: number; at: number }[] = [];
+  let boss: string | undefined;
+  if (extra % 5 === 0) {
+    // 无尽模式每 5 波（25 / 30 / 35...）作为里程碑 Boss 波，轮换泰坦兜虫与螳螂女王
+    boss = extra % 10 === 5 ? 'goliath_boss' : 'mantis';
+    const pairs = Math.min(2, 1 + Math.floor(extra / 15));
+    elites.push({ enemy: extra % 10 === 5 ? 'hornet_elite' : 'soldier', count: pairs, at: 14 });
+  } else if (extra >= 2 && extra % 2 === 0) {
+    // 第 21 波作为无尽过渡热身波，第 22 波起每 2 波轮换精英
+    elites.push({ enemy: extra % 4 === 2 ? 'hornet_elite' : 'soldier', count: 1, at: 6 });
+  }
+  return wave(
+    60,
+    rate,
+    { ant: 2.6, mosquito: 1.5, wasp: 1.2, spider: 1.0, slime: 1.0, gasbag: 1.1, queen: 0.22 },
+    { ...(elites.length > 0 ? { elites } : {}), ...(boss ? { boss } : {}) },
+  );
+}

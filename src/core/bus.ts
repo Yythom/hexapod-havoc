@@ -15,6 +15,18 @@ export const EVT = {
   LEVEL_UP: 'level-up',
   /** 解锁了新角色（参数：角色 id） */
   UNLOCK: 'unlock',
+  /** 波次随机小事件横幅（参数：text, color） */
+  WAVE_EVENT: 'wave-event',
+  /** 第 20 波通关：选择凯旋结算或进入无尽模式 */
+  VICTORY_CHOICE: 'victory-choice',
+  /** 玩家选择进入无尽模式 */
+  CONTINUE_ENDLESS: 'continue-endless',
+  /** 玩家选择结束并进入结算页 */
+  FINISH_RUN: 'finish-run',
+  /** 移动端触控冲刺按钮触发 */
+  DASH_TRIGGER: 'dash-trigger',
+  /** 极短时间内连杀清屏爆发（参数：count） */
+  KILL_STREAK: 'kill-streak',
   VICTORY: 'victory',
 } as const;
 

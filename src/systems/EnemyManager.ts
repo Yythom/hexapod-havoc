@@ -6,6 +6,7 @@ import { AFFIX_LABEL, type DifficultyDef, type EliteAffix } from '../data/diffic
 import { ENEMIES, enemyDamage, enemyHp, enemySkillDamage, type EnemyDef } from '../data/enemies';
 import type { Mods } from '../data/items';
 import type { Effects } from './Effects';
+import type { EnemyShotKind } from './EnemyShots';
 import { shake } from '../ui/camera';
 import { SpatialGrid } from './SpatialGrid';
 import type { Telegraphs } from './Telegraphs';
@@ -63,9 +64,11 @@ export interface EnemyHost {
   readonly mods: Mods;
   /** Brotato 的诅咒：提高敌人生命/伤害 */
   readonly curse: number;
+  /** 每日挑战等特殊词条给怪物的移速倍率 */
+  readonly enemySpeedMult?: number;
   /** 对玩家造成伤害（走闪避、甲壳、无敌时间） */
   hurtPlayer(damage: number): void;
-  shoot(x: number, y: number, angle: number, speed: number, damage: number): void;
+  shoot(x: number, y: number, angle: number, speed: number, damage: number, kind?: EnemyShotKind): void;
 }
 
 export type HitKind = 'normal' | 'poison' | 'burn';
@@ -89,6 +92,9 @@ export class Enemy {
   heading = 0;
   age = 0;
   flash = 0;
+  /** 受击挤压弹跳（Squash & Stretch） */
+  squash = 0;
+  squashAmp = 0;
   wobble = 0;
   active = false;
   /** 行为状态机 */
@@ -169,7 +175,7 @@ export class EnemyManager {
     e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult;
     e.damage = enemyDamage(def, wave) * mult * curseMult;
     e.skillDamage = enemySkillDamage(def, wave) * mult * curseMult;
-    e.speed = def.speed * (def.boss || def.elite ? 1 : Phaser.Math.FloatBetween(0.92, 1.08));
+    e.speed = def.speed * (def.boss || def.elite ? 1 : Phaser.Math.FloatBetween(0.92, 1.08)) * (this.host.enemySpeedMult ?? 1);
     e.storm = false;
     e.timer3 = 0;
     e.affix = null;
@@ -183,6 +189,8 @@ export class EnemyManager {
     e.kx = e.ky = 0;
     e.age = 0;
     e.flash = 0;
+    e.squash = 0;
+    e.squashAmp = 0;
     e.wobble = Math.random() * Math.PI * 2;
     e.heading = Math.random() * Math.PI * 2;
     e.state = 0;
@@ -227,9 +235,9 @@ export class EnemyManager {
     for (const e of this.active) grid.insert(e);
 
     const decay = Math.exp(-KNOCKBACK_DECAY * dt);
-    // 倒序遍历：中途死亡的怪会被末尾的怪替换，末尾的已经更新过了
-    for (let i = this.active.length - 1; i >= 0; i--) {
-      const e = this.active[i];
+    // 用快照遍历，避免毒/烧/自爆触发尸爆或毒菇连锁击杀多只怪时，swap-pop 导致倒序下标越界崩溃
+    for (const e of this.active.slice()) {
+      if (!e.active) continue;
       e.age += dt;
       this.updateStatus(e, dt);
       if (!e.active) continue;
@@ -299,11 +307,15 @@ export class EnemyManager {
     }
     if (kind === 'normal') {
       e.flash = 0.07;
+      // 受击挤压弹跳：暴击/精英/Boss/重击更 Q 弹，增强打击实感
+      const amp = crit ? 0.3 : e.def.elite || e.def.boss ? 0.22 : knockback >= 110 ? 0.18 : 0.12;
+      e.squash = 0.16;
+      e.squashAmp = Math.max(e.squashAmp, amp);
       const resist = e.def.knockbackResist ?? 0;
       e.kx += dirX * knockback * (1 - resist);
       e.ky += dirY * knockback * (1 - resist);
       this.fx.number(e.x, e.y - e.radius - 6, damage, crit ? 'crit' : 'normal');
-      sfx.play('hit');
+      sfx.play(crit ? 'crit' : 'hit');
       this.onDamaged?.(e, damage, crit);
     } else if (kind === 'poison') {
       this.fx.number(e.x, e.y - e.radius - 6, damage, 'poison');
@@ -350,7 +362,7 @@ export class EnemyManager {
     const k = e.def.elite ? FREEZE_TIME_ELITE / FREEZE_TIME : 1;
     e.frozen = (FREEZE_TIME + this.host.mods.freezeDuration) * k;
     e.kx = e.ky = 0;
-    this.fx.burst(e.x, e.y, 0xd8f4ff, 7, 110, 0.75);
+    this.fx.iceShatter(e.x, e.y, e.radius * 0.9, 5);
     sfx.play('freeze');
   }
 
@@ -398,14 +410,24 @@ export class EnemyManager {
   private die(e: Enemy, drops: boolean): void {
     const isTree = e.def.behavior === 'tree';
     const isLoot = e.def.behavior === 'lootbug';
+    const wasFrozen = e.frozen > 0;
     const big = e.def.boss ? 4 : e.def.elite || isLoot ? 2 : 1;
     sfx.play(big > 1 ? 'killBig' : 'kill');
-    if (isTree) {
-      this.fx.burst(e.x, e.y, 0x62c048, 9, 140, 0.9);
-      this.fx.burst(e.x, e.y, 0x8a582c, 6, 110, 0.8);
+    if (wasFrozen) {
+      // 冻住的敌人被击杀时炸出锐利冰碴
+      this.fx.iceShatter(e.x, e.y, e.radius * 1.25, 9 * Math.min(2, big));
+      this.fx.ring(e.x, e.y, e.radius + 18, 0x9ceeff);
+    } else if (isTree) {
+      if (e.def.id !== 'boomshroom') {
+        this.fx.burst(e.x, e.y, 0x62c048, 9, 140, 0.9);
+        this.fx.burst(e.x, e.y, 0x8a582c, 6, 110, 0.8);
+      }
     } else {
       this.fx.burst(e.x, e.y, isLoot ? 0xffd038 : 0x4a2030, 7 * big, 150 * Math.sqrt(big), 0.9 * big);
       this.fx.burst(e.x, e.y, isLoot ? 0xffffff : 0xb0d060, 4 * big, 110, 0.6 * big);
+    }
+    if (e.def.elite || e.def.boss) {
+      this.fx.hitSlash(e.x, e.y, Math.random() * Math.PI, 0xffe468, e.def.boss ? 1.85 : 1.45);
     }
     this.release(e);
     if (!drops) return;
@@ -427,8 +449,7 @@ export class EnemyManager {
   private explodeBurn(src: Enemy): void {
     const r = 74;
     const dmg = Math.max(8, Math.round(src.burnDps * 1.8 * (1 + this.host.mods.burnDamagePct)));
-    this.fx.ring(src.x, src.y, r, 0xff7028);
-    this.fx.burst(src.x, src.y, 0xff9a3a, 10, 190, 1);
+    this.fx.explosion(src.x, src.y, r, 0xff6e28, 1);
     for (const o of this.grid.query(src.x, src.y, r + MAX_ENEMY_RADIUS, this.buf).slice()) {
       if (!o.active || o === src) continue;
       const dx = o.x - src.x;
@@ -507,6 +528,8 @@ export class EnemyManager {
       if (e.frozen <= 0) {
         e.frozen = 0;
         e.freezeImmune = FREEZE_IMMUNE;
+        // 解除冰冻时炸出几片锐利冰碴
+        this.fx.iceShatter(e.x, e.y, e.radius, 5);
       }
     } else if (e.freezeImmune > 0) {
       e.freezeImmune -= dt;
@@ -541,7 +564,10 @@ export class EnemyManager {
       if (e.poisonTick >= 1) {
         e.poisonTick -= 1;
         const dmg = Math.round(e.poison * e.poisonPer);
-        if (dmg >= 1) this.hit(e, dmg, false, 0, 0, 0, 'poison');
+        if (dmg >= 1) {
+          this.fx.poisonBubbles(e.x, e.y, 1);
+          this.hit(e, dmg, false, 0, 0, 0, 'poison');
+        }
       }
       if (e.poisonTime <= 0) {
         e.poison = 0;
@@ -561,7 +587,15 @@ export class EnemyManager {
     if (e.age < SPAWN_POP) scale *= Phaser.Math.Easing.Back.Out(e.age / SPAWN_POP);
     if (e.def.behavior === 'bomber' && e.state === 1) scale *= 1 + (1 - e.timer) * 0.6;
     if (e.def.behavior === 'boss' && e.state === 21) scale *= 1 + Math.sin((1 - e.timer / 0.35) * Math.PI) * 0.25;
-    s.setScale(scale);
+    if (e.squash > 0) {
+      e.squash = Math.max(0, e.squash - dt);
+      const k = e.squash / 0.16;
+      const sq = Math.sin((1 - k) * Math.PI * 2.2) * e.squashAmp * k;
+      s.setScale(scale * (1 + sq), scale * (1 - sq * 0.72));
+      if (e.squash <= 0) e.squashAmp = 0;
+    } else {
+      s.setScale(scale);
+    }
     if (e.flash > 0) {
       e.flash -= dt;
       s.setTintFill(0xffffff);
@@ -592,7 +626,7 @@ export class EnemyManager {
       const by = e.y - e.radius - 10;
       g.fillStyle(0x050507, 0.85);
       g.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-      g.fillStyle(isTree ? 0x62d858 : 0xffd038, 1);
+      g.fillStyle(e.def.id === 'boomshroom' ? 0xff6288 : isTree ? 0x62d858 : 0xffd038, 1);
       g.fillRect(bx, by, Math.max(2, bw * Math.max(0, e.hp / e.maxHp)), bh);
     }
   }
@@ -692,9 +726,8 @@ export class EnemyManager {
           const px = h.px - e.x;
           const py = h.py - e.y;
           if (px * px + py * py < rr * rr) h.hurtPlayer(e.skillDamage);
-          this.fx.ring(e.x, e.y, 90, 0xff9a6a);
+          this.fx.explosion(e.x, e.y, 90, 0xff7858, 1);
           sfx.play('explode');
-          this.fx.burst(e.x, e.y, 0xd89898, 18, 260, 1.2);
           this.die(e, false);
         }
         return [0, 0];
@@ -717,8 +750,14 @@ export class EnemyManager {
       case 'elite':
         return this.behaveElite(e, dt, ux, uy, ang, d);
 
+      case 'elite_hornet':
+        return this.behaveHornetElite(e, dt, ux, uy, ang, d);
+
       case 'boss':
         return this.behaveBoss(e, dt, ux, uy, ang, d);
+
+      case 'boss_goliath':
+        return this.behaveGoliathBoss(e, dt, ux, uy, ang, d);
 
       case 'tree':
         return [0, 0];
@@ -796,6 +835,69 @@ export class EnemyManager {
           e.timer = 2.5;
         }
         return [0, 0];
+    }
+  }
+
+  /** 皇家胡蜂（远程弹幕精英）：中距环绕 → 预警 5 发扇形毒针 / 8 发环形弹幕 → 侧向闪避换位 */
+  private behaveHornetElite(e: Enemy, dt: number, ux: number, uy: number, ang: number, d: number): [number, number] {
+    const h = this.host;
+    e.timer -= dt;
+    switch (e.state) {
+      case 0: {
+        // 中距离侧飞拉扯，冷却到就蓄力放弹幕
+        if (e.timer <= 0) {
+          e.state = 1;
+          e.timer = 0.68;
+          e.tx = ang;
+          e.count++;
+          if (e.count % 2 === 0) {
+            this.tel.circle(e.x, e.y, 70, 0.68);
+          } else {
+            this.tel.fan(e.x, e.y, 200, ang, 0.56, 0.68);
+          }
+          sfx.play('warn');
+          return [0, 0];
+        }
+        const side = Math.sin(e.wobble + e.count) >= 0 ? 1 : -1;
+        if (d < 170) return [-ux * e.speed, -uy * e.speed];
+        if (d > 290) return [ux * e.speed, uy * e.speed];
+        return [-uy * side * e.speed * 0.9, ux * side * e.speed * 0.9];
+      }
+      case 1: {
+        // 蓄力结束发射弹幕，随后切入侧向短冲锋换位
+        if (e.timer <= 0) {
+          if (e.count % 2 === 0) {
+            // 8 方向环形赤红毒针弹幕
+            for (let k = 0; k < 8; k++) {
+              const a = e.tx + (k / 8) * Math.PI * 2;
+              h.shoot(e.x, e.y, a, 225, e.skillDamage, 'stinger');
+            }
+            this.fx.ring(e.x, e.y, 58, 0xffc848);
+          } else {
+            // 5 发扇形赤红毒针齐射（略宽夹角，便于走位穿插或冲刺躲避）
+            for (let k = -2; k <= 2; k++) {
+              h.shoot(e.x, e.y, e.tx + k * 0.24, 265, e.skillDamage, 'stinger');
+            }
+            this.fx.muzzle(e.x, e.y, e.tx, 0xffd04c, 22, 5, 2);
+          }
+          sfx.play('spit');
+          e.state = 2;
+          e.timer = 0.32;
+          const side = e.count % 2 === 0 ? 1 : -1;
+          const dashAng = ang + side * 1.25;
+          e.dirX = Math.cos(dashAng);
+          e.dirY = Math.sin(dashAng);
+        }
+        return [0, 0];
+      }
+      default: {
+        if (e.timer <= 0) {
+          e.state = 0;
+          e.timer = 2.2;
+        }
+        const ds = e.def.dashSpeed ?? 420;
+        return [e.dirX * ds, e.dirY * ds];
+      }
     }
   }
 
@@ -902,6 +1004,133 @@ export class EnemyManager {
           sfx.play('explode');
           e.state = 0;
           e.timer = e.enraged ? 0.8 : 1.2;
+        }
+        return [0, 0];
+      }
+    }
+  }
+
+  /** 泰坦兜虫（第二只 Boss）：重角崩冲 + 落岩震击 + 碎角弹幕；半血狂暴二连冲、落岩加密并召唤黄蜂 */
+  private behaveGoliathBoss(e: Enemy, dt: number, ux: number, uy: number, ang: number, d: number): [number, number] {
+    const h = this.host;
+    if (!e.enraged && e.hp < e.maxHp * 0.5) {
+      e.enraged = true;
+      e.timer2 = 0;
+      this.fx.number(e.x, e.y - 64, '重铠狂暴！', 'crit');
+      this.fx.ring(e.x, e.y, 130, 0xffae2b);
+      shake(this.scene, 200, 0.008);
+    }
+    if (h.difficulty.bossPhase3 && e.hp < e.maxHp * 0.3) {
+      if (!e.storm) {
+        e.storm = true;
+        e.timer3 = 0.6;
+        this.fx.number(e.x, e.y - 64, '雷暴！', 'crit');
+      }
+      e.timer3 -= dt;
+      if (e.timer3 <= 0) {
+        e.timer3 = 1.45;
+        for (let k = 0; k < 3; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = k === 0 ? 0 : 85 + Math.random() * 155;
+          const x = Phaser.Math.Clamp(h.px + Math.cos(a) * r, 40, WORLD_WIDTH - 40);
+          const y = Phaser.Math.Clamp(h.py + Math.sin(a) * r, 40, WORLD_HEIGHT - 40);
+          this.strikes.push({ x, y, r: 70, t: 0.9, damage: e.skillDamage * 0.6 });
+          this.tel.circle(x, y, 70, 0.9);
+        }
+      }
+    }
+    if (e.enraged) {
+      e.timer2 -= dt;
+      if (e.timer2 <= 0) {
+        e.timer2 = 9.5;
+        for (let k = 0; k < 2; k++) {
+          const a = ang + (k === 0 ? 1.1 : -1.1);
+          this.spawnChild('wasp', e.x + Math.cos(a) * 58, e.y + Math.sin(a) * 58);
+        }
+      }
+    }
+    const spd = e.speed * (e.enraged ? 1.28 : 1);
+    e.timer -= dt;
+    switch (e.state) {
+      case 0: {
+        if (e.timer <= 0) {
+          if (d > 170 || Math.random() < 0.55) {
+            // 重角崩冲
+            e.state = 10;
+            e.count = e.enraged ? 2 : 1;
+            e.timer = 0.78;
+            e.dirX = ux;
+            e.dirY = uy;
+            this.tel.line(e.x, e.y, ang, 340, 62, 0.78);
+            sfx.play('warn');
+          } else {
+            // 震地落岩
+            e.state = 20;
+            e.timer = 0.85;
+            this.tel.circle(e.x, e.y, 140, 0.85);
+            sfx.play('warn');
+          }
+          return [0, 0];
+        }
+        return [ux * spd, uy * spd];
+      }
+      case 10: {
+        if (e.timer <= 0) {
+          e.state = 11;
+          e.timer = 0.62;
+          sfx.play('bossRoar');
+        }
+        return [0, 0];
+      }
+      case 11: {
+        if (e.timer <= 0) {
+          // 冲锋刹车：震波 + 8 向碎角毒针
+          if (d < 130 + h.pr) h.hurtPlayer(e.skillDamage * 0.9);
+          this.fx.ring(e.x, e.y, 130, 0xffb848);
+          this.fx.burst(e.x, e.y, 0x7c5424, 20, 260, 1.3);
+          shake(this.scene, 150, 0.007);
+          sfx.play('explode');
+          const shots = e.enraged ? 10 : 8;
+          for (let k = 0; k < shots; k++) {
+            const a = ang + (k / shots) * Math.PI * 2;
+            h.shoot(e.x, e.y, a, 230, e.skillDamage * 0.55, 'stinger');
+          }
+          e.count--;
+          if (e.count > 0) {
+            e.state = 10;
+            e.timer = 0.58;
+            e.dirX = ux;
+            e.dirY = uy;
+            this.tel.line(e.x, e.y, ang, 340, 62, 0.58);
+            sfx.play('warn');
+          } else {
+            e.state = 0;
+            e.timer = e.enraged ? 1.05 : 1.55;
+          }
+          return [0, 0];
+        }
+        const ds = (e.def.dashSpeed ?? 500) * (e.enraged ? 1.12 : 1);
+        return [e.dirX * ds, e.dirY * ds];
+      }
+      default: {
+        // 震地落岩：近身大震波 + 玩家周围落岩预警圈
+        if (e.timer <= 0) {
+          if (d < 140 + h.pr) h.hurtPlayer(e.skillDamage);
+          this.fx.ring(e.x, e.y, 140, 0xffa838);
+          this.fx.burst(e.x, e.y, 0x6a4a24, 24, 290, 1.4);
+          shake(this.scene, 200, 0.009);
+          sfx.play('explode');
+          const rocks = e.enraged ? 6 : 4;
+          for (let k = 0; k < rocks; k++) {
+            const a = (k / rocks) * Math.PI * 2 + Math.random() * 0.4;
+            const r = k === 0 ? 18 : 95 + Math.random() * 130;
+            const x = Phaser.Math.Clamp(h.px + Math.cos(a) * r, 48, WORLD_WIDTH - 48);
+            const y = Phaser.Math.Clamp(h.py + Math.sin(a) * r, 48, WORLD_HEIGHT - 48);
+            this.strikes.push({ x, y, r: 72, t: 0.88, damage: e.skillDamage * 0.72 });
+            this.tel.circle(x, y, 72, 0.88);
+          }
+          e.state = 0;
+          e.timer = e.enraged ? 1.15 : 1.65;
         }
         return [0, 0];
       }

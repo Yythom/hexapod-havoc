@@ -19,14 +19,16 @@ export interface CombatHost {
   readonly mods: Mods;
   /** 当前生命比例（Sharp Tooth 这类武器用） */
   readonly hpRatio: number;
-  /** 武器命中回血（蜂蜜罐） */
-  heal(n: number): void;
+  /** 武器命中回血 / 吸取（传入受击敌人坐标以生成吸血光丝） */
+  heal(n: number, fromX?: number, fromY?: number, kind?: 'lifesteal' | 'other'): void;
   /** 额外掉落花蜜（金龟子钳） */
   dropBonusNectar(x: number, y: number, n: number): void;
   /** 武器击杀了一只怪（近战击杀统计） */
   onWeaponKill(def: WeaponDef): void;
   /** 暴击触发额外火花弹（暴击火花道具） */
   onCritSpark?(x: number, y: number, count: number): void;
+  /** 极短微顿帧反馈（重击/爆炸/精英击杀） */
+  onHitstop?(sec: number): void;
   /** 命中时向周围发射弹片（Cacti Club / Sniper Gun / Thunder Sword） */
   burst?(x: number, y: number, count: number, damage: number, texture: string, radius: number, speed: number, src: HitSource): void;
 }
@@ -76,9 +78,25 @@ export class HitResolver {
     const x = e.x;
     const y = e.y;
     const fx = def.onHit;
+    const dealt = Math.max(0, Math.round(damage));
+    if (src.owned) {
+      src.owned.waveDamage = (src.owned.waveDamage ?? 0) + dealt;
+      src.owned.totalDamage = (src.owned.totalDamage ?? 0) + dealt;
+    }
     const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback);
+    if (killed && (e.def.elite || e.def.boss)) {
+      this.host.onHitstop?.(e.def.boss ? 0.07 : 0.042);
+    }
+    if (src.tier >= 3) {
+      // IV 级传说武器命中自带额外小爆星
+      this.fx?.star(x, y, crit ? 18 : 13, 0xff8ce8, Math.random() * Math.PI);
+    }
     if (crit) {
-      this.fx?.star(x, y, 14, 0xffe258);
+      this.fx?.star(x, y, 14 + src.tier * 1.5, 0xffe258);
+      if (def.kind !== 'melee') {
+        const hitAng = Math.hypot(dirX, dirY) > 0.01 ? Math.atan2(dirY, dirX) : Math.random() * Math.PI;
+        this.fx?.hitSlash(x, y, hitAng, 0xffe468, 1.12);
+      }
       if (mods.critNova > 0) {
         const nr = 58;
         const ndmg = Math.max(1, Math.round(damage * 0.5));
@@ -112,6 +130,7 @@ export class HitResolver {
         }
         if (fx.poison) {
           this.enemies.applyPoison(e, fx.poison, 1, 3 + this.host.mods.poisonDuration);
+          this.fx?.poisonBubbles(x, y, 3);
         }
         if (fx.slow) {
           this.enemies.applySlow(e, 2, Math.max(0.2, 1 - fx.slow));
@@ -122,38 +141,40 @@ export class HitResolver {
         }
       }
       if (special?.explodeChance && Math.random() < special.explodeChance) {
-      const r = (special.explodeRadius ?? 60) * (1 + this.host.mods.explodeRadiusPct);
-      const ed = Math.max(1, Math.round(damage * 0.6));
-      this.fx?.ring(x, y, r, 0xffa040);
-      this.fx?.burst(x, y, 0xff8a30, 8, 180, 0.9);
-      for (const o of this.enemies.grid.query(x, y, r + 40, this.aoeBuf).slice()) {
-        if (!o.active || o === e) continue;
-        const dx = o.x - x;
-        const dy = o.y - y;
-        const rr = r + o.radius;
-        if (dx * dx + dy * dy > rr * rr) continue;
-        const d = Math.hypot(dx, dy) || 1;
-        this.enemies.hit(o, ed, false, dx / d, dy / d, 60);
+        const r = (special.explodeRadius ?? 60) * (1 + this.host.mods.explodeRadiusPct);
+        const ed = Math.max(1, Math.round(damage * 0.6));
+        this.fx?.explosion(x, y, r, 0xff8c30, src.tier);
+        this.host.onHitstop?.(0.022);
+        for (const o of this.enemies.grid.query(x, y, r + 40, this.aoeBuf).slice()) {
+          if (!o.active || o === e) continue;
+          const dx = o.x - x;
+          const dy = o.y - y;
+          const rr = r + o.radius;
+          if (dx * dx + dy * dy > rr * rr) continue;
+          const d = Math.hypot(dx, dy) || 1;
+          this.enemies.hit(o, ed, false, dx / d, dy / d, 60);
+        }
       }
-    }
-    if (fx.heal && Math.random() < fx.heal) this.host.heal(1);
+      if (fx.heal && Math.random() < fx.heal) this.host.heal(1, x, y, 'other');
       if (killed && fx.nectarOnKill && Math.random() < fx.nectarOnKill) this.host.dropBonusNectar(x, y, 1);
     }
 
-    // 武器自带吸取：每次命中按几率回 1 血
+    // 武器自带吸取：每次命中按几率回 1 血（带吸血光丝飞向甲虫）
     let ls = weaponLifesteal(def, src.tier);
     if (special?.lifestealPerMissingHp) ls += special.lifestealPerMissingHp * (1 - Math.max(0, Math.min(1, this.host.hpRatio))) * 10;
-    if (ls > 0 && Math.random() < ls) this.host.heal(1);
+    if (ls > 0 && Math.random() < ls) this.host.heal(1, x, y, 'lifesteal');
     // Brick：命中时概率掉花蜜（原作会碎武器，这里只保留掉落）
     if (special?.breakChance && Math.random() < special.breakChance) this.host.dropBonusNectar(x, y, 1);
     // Drill / Thief Dagger：暴击击杀额外掉花蜜
     if (killed && crit && special?.materialOnCritKill && Math.random() < special.materialOnCritKill) {
       this.host.dropBonusNectar(x, y, 1);
     }
-    if (killed && special?.healOnKill) this.host.heal(special.healOnKill);
+    if (killed && special?.healOnKill) this.host.heal(special.healOnKill, x, y, 'other');
 
     if (killed) {
-      if (def.growth && src.owned) src.owned.kills = (src.owned.kills ?? 0) + 1;
+      if ((def.growth || def.special?.growthMaxHp || def.special?.growthAttackSpeed) && src.owned) {
+        src.owned.kills = (src.owned.kills ?? 0) + 1;
+      }
       this.host.onWeaponKill(def);
     }
     return killed;

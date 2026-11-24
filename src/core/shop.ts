@@ -9,8 +9,10 @@ export const OFFER_COUNT = 4;
 const WEAPON_OFFER_CHANCE = 0.23;
 const WEAPON_OFFER_CHANCE_FILLING = 0.35;
 const SELL_RATIO = 0.25;
-/** 非唯一道具最多堆叠 5 件，避免 100+ 道具时单项属性爆表 */
-const MAX_ITEM_STACK = 4;
+/** 非唯一道具堆叠上限：普通~稀有最多 4 件，传说最多 2 件，防后期高幸运叠出爆炸面板 */
+function maxItemStack(d: ItemDef): number {
+  return d.rarity >= 3 ? 2 : 4;
+}
 const MAX_TIER = TIERS.length - 1;
 
 export interface Offer {
@@ -143,16 +145,19 @@ export function sellValue(price: number): number {
   return Math.max(1, Math.floor(price * SELL_RATIO));
 }
 
-/** 同一次进商店里第 times+1 次刷新的费用 */
+/** 同一次进商店里第 times+1 次刷新的费用：基础与连刷步长随波次递增，避免中后期无限白嫖刷新 */
 export function rerollCost(wave: number, times: number): number {
-  return 1 + Math.ceil(wave / 2) + times;
+  const t = Math.max(0, times);
+  const base = 2 + Math.floor(wave * 0.85);
+  const step = Math.max(1, Math.floor(wave / 2.5));
+  return base + t * step;
 }
 
 /** 严格过滤当前角色完全用不上的死道具（例如蚁后不出武器向机械件、蚊子不出普通回血件等） */
 function itemAllowed(id: string, run: RunState): boolean {
   const d = ITEMS[id];
   if (d.unique && run.items[d.id]) return false;
-  if (!d.unique && (run.items[d.id] ?? 0) >= MAX_ITEM_STACK) return false;
+  if (!d.unique && (run.items[d.id] ?? 0) >= maxItemStack(d)) return false;
   const perks = run.character.perks;
   const m = d.mods;
   if (run.weaponSlots === 0) {
@@ -296,7 +301,9 @@ export function refreshOffers(run: RunState): void {
   const hasLockedWeapon = run.offers.some((o) => o && o.locked && o.kind === 'weapon');
   const needWeaponSlot = run.weaponSlots > 0 && run.weapons.length < run.weaponSlots && run.wave <= 4 && !hasLockedWeapon;
   let forced = false;
-  for (let i = 0; i < OFFER_COUNT; i++) {
+  const count = run.shopOfferCount;
+  run.offers.length = count;
+  for (let i = 0; i < count; i++) {
     const o = run.offers[i];
     if (!o || !o.locked) {
       const forceW = needWeaponSlot && !forced;
@@ -340,7 +347,8 @@ export function buyOffer(run: RunState, index: number): boolean {
 }
 
 export function addItem(run: RunState, id: string): void {
-  if (!ITEMS[id].unique && (run.items[id] ?? 0) >= MAX_ITEM_STACK) {
+  const d = ITEMS[id];
+  if (!d.unique && (run.items[id] ?? 0) >= maxItemStack(d)) {
     run.nectar += 5;
     return;
   }

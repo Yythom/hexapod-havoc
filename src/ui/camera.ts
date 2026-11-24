@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { RENDER_SCALE } from '../config';
+import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from '../config';
 import { getSettings } from '../core/settings';
 
 /**
@@ -8,6 +8,32 @@ import { getSettings } from '../core/settings';
  */
 export function setupUICamera(scene: Phaser.Scene): void {
   scene.cameras.main.setOrigin(0, 0).setZoom(RENDER_SCALE);
+}
+
+/** 干脆利落的黑墨转场淡入（仅用于全屏独立场景，不用于战斗 HUD 叠加层） */
+export function fadeInScene(scene: Phaser.Scene, duration = 150): void {
+  const veil = scene.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050507, 1).setOrigin(0).setDepth(9999);
+  scene.tweens.add({
+    targets: veil,
+    alpha: 0,
+    duration,
+    ease: 'Quad.Out',
+    onComplete: () => veil.destroy(),
+  });
+}
+
+/** 带黑墨淡出转场的场景切换（防连点） */
+export function transitionTo(scene: Phaser.Scene, target: string, data?: object, duration = 120): void {
+  if (scene.data.get('__transitioning')) return;
+  scene.data.set('__transitioning', true);
+  const veil = scene.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050507, 0).setOrigin(0).setDepth(9999).setInteractive();
+  scene.tweens.add({
+    targets: veil,
+    alpha: 1,
+    duration,
+    ease: 'Quad.In',
+    onComplete: () => scene.scene.start(target, data),
+  });
 }
 
 /** 指针在界面逻辑坐标里的位置 */

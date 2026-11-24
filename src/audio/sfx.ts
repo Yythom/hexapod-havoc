@@ -9,6 +9,7 @@ export type SfxName =
   | 'spray'
   | 'melee'
   | 'hit'
+  | 'crit'
   | 'kill'
   | 'killBig'
   | 'nectar'
@@ -29,6 +30,10 @@ export type SfxName =
   | 'victory'
   | 'click'
   | 'buy'
+  | 'merge'
+  | 'reroll'
+  | 'dash'
+  | 'frenzy'
   | 'heartbeat'
   | 'unlock'
   | 'freeze'
@@ -70,9 +75,21 @@ class SfxEngine {
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private readonly last = new Map<SfxName, number>();
+  private readonly unlockListeners: ((ctx: AudioContext) => void)[] = [];
   private voices = 0;
   private combo = 0;
   private comboAt = 0;
+
+  /** 获取已解锁的共享 AudioContext（供 BGM 复用） */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+
+  /** 注册音频解锁回调（首次点击/按键时触发） */
+  onUnlock(fn: (ctx: AudioContext) => void): void {
+    this.unlockListeners.push(fn);
+    if (this.ctx) fn(this.ctx);
+  }
 
   /** 注册第一次用户操作时解锁音频 */
   init(volume: number): void {
@@ -172,6 +189,7 @@ class SfxEngine {
         for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
         this.noise = buf;
         this.ctx = ctx;
+        for (const fn of this.unlockListeners) fn(ctx);
       }
       if (this.ctx.state === 'suspended') void this.ctx.resume();
     } catch {
@@ -187,6 +205,7 @@ const GAPS: Record<SfxName, number> = {
   spray: 0.09,
   melee: 0.05,
   hit: 0.03,
+  crit: 0.045,
   kill: 0.025,
   killBig: 0.15,
   nectar: 0.028,
@@ -207,6 +226,10 @@ const GAPS: Record<SfxName, number> = {
   victory: 1,
   click: 0.03,
   buy: 0.05,
+  merge: 0.15,
+  reroll: 0.08,
+  dash: 0.15,
+  frenzy: 0.25,
   heartbeat: 0.3,
   unlock: 0.5,
   freeze: 0.08,
@@ -244,6 +267,11 @@ const SOUNDS: Record<SfxName, Play> = {
   },
   melee: (e, t) => e.noiseBurst(t, { dur: 0.09, vol: 0.07, filter: 'bandpass', from: 1800, to: 500 }),
   hit: (e, t) => e.tone(t, { type: 'sine', from: 190, to: 70, dur: 0.06, vol: 0.08 }),
+  crit: (e, t) => {
+    e.tone(t, { type: 'triangle', from: 1180, to: 720, dur: 0.075, vol: 0.075 });
+    e.tone(t, { type: 'sine', from: 1760, to: 1320, dur: 0.065, vol: 0.05, delay: 0.015 });
+    e.noiseBurst(t, { dur: 0.04, vol: 0.045, filter: 'highpass', from: 3600 });
+  },
   kill: (e, t) => {
     e.tone(t, { type: 'triangle', from: 500, to: 1100, dur: 0.06, vol: 0.05 });
     e.noiseBurst(t, { dur: 0.05, vol: 0.03, filter: 'highpass', from: 3000 });
@@ -297,6 +325,25 @@ const SOUNDS: Record<SfxName, Play> = {
   buy: (e, t) => {
     e.tone(t, { type: 'square', from: 988, dur: 0.05, vol: 0.05, lowpass: 5000 });
     e.tone(t, { type: 'square', from: 1319, dur: 0.08, vol: 0.05, lowpass: 5000, delay: 0.06 });
+  },
+  merge: (e, t) => {
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      e.tone(t, { type: 'triangle', from: f, to: f * 1.015, dur: 0.18, vol: 0.065, delay: i * 0.055 });
+    });
+    e.tone(t, { type: 'sine', from: 1567.98, dur: 0.22, vol: 0.045, delay: 0.18 });
+  },
+  reroll: (e, t) => {
+    e.noiseBurst(t, { dur: 0.07, vol: 0.045, filter: 'bandpass', from: 1400, to: 3200 });
+    e.tone(t, { type: 'triangle', from: 440, to: 680, dur: 0.06, vol: 0.04, delay: 0.025 });
+  },
+  dash: (e, t) => {
+    e.noiseBurst(t, { dur: 0.14, vol: 0.09, filter: 'bandpass', from: 2800, to: 900 });
+    e.tone(t, { type: 'triangle', from: 460, to: 180, dur: 0.12, vol: 0.065 });
+  },
+  frenzy: (e, t) => {
+    [587.33, 783.99, 1046.5, 1396.91].forEach((f, i) => {
+      e.tone(t, { type: 'triangle', from: f, to: f * 1.04, dur: 0.16, vol: 0.065, delay: i * 0.045 });
+    });
   },
   heartbeat: (e, t) => {
     e.tone(t, { type: 'sine', from: 70, to: 50, dur: 0.12, vol: 0.2 });

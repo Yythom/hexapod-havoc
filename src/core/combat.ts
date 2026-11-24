@@ -14,10 +14,18 @@ export function effectiveRange(def: WeaponDef, stats: Stats, tier = 0): number {
   return Math.max(40, Math.min(MAX_SCREEN_RANGE, base + bonus));
 }
 
-/** 成长型武器已经长出来的固定伤害 */
+/** 远程武器超出屏幕上限的溢出射程自动转化为增伤（每溢出 25 射程 +2% 伤害，上限 +25%），避免枪械流射程白给 */
+export function rangeOverflowBonus(def: WeaponDef, stats: Stats, tier = 0): number {
+  if (def.kind === 'melee' || def.summon || def.device) return 0;
+  const raw = tierOf(def, tier).range + stats.range;
+  if (raw <= MAX_SCREEN_RANGE) return 0;
+  return Math.min(0.25, ((raw - MAX_SCREEN_RANGE) / 25) * 0.02);
+}
+
+/** 成长型武器已经长出来的固定伤害（单把上限 +40，防无尽模式无限膨胀） */
 export function growthBonus(def: WeaponDef, owned: OwnedWeapon | null | undefined): number {
   if (!def.growth || !owned) return 0;
-  return Math.floor((owned.kills ?? 0) / def.growth.kills);
+  return Math.min(40, Math.floor((owned.kills ?? 0) / def.growth.kills));
 }
 
 /**
@@ -44,7 +52,8 @@ export function weaponDamage(
     const k = stat === 'melee' || stat === 'ranged' ? 1 + mods.flatBonusPct : 1;
     flat += (stats[stat] ?? 0) * coef * k;
   }
-  let dmg = flat * (1 + stats.damagePct);
+  const dmgPctMult = Math.max(0.2, 1 + stats.damagePct);
+  let dmg = flat * dmgPctMult * (1 + rangeOverflowBonus(def, stats, tier));
   if (def.kind === 'ranged') dmg *= Math.max(0, 1 + mods.rangedDamagePct);
   if (def.kind !== 'device') dmg *= Math.max(0, 1 + mods.nonDeviceDamagePct);
   dmg *= Math.max(0, 1 + mods.weaponDamagePct) * mult;

@@ -2,6 +2,7 @@ import { baseSlots, CHARACTERS, type CharacterDef } from '../data/characters';
 import { DIFFICULTIES, type DifficultyDef } from '../data/difficulty';
 import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
 import { WEAPONS } from '../data/weapons';
+import { DAILY_MUTATORS, type DailyMutatorId } from './daily';
 import { xpToNext } from './progression';
 import { activeSets } from './sets';
 import type { Offer } from './shop';
@@ -17,13 +18,54 @@ export interface OwnedWeapon {
   kills?: number;
   /** Railgun：本波累积的额外伤害 */
   ramp?: number;
+  /** 上一波造成的伤害统计 */
+  waveDamage?: number;
+  /** 本局累计造成的伤害统计 */
+  totalDamage?: number;
 }
 
-/** 开局选择：角色、难度、初始武器 */
+export interface OffscreenMarker {
+  x: number;
+  y: number;
+  kind: 'lootbug' | 'elite' | 'boss' | 'chest';
+}
+
+/** 局中断点续玩存档结构（波间进入商店时自动保存） */
+export interface SavedRun {
+  version: 1;
+  setup: RunSetup;
+  wave: number;
+  endless: boolean;
+  won: boolean;
+  victoryRecorded: boolean;
+  bonus: Stats;
+  items: Record<string, number>;
+  weapons: OwnedWeapon[];
+  offers: (Offer | null)[];
+  nectar: number;
+  waveNectar: number;
+  waveHarvest: number;
+  waveInterest: number;
+  totalNectar: number;
+  kills: number;
+  level: number;
+  xp: number;
+  pendingLevelUps: number;
+  chests: number;
+  toxinDamage: number;
+  meleeKills: number;
+  maxSummons: number;
+  lifestealHealed: number;
+  devicesPlaced: number;
+}
+
+/** 开局选择：角色、难度、初始武器（可选每日挑战日期与突变词条） */
 export interface RunSetup {
   character: string;
   difficulty: number;
   weapon: string;
+  daily?: string;
+  mutators?: DailyMutatorId[];
 }
 
 /** 蜘蛛 8 个槽 + 第七条腿 */
@@ -53,6 +95,7 @@ export class RunState {
   shield = 0;
   nectar = 0;
   waveNectar = 0;
+  waveKills = 0;
   waveHarvest = 0;
   waveInterest = 0;
   totalNectar = 0;
@@ -67,6 +110,12 @@ export class RunState {
 
   /** Boss 战时的血量，给 HUD 显示 */
   boss: { name: string; hp: number; maxHp: number } | null = null;
+  /** 屏幕外高价值目标方向指示（宝藏虫、精英、Boss、宝箱） */
+  offscreenMarkers: OffscreenMarker[] = [];
+  /** 主动冲刺充能进度（0~1，1 表示就绪） */
+  dashRatio = 1;
+  /** 琥珀狂热剩余秒数 */
+  frenzyTime = 0;
   /** 本局造成的毒素伤害（解锁屁步甲用） */
   toxinDamage = 0;
   /** 其他解锁条件的统计 */
@@ -75,6 +124,11 @@ export class RunState {
   lifestealHealed = 0;
   devicesPlaced = 0;
   won = false;
+  /** 是否进入第 21 波起的无尽模式 */
+  endless = false;
+  /** 是否已记录第 20 波通关（防止无尽结束重复计胜场） */
+  victoryRecorded = false;
+  newDifficultyUnlocked = false;
 
   constructor(setup: RunSetup) {
     this.setup = setup;
@@ -120,6 +174,15 @@ export class RunState {
     return this.items[id] ?? 0;
   }
 
+  hasMutator(id: DailyMutatorId): boolean {
+    return !!this.setup.mutators?.includes(id);
+  }
+
+  /** 商店单次刷新展示的商品数（每日挑战「虫市清仓」为 3 格，常规 4 格） */
+  get shopOfferCount(): number {
+    return this.hasMutator('discount') ? 3 : 4;
+  }
+
   recomputeStats(): void {
     const s: Stats = { ...BASE_STATS };
     const m: Mods = { ...ZERO_MODS };
@@ -143,12 +206,19 @@ export class RunState {
       const def = WEAPONS[w.id];
       if (!def) continue;
       if (def.bonusStats) addStats(def.bonusStats);
-      if (def.special?.growthMaxHp) s.maxHp += Math.floor((w.kills ?? 0) * def.special.growthMaxHp);
+      if (def.special?.growthMaxHp) s.maxHp += Math.min(25, Math.floor(((w.kills ?? 0) / 20) * def.special.growthMaxHp));
       if (def.special?.armorPerWeapon) s.armor += def.special.armorPerWeapon * this.weapons.length;
     }
     for (const set of activeSets(this.weapons)) {
       addStats(set.level.stats);
       addMods(set.level.mods);
+    }
+    // 每日挑战词条加成
+    for (const mid of this.setup.mutators ?? []) {
+      const mdef = DAILY_MUTATORS[mid];
+      if (!mdef) continue;
+      if (mdef.stats) addStats(mdef.stats);
+      addMods(mdef.mods);
     }
     // 角色规则
     const perks = this.character.perks;
@@ -177,5 +247,68 @@ export class RunState {
       up++;
     }
     return up;
+  }
+
+  /** 序列化当前局内进度（用于波间断点续玩） */
+  serialize(): SavedRun {
+    return {
+      version: 1,
+      setup: { ...this.setup },
+      wave: this.wave,
+      endless: this.endless,
+      won: this.won,
+      victoryRecorded: this.victoryRecorded,
+      bonus: { ...this.bonus },
+      items: { ...this.items },
+      weapons: this.weapons.map((w) => ({ ...w })),
+      offers: this.offers.map((o) => (o ? { ...o } : null)),
+      nectar: this.nectar,
+      waveNectar: this.waveNectar,
+      waveHarvest: this.waveHarvest,
+      waveInterest: this.waveInterest,
+      totalNectar: this.totalNectar,
+      kills: this.kills,
+      level: this.level,
+      xp: this.xp,
+      pendingLevelUps: this.pendingLevelUps,
+      chests: this.chests,
+      toxinDamage: this.toxinDamage,
+      meleeKills: this.meleeKills,
+      maxSummons: this.maxSummons,
+      lifestealHealed: this.lifestealHealed,
+      devicesPlaced: this.devicesPlaced,
+    };
+  }
+
+  /** 从断点存档恢复一局状态 */
+  static restore(data: SavedRun): RunState {
+    const run = new RunState(data.setup);
+    run.wave = Math.max(1, Math.floor(data.wave || 1));
+    run.endless = !!data.endless;
+    run.won = !!data.won;
+    run.victoryRecorded = !!data.victoryRecorded;
+    run.bonus = { ...ZERO_STATS, ...data.bonus };
+    run.items = { ...data.items };
+    run.weapons = (data.weapons ?? []).filter((w) => !!WEAPONS[w.id]).map((w) => ({ ...w }));
+    run.offers = Array.isArray(data.offers) ? data.offers.map((o) => (o ? { ...o } : null)) : [];
+    run.nectar = Number(data.nectar) || 0;
+    run.waveNectar = Number(data.waveNectar) || 0;
+    run.waveHarvest = Number(data.waveHarvest) || 0;
+    run.waveInterest = Number(data.waveInterest) || 0;
+    run.totalNectar = Number(data.totalNectar) || 0;
+    run.kills = Number(data.kills) || 0;
+    run.level = Math.max(1, Number(data.level) || 1);
+    run.xp = Math.max(0, Number(data.xp) || 0);
+    run.pendingLevelUps = Math.max(0, Number(data.pendingLevelUps) || 0);
+    run.chests = Math.max(0, Number(data.chests) || 0);
+    run.toxinDamage = Number(data.toxinDamage) || 0;
+    run.meleeKills = Number(data.meleeKills) || 0;
+    run.maxSummons = Number(data.maxSummons) || 0;
+    run.lifestealHealed = Number(data.lifestealHealed) || 0;
+    run.devicesPlaced = Number(data.devicesPlaced) || 0;
+    run.recomputeStats();
+    run.hp = run.maxHp;
+    run.phase = 'intermission';
+    return run;
   }
 }

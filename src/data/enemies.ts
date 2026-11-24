@@ -1,4 +1,4 @@
-export type EnemyBehavior = 'chase' | 'swarm' | 'charger' | 'ranged' | 'bomber' | 'summoner' | 'elite' | 'boss' | 'tree' | 'lootbug';
+export type EnemyBehavior = 'chase' | 'swarm' | 'charger' | 'ranged' | 'bomber' | 'summoner' | 'elite' | 'elite_hornet' | 'boss' | 'boss_goliath' | 'tree' | 'lootbug';
 
 export interface EnemyDef {
   id: string;
@@ -124,16 +124,48 @@ const LIST: EnemyDef[] = [
     elite: true,
   },
   {
+    id: 'hornet_elite',
+    name: '皇家胡蜂',
+    hp: 235,
+    damage: 3,
+    speed: 112,
+    nectar: [22, 22],
+    radius: 21,
+    texture: 'hornet_elite',
+    behavior: 'elite_hornet',
+    dashSpeed: 420,
+    skillDamage: 2.5,
+    knockbackResist: 0.8,
+    elite: true,
+  },
+  {
     id: 'mantis',
     name: '螳螂女王',
-    hp: 9000,
+    hp: 15000,
     damage: 15,
-    speed: 85,
+    speed: 90,
     nectar: [0, 0],
     radius: 38,
     texture: 'mantis',
     behavior: 'boss',
     skillDamage: 30,
+    knockbackResist: 1,
+    hpGrowth: 0,
+    damageGrowth: 0,
+    boss: true,
+  },
+  {
+    id: 'goliath_boss',
+    name: '泰坦兜虫',
+    hp: 16500,
+    damage: 16,
+    speed: 82,
+    nectar: [0, 0],
+    radius: 40,
+    texture: 'goliath_boss',
+    behavior: 'boss_goliath',
+    dashSpeed: 500,
+    skillDamage: 28,
     knockbackResist: 1,
     hpGrowth: 0,
     damageGrowth: 0,
@@ -166,6 +198,19 @@ const LIST: EnemyDef[] = [
     hpGrowth: 0.35,
   },
   {
+    id: 'boomshroom',
+    name: '爆裂毒菇',
+    hp: 16,
+    damage: 0,
+    speed: 0,
+    nectar: [1, 2],
+    radius: 17,
+    texture: 'boomshroom',
+    behavior: 'tree',
+    knockbackResist: 1,
+    hpGrowth: 0.45,
+  },
+  {
     id: 'lootbug',
     name: '宝藏虫',
     hp: 26,
@@ -185,19 +230,31 @@ export const ENEMIES: Record<string, EnemyDef> = Object.fromEntries(LIST.map((d)
 /** 默认生命成长：每过一波 +55% 基础生命 */
 export const DEFAULT_HP_GROWTH = 0.65;
 
-/** 每过一波：生命 × (1 + 成长率 × (波数 − 1)) */
+/**
+ * 怪物生命随波次成长：
+ * - 1~8 波：线性成长，保证开荒期流畅
+ * - 9~20 波：叠加温和二次项，跟上玩家 6 槽+高阶武器+羁绊的乘性 DPS 爆发
+ * - 21+ 无尽波：指数拉升（×1.28/波），让成型神装在 25~33 波迎来真正极限
+ */
 export function enemyHp(def: EnemyDef, wave: number): number {
-  return def.hp * (1 + (def.hpGrowth ?? DEFAULT_HP_GROWTH) * (wave - 1));
+  const base = def.hp * (1 + (def.hpGrowth ?? DEFAULT_HP_GROWTH) * (wave - 1));
+  if (def.boss) return wave > 20 ? base * Math.pow(1.28, wave - 20) : base;
+  const lateWave = Math.min(wave, 20);
+  const midCurve = lateWave > 8 ? 1 + 0.01 * (lateWave - 8) * (lateWave - 8) : 1;
+  const scaled = base * midCurve;
+  return wave > 20 ? scaled * Math.pow(1.28, wave - 20) : scaled;
 }
 
-/** 默认伤害成长：每过一波 +30% 基础伤害（小怪基础伤害只有 1~2，成长太低会被取整吃掉） */
+/** 默认伤害成长：每过一波 +35% 基础伤害（小怪基础伤害只有 1~2，成长太低会被取整吃掉） */
 export const DEFAULT_DAMAGE_GROWTH = 0.35;
 
-/** 每过一波：伤害 × (1 + 成长率 × (波数 − 1)) */
+/** 每过一波：伤害 × (1 + 成长率 × (波数 − 1))，无尽模式第 21 波起指数递增 */
 export function enemyDamage(def: EnemyDef, wave: number): number {
-  return def.damage * (1 + (def.damageGrowth ?? DEFAULT_DAMAGE_GROWTH) * (wave - 1));
+  const base = def.damage * (1 + (def.damageGrowth ?? DEFAULT_DAMAGE_GROWTH) * (wave - 1));
+  return wave > 20 ? base * Math.pow(1.15, wave - 20) : base;
 }
 
 export function enemySkillDamage(def: EnemyDef, wave: number): number {
-  return (def.skillDamage ?? def.damage) * (1 + (def.damageGrowth ?? DEFAULT_DAMAGE_GROWTH) * (wave - 1));
+  const base = (def.skillDamage ?? def.damage) * (1 + (def.damageGrowth ?? DEFAULT_DAMAGE_GROWTH) * (wave - 1));
+  return wave > 20 ? base * Math.pow(1.15, wave - 20) : base;
 }

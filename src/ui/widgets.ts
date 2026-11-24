@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
 import { DISPLAY_FONT, FONT_FAMILY, NUM_FONT, fontPx } from '../config';
-import { effectiveRange, growthBonus, weaponDamage } from '../core/combat';
+import { effectiveRange, growthBonus, rangeOverflowBonus, weaponDamage } from '../core/combat';
 import type { OwnedWeapon } from '../core/RunState';
-import { attackInterval, BASE_STATS, formatStat, formatStatDelta, STAT_KEYS, STAT_META, type Stats } from '../core/stats';
+import { attackInterval, BASE_STATS, formatStat, formatStatDelta, STAT_META, type Stats } from '../core/stats';
 import { MOD_LABEL, type ItemDef, type Mods } from '../data/items';
 import { CLASS_LABEL, KIND_LABEL, TIERS, tierOf, type WeaponClass, type WeaponDef } from '../data/weapons';
-import { chamferPoints } from './Button';
+import { chamferPoints, fillPoly, insetPoints, strokePoly, type Pt } from './Button';
 
 /** 土豆兄弟风格（Brotato）色板：哑光炭黑石板 + 纯黑重墨描边 + 骨白高对比字 + 鲜明绿红数值 */
 export const COLOR = {
@@ -149,9 +149,137 @@ export function numLabel(
   });
 }
 
+export interface ChamferPlateOpts {
+  fill?: number;
+  fillAlpha?: number;
+  border?: number;
+  borderWidth?: number;
+  borderAlpha?: number;
+  accentTop?: number;
+  headerH?: number;
+  bevel?: boolean;
+  cornerTicks?: boolean;
+  shadowX?: number;
+  shadowY?: number;
+  cutBig?: number;
+  cutSmall?: number;
+  inkWidth?: number;
+}
+
+/** 绘制硬核非对称切角面板（供主面板、卡片、弹框、选人框共用） */
+export function drawChamferPlate(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  opts: ChamferPlateOpts = {},
+): Pt[] {
+  const fill = opts.fill ?? COLOR.panel;
+  const fillAlpha = opts.fillAlpha ?? 1;
+  const border = opts.border ?? COLOR.border;
+  const borderWidth = opts.borderWidth ?? 2;
+  const borderAlpha = opts.borderAlpha ?? 0.92;
+  const sx = opts.shadowX ?? 4;
+  const sy = opts.shadowY ?? 5;
+  const cBig = opts.cutBig ?? Math.min(11, Math.max(5, Math.round(Math.min(w, h) * 0.085)));
+  const cSmall = opts.cutSmall ?? Math.max(3, Math.round(cBig * 0.45));
+  const pts = chamferPoints(x, y, w, h, cBig, cSmall, cBig, cSmall);
+
+  // 1. 纯黑硬偏移漫画投影
+  if (sx !== 0 || sy !== 0) {
+    fillPoly(g, chamferPoints(x + sx, y + sy, w, h, cBig, cSmall, cBig, cSmall), COLOR.ink, 0.92);
+  }
+
+  // 2. 主体哑光底色
+  fillPoly(g, pts, fill, fillAlpha);
+
+  // 3. 可选品质顶部染色洗层 + 45° 版画斜排线（headerH = 0 仅保留顶部细彩条）
+  if (opts.accentTop !== undefined) {
+    const bandH = opts.headerH ?? Math.min(72, Math.round(h * 0.25));
+    if (bandH > 0) {
+      const topPts: Pt[] = [
+        { x: pts[0].x + 1, y: y + 2 },
+        { x: pts[1].x - 1, y: y + 2 },
+        { x: x + w - 2, y: Math.min(y + bandH, pts[2].y + 1) },
+        { x: x + w - 2, y: y + bandH },
+        { x: x + 2, y: y + bandH },
+        { x: x + 2, y: Math.min(y + bandH, pts[7].y + 1) },
+      ];
+      fillPoly(g, topPts, opts.accentTop, 0.13);
+      g.lineStyle(2, 0xffffff, 0.045);
+      for (let hx = x + cBig + 6; hx < x + w - 10; hx += 12) {
+        const topX = Math.min(pts[1].x - 4, hx + 16);
+        const botX = Math.max(x + 4, hx - 12);
+        g.beginPath();
+        g.moveTo(topX, y + 5);
+        g.lineTo(botX, y + Math.min(bandH - 4, 34));
+        g.strokePath();
+      }
+      g.lineStyle(1.5, COLOR.ink, 0.48);
+      g.beginPath();
+      g.moveTo(x + 3, y + bandH);
+      g.lineTo(x + w - 3, y + bandH);
+      g.strokePath();
+    }
+    fillPoly(
+      g,
+      [
+        { x: pts[0].x + 1, y: y + 2 },
+        { x: pts[1].x - 1, y: y + 2 },
+        { x: pts[1].x + 1, y: y + 6 },
+        { x: pts[0].x - 1, y: y + 6 },
+      ],
+      opts.accentTop,
+      0.92,
+    );
+  }
+
+  // 4. 立体倒角棱线：左上亮棱 + 右下暗唇（营造甲壳/金属铭牌厚度）
+  if (opts.bevel !== false) {
+    g.lineStyle(1.4, 0xffffff, 0.11);
+    g.beginPath();
+    g.moveTo(pts[6].x + 2, pts[6].y - 2);
+    g.lineTo(pts[7].x + 2, pts[7].y + 1);
+    g.lineTo(pts[0].x + 1, pts[0].y + 2);
+    g.lineTo(pts[1].x - 1, pts[1].y + 2);
+    g.strokePath();
+
+    g.lineStyle(2, 0x000000, 0.34);
+    g.beginPath();
+    g.moveTo(pts[2].x - 2, pts[2].y + 2);
+    g.lineTo(pts[3].x - 2, pts[3].y - 1);
+    g.lineTo(pts[4].x - 1, pts[4].y - 2);
+    g.lineTo(pts[5].x + 1, pts[5].y - 2);
+    g.strokePath();
+  }
+
+  // 5. 大尺寸面板边角机械卡扣刻度
+  if (opts.cornerTicks && w >= 160 && h >= 110) {
+    g.lineStyle(1.8, border, 0.42);
+    g.beginPath();
+    g.moveTo(x + w - cSmall - 16, y + 6);
+    g.lineTo(x + w - cSmall - 2, y + 6);
+    g.lineTo(x + w - 6, y + cSmall + 2);
+    g.lineTo(x + w - 6, y + cSmall + 14);
+    g.moveTo(x + cSmall + 16, y + h - 6);
+    g.lineTo(x + cSmall + 2, y + h - 6);
+    g.lineTo(x + 6, y + h - cSmall - 2);
+    g.lineTo(x + 6, y + h - cSmall - 14);
+    g.strokePath();
+  }
+
+  // 6. 内边框 + 外重黑墨描边
+  if (border !== COLOR.ink && borderWidth > 0) {
+    strokePoly(g, insetPoints(pts, 1.8), borderWidth, border, borderAlpha);
+  }
+  strokePoly(g, pts, opts.inkWidth ?? 3, COLOR.ink, 1);
+  return pts;
+}
+
 /**
  * 土豆兄弟风手绘黑墨面板：
- * 硬朗纯黑偏移投影 + 3px 黑墨外轮廓 + 哑光炭黑/品质微晕底板 + 可选顶部斜纹版画头带
+ * 硬朗纯黑偏移投影 + 3px 黑墨外轮廓 + 非对称切角哑光底板 + 立体棱线 + 可选顶部斜纹版画头带
  */
 export function panel(
   scene: Phaser.Scene,
@@ -166,50 +294,14 @@ export function panel(
   headerH?: number,
 ): Phaser.GameObjects.Graphics {
   const g = scene.add.graphics();
-  const r = Math.min(8, Math.round(Math.min(w, h) * 0.08));
-
-  // 1. 纯黑硬偏移漫画投影
-  g.fillStyle(COLOR.ink, 0.92);
-  g.fillRoundedRect(x + 4, y + 5, w, h, r);
-
-  // 2. 主体哑光底色
-  g.fillStyle(fill, 1);
-  g.fillRoundedRect(x, y, w, h, r);
-
-  // 3. 可选品质顶部染色洗层 + 45° 版画斜排线（headerH = 0 可仅保留顶部细彩条）
-  if (accentTop !== undefined) {
-    const bandH = headerH ?? Math.min(72, Math.round(h * 0.25));
-    if (bandH > 0) {
-      g.fillStyle(accentTop, 0.12);
-      g.fillRoundedRect(x + 2, y + 2, w - 4, bandH, { tl: r - 2, tr: r - 2, bl: 0, br: 0 });
-      g.lineStyle(2, 0xffffff, 0.04);
-      for (let sx = x + 12; sx < x + w - 8; sx += 12) {
-        const topX = Math.min(x + w - 4, sx + 16);
-        const botX = Math.max(x + 4, sx - 12);
-        g.beginPath();
-        g.moveTo(topX, y + 5);
-        g.lineTo(botX, y + Math.min(bandH - 4, 34));
-        g.strokePath();
-      }
-    }
-    g.fillStyle(accentTop, 0.9);
-    g.fillRect(x + 2, y + 2, w - 4, 4);
-  }
-
-  // 4. 极轻顶部暗角高光（保持哑光质感）
-  g.lineStyle(1, 0xffffff, 0.06);
-  g.beginPath();
-  g.moveTo(x + r, y + 2);
-  g.lineTo(x + w - r, y + 2);
-  g.strokePath();
-
-  // 5. 内边框 + 外重黑墨描边
-  if (border !== COLOR.ink) {
-    g.lineStyle(borderWidth, border, 0.92);
-    g.strokeRoundedRect(x + 1.5, y + 1.5, w - 3, h - 3, Math.max(2, r - 1));
-  }
-  g.lineStyle(3, COLOR.ink, 1);
-  g.strokeRoundedRect(x, y, w, h, r);
+  drawChamferPlate(g, x, y, w, h, {
+    fill,
+    border,
+    borderWidth,
+    accentTop,
+    headerH,
+    cornerTicks: w >= 200 && h >= 160,
+  });
   return g;
 }
 
@@ -376,7 +468,15 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
   if (hit?.nectarOnKill) parts.push(`击杀时 ${Math.round(hit.nectarOnKill * 100)}% 概率多掉 1 颗花蜜`);
   if (def.growth) {
     const grown = growthBonus(def, owned);
-    parts.push(`本局每击杀 ${def.growth.kills} 只，伤害永久 +1${grown > 0 ? `（已 +${grown}）` : ''}`);
+    parts.push(`本局每击杀 ${def.growth.kills} 只，伤害永久 +1（上限 +40${grown > 0 ? `，已 +${grown}` : ''}）`);
+  }
+  if (def.special?.growthMaxHp) {
+    const gained = Math.min(25, Math.floor(((owned?.kills ?? 0) / 20) * def.special.growthMaxHp));
+    parts.push(`每击杀 20 只，最大生命 +1（上限 +25${gained > 0 ? `，已 +${gained}` : ''}）`);
+  }
+  if (def.special?.growthAttackSpeed) {
+    const pctGained = Math.round(Math.min(0.6, Math.floor((owned?.kills ?? 0) / 12) * def.special.growthAttackSpeed) * 100);
+    parts.push(`每击杀 12 只，攻速 +1%（上限 +60%${pctGained > 0 ? `，已 +${pctGained}%` : ''}）`);
   }
   return parts.join('，');
 }
@@ -394,12 +494,13 @@ export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mo
     ? t.cooldown / (def.device!.type === 'turret' ? Math.max(0.2, 1 + mods.turretSpeedPct) : 1)
     : attackInterval(t.cooldown, stats);
   const range = effectiveRange(def, stats, tier);
+  const overflow = rangeOverflowBonus(def, stats, tier);
   const dmgLabel =
     def.summon?.type === 'web' ? `每秒伤害 ${Math.round(dmg)}` : def.summon ? `每只伤害 ${Math.round(dmg)}` : def.beam ? `每次伤害 ${Math.round(dmg)}` : `伤害 ${Math.round(dmg)}`;
   let timing: string;
   if (def.summon?.type === 'aphid' || def.summon?.type === 'moth') timing = `间隔 ${interval.toFixed(2)} 秒`;
   else if (def.device?.type === 'mine') timing = `每 ${interval.toFixed(1)} 秒埋一颗`;
-  else timing = `间隔 ${interval.toFixed(2)} 秒 · 射程 ${Math.round(range)}`;
+  else timing = `间隔 ${interval.toFixed(2)} 秒 · 射程 ${Math.round(range)}${overflow > 0 ? ` (+${Math.round(overflow * 100)}%伤)` : ''}`;
   const lines: Line[] = [
     { text: dmgLabel, color: COLOR.text },
     { text: scaling ? `加成 ${scaling}` : '加成 伤害%', color: COLOR.dim },
@@ -441,46 +542,154 @@ export function layoutLines(
   return cy - y;
 }
 
-/** 右侧土豆兄弟风格属性面板：暗炭黑框 + 斑马底纹 + 区分变动属性与零值 */
-export function statsPanel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, stats: Stats): Phaser.GameObjects.Container {
+const STAT_GROUPS: (keyof Stats)[][] = [
+  ['maxHp', 'regen', 'lifesteal', 'armor', 'dodge'],
+  ['damagePct', 'melee', 'ranged', 'toxin', 'elemental', 'curse', 'attackSpeedPct', 'critChance', 'range'],
+  ['speedPct', 'luck', 'harvest', 'pickupPct', 'engineering'],
+];
+
+export interface StatsPanelHandle {
+  container: Phaser.GameObjects.Container;
+  /** 鼠标悬停卡片时实时预览属性增减 */
+  preview: (deltas?: Partial<Stats>) => void;
+  /** 升级/购买引起属性变化后脉冲高亮对应行 */
+  pulse: (keys: (keyof Stats)[]) => void;
+}
+
+/** 创建支持悬停预览与变化脉冲的右侧属性面板（三段式分组 + 切角顶栏） */
+export function createStatsPanel(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  stats: Stats,
+): StatsPanelHandle {
   const c = scene.add.container(0, 0);
   c.add(panel(scene, x, y, w, h, COLOR.border, COLOR.panel, 2));
+
   const hdr = scene.add.graphics();
-  hdr.fillStyle(COLOR.panelDeep, 0.72);
-  hdr.fillRoundedRect(x + 2, y + 2, w - 4, 40, { tl: 6, tr: 6, bl: 0, br: 0 });
+  const cBig = Math.min(11, Math.max(5, Math.round(Math.min(w, h) * 0.085)));
+  const cSmall = Math.max(3, Math.round(cBig * 0.45));
+  fillPoly(
+    hdr,
+    [
+      { x: x + cBig + 1, y: y + 2 },
+      { x: x + w - cSmall - 1, y: y + 2 },
+      { x: x + w - 2, y: y + cSmall + 1 },
+      { x: x + w - 2, y: y + 40 },
+      { x: x + 2, y: y + 40 },
+      { x: x + 2, y: y + cBig + 1 },
+    ],
+    COLOR.panelDeep,
+    0.78,
+  );
   c.add(hdr);
-  c.add(cardTitle(scene, x + w / 2, y + 22, '属性', 20, COLOR.text).setOrigin(0.5));
-  c.add(divider(scene, x + 14, y + 42, w - 28, COLOR.border, 0.75));
+  c.add(cardTitle(scene, x + w / 2, y + 21, '属性', 20, COLOR.text).setOrigin(0.5));
+  c.add(divider(scene, x + 14, y + 40, w - 28, COLOR.border, 0.78));
 
   const g = scene.add.graphics();
-  const topY = y + 48;
-  const rowH = (h - 54) / STAT_KEYS.length;
+  const totalStats = STAT_GROUPS.reduce((sum, grp) => sum + grp.length, 0);
+  const groupGap = 7;
+  const topY = y + 46;
+  const rowH = (h - 52 - groupGap * (STAT_GROUPS.length - 1)) / totalStats;
 
-  STAT_KEYS.forEach((k, i) => {
-    const ry = topY + i * rowH;
-    if (i % 2 === 0) {
-      g.fillStyle(0xffffff, 0.028);
-      g.fillRect(x + 6, ry - 1, w - 12, rowH - 1);
+  const rows = new Map<
+    keyof Stats,
+    {
+      nameText: Phaser.GameObjects.Text;
+      valText: Phaser.GameObjects.Text;
+      previewText: Phaser.GameObjects.Text;
+      flash: Phaser.GameObjects.Rectangle;
+      baseVal: number;
     }
-    const dotY = ry + rowH * 0.44;
-    g.fillStyle(COLOR.ink, 1);
-    g.fillRect(x + 14, dotY - 4, 8, 8);
-    g.fillStyle(STAT_DOT[k], 1);
-    g.fillRect(x + 15.5, dotY - 2.5, 5, 5);
+  >();
 
-    const v = stats[k];
-    const base = BASE_STATS[k];
-    const changed = Math.abs(v - base) > 1e-6;
-    const color = v > base + 1e-6 ? COLOR.good : v < base - 1e-6 ? COLOR.bad : '#7d8392';
-    c.add(label(scene, x + 28, ry + 1, STAT_META[k].label, 15, changed ? COLOR.text : '#9195a3', changed));
-    c.add(label(scene, x + w - 14, ry + 1, formatStat(k, v), 15, color, changed).setOrigin(1, 0));
+  let curY = topY;
+  let rowIdx = 0;
+  STAT_GROUPS.forEach((group, gi) => {
+    if (gi > 0) {
+      const sepY = curY + groupGap * 0.45;
+      g.lineStyle(1, COLOR.borderSoft, 0.85);
+      g.beginPath();
+      g.moveTo(x + 14, sepY);
+      g.lineTo(x + w - 14, sepY);
+      g.strokePath();
+      curY += groupGap;
+    }
+    for (const k of group) {
+      const ry = curY;
+      if (rowIdx % 2 === 0) {
+        g.fillStyle(0xffffff, 0.024);
+        g.fillRect(x + 6, ry - 0.5, w - 12, rowH - 1);
+      }
+      const dotY = ry + rowH * 0.46;
+      g.fillStyle(COLOR.ink, 1);
+      g.fillRect(x + 14, dotY - 4, 8, 8);
+      g.fillStyle(STAT_DOT[k], 1);
+      g.fillRect(x + 15.5, dotY - 2.5, 5, 5);
+
+      const v = stats[k];
+      const base = BASE_STATS[k];
+      const changed = Math.abs(v - base) > 1e-6;
+      const color = v > base + 1e-6 ? COLOR.good : v < base - 1e-6 ? COLOR.bad : '#717786';
+
+      const flash = scene.add.rectangle(x + w / 2, ry + rowH * 0.46, w - 12, rowH, 0x5de862, 0).setOrigin(0.5);
+      const nameText = label(scene, x + 27, ry + 0.5, STAT_META[k].label, 14.5, changed ? COLOR.text : '#8c909f', changed);
+      const valText = label(scene, x + w - 14, ry + 0.5, formatStat(k, v), 14.5, color, changed).setOrigin(1, 0);
+      const previewText = label(scene, x + w - 18, ry + 0.5, '', 13, COLOR.good, true).setOrigin(1, 0).setVisible(false);
+
+      c.add([flash, nameText, previewText, valText]);
+      rows.set(k, { nameText, valText, previewText, flash, baseVal: v });
+
+      curY += rowH;
+      rowIdx++;
+    }
   });
 
   c.addAt(g, 2);
-  return c;
+
+  const preview = (deltas?: Partial<Stats>) => {
+    for (const [k, row] of rows) {
+      const d = deltas?.[k] ?? 0;
+      if (Math.abs(d) > 1e-6) {
+        const col = d > 0 ? COLOR.good : COLOR.bad;
+        row.previewText
+          .setText(`(${formatStatDelta(k, d)})`)
+          .setColor(col)
+          .setPosition(row.valText.x - row.valText.displayWidth - 5, row.valText.y + 1)
+          .setVisible(true);
+        row.flash.setFillStyle(d > 0 ? 0x5de862 : 0xff5d57, 0.14);
+        row.nameText.setColor('#ffffff');
+      } else {
+        row.previewText.setVisible(false);
+        row.flash.setAlpha(0);
+        const changed = Math.abs(row.baseVal - BASE_STATS[k]) > 1e-6;
+        row.nameText.setColor(changed ? COLOR.text : '#8c909f');
+      }
+    }
+  };
+
+  const pulse = (keys: (keyof Stats)[]) => {
+    for (const k of keys) {
+      const row = rows.get(k);
+      if (!row) continue;
+      row.flash.setFillStyle(stats[k] >= BASE_STATS[k] ? 0x5de862 : 0xff5d57, 0.36);
+      scene.tweens.add({ targets: row.flash, alpha: 0, duration: 550, ease: 'Quad.Out' });
+      row.valText.setScale(1.24);
+      scene.tweens.add({ targets: row.valText, scale: 1, duration: 360, ease: 'Back.Out' });
+    }
+  };
+
+  return { container: c, preview, pulse };
 }
 
-/** 土豆兄弟风格方正凹槽（黑墨重描边 + 品质微底色 + 硬投影 + 可选武器品阶菱点） */
+/** 右侧土豆兄弟风格属性面板（兼容旧调用） */
+export function statsPanel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, stats: Stats): Phaser.GameObjects.Container {
+  return createStatsPanel(scene, x, y, w, h, stats).container;
+}
+
+/** 土豆兄弟风格切角凹槽（黑墨重描边 + 品质微底色 + 倒角高光 + 硬投影 + 可选武器品阶菱点） */
 export function slotBox(
   scene: Phaser.Scene,
   cx: number,
@@ -493,40 +702,73 @@ export function slotBox(
   const g = scene.add.graphics();
   const x = cx - size / 2;
   const y = cy - size / 2;
-  const r = Math.min(7, Math.round(size * 0.1));
+  const cBig = Math.min(8, Math.max(4, Math.round(size * 0.13)));
+  const cSmall = Math.max(2, Math.round(cBig * 0.45));
+  const pts = chamferPoints(x, y, size, size, cBig, cSmall, cBig, cSmall);
 
   // 硬投影
-  g.fillStyle(COLOR.ink, 0.9);
-  g.fillRoundedRect(x + 3, y + 4, size, size, r);
+  fillPoly(g, chamferPoints(x + 3, y + 4, size, size, cBig, cSmall, cBig, cSmall), COLOR.ink, 0.9);
 
   if (glow || (tier !== undefined && tier >= 2)) {
-    g.lineStyle(3, border, glow ? 0.58 : 0.36);
-    g.strokeRoundedRect(x - 3, y - 3, size + 6, size + 6, r + 2);
+    strokePoly(g, chamferPoints(x - 3, y - 3, size + 6, size + 6, cBig + 2, cSmall + 1, cBig + 2, cSmall + 1), 3, border, glow ? 0.62 : 0.36);
   }
   // 暗炭底 + 随品阶递增的品质微染底
   const fillAlpha = tier !== undefined ? 0.14 + tier * 0.06 : 0.14;
-  g.fillStyle(COLOR.panelDeep, 1);
-  g.fillRoundedRect(x, y, size, size, r);
-  g.fillStyle(border, fillAlpha);
-  g.fillRoundedRect(x + 2, y + 2, size - 4, size - 4, Math.max(2, r - 2));
+  fillPoly(g, pts, COLOR.panelDeep, 1);
+  fillPoly(g, insetPoints(pts, 2), border, fillAlpha);
+
+  // 内倒角亮棱线与底槽暗线
+  g.lineStyle(1.3, 0xffffff, 0.16);
+  g.beginPath();
+  g.moveTo(pts[6].x + 2, pts[6].y - 2);
+  g.lineTo(pts[7].x + 2, pts[7].y + 1);
+  g.lineTo(pts[0].x + 1, pts[0].y + 2);
+  g.lineTo(pts[1].x - 1, pts[1].y + 2);
+  g.strokePath();
+
+  g.lineStyle(1.8, 0x000000, 0.38);
+  g.beginPath();
+  g.moveTo(pts[2].x - 2, pts[2].y + 2);
+  g.lineTo(pts[3].x - 2, pts[3].y - 1);
+  g.lineTo(pts[4].x - 1, pts[4].y - 2);
+  g.lineTo(pts[5].x + 1, pts[5].y - 2);
+  g.strokePath();
 
   // 内品质描边 + 外纯黑墨线
-  g.lineStyle(tier !== undefined && tier >= 2 ? 2.4 : 2, border, 0.95);
-  g.strokeRoundedRect(x + 1.5, y + 1.5, size - 3, size - 3, Math.max(2, r - 1));
-  g.lineStyle(2.8, COLOR.ink, 1);
-  g.strokeRoundedRect(x, y, size, size, r);
+  strokePoly(g, insetPoints(pts, 1.6), tier !== undefined && tier >= 2 ? 2.4 : 2, border, 0.95);
+  strokePoly(g, pts, 2.8, COLOR.ink, 1);
 
-  // 武器品阶指示点（左下角 1~4 颗黑边品质晶块，一眼分辨等级）
+  // 武器品阶指示点（左下角 1~4 颗黑边品质菱晶，一眼分辨等级）
   if (tier !== undefined && size >= 44) {
     const count = Math.max(1, Math.min(4, tier + 1));
-    const step = 7;
-    const py = y + size - 7;
+    const step = 8;
+    const py = y + size - 8;
     for (let k = 0; k < count; k++) {
-      const px = x + 8 + k * step;
-      g.fillStyle(COLOR.ink, 1);
-      g.fillRect(px - 3, py - 3, 6, 6);
-      g.fillStyle(border, 1);
-      g.fillRect(px - 2, py - 2, 4, 4);
+      const px = x + 9 + k * step;
+      const rOut = 3.8;
+      const rIn = 2.4;
+      fillPoly(
+        g,
+        [
+          { x: px, y: py - rOut },
+          { x: px + rOut, y: py },
+          { x: px, y: py + rOut },
+          { x: px - rOut, y: py },
+        ],
+        COLOR.ink,
+        1,
+      );
+      fillPoly(
+        g,
+        [
+          { x: px, y: py - rIn },
+          { x: px + rIn, y: py },
+          { x: px, y: py + rIn },
+          { x: px - rIn, y: py },
+        ],
+        border,
+        1,
+      );
     }
   }
   return g;

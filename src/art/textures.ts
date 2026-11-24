@@ -368,6 +368,47 @@ function nectar(scene: Phaser.Scene): void {
     },
     SPRITE_RES,
   );
+  // 琥珀狂热露珠（拾取后 5 秒攻速+移速狂热）26×26 @ 2x
+  bake2D(
+    scene,
+    'frenzy-dew',
+    26,
+    26,
+    (ctx) => {
+      cSoftEllipse(ctx, 13, 13, 12.5, 12.5, 'rgba(255,180,32,0.58)', 'rgba(255,120,10,0)');
+      const grad = ctx.createRadialGradient(11, 10, 1, 13, 13, 9);
+      grad.addColorStop(0, '#fffef0');
+      grad.addColorStop(0.4, '#ffd43b');
+      grad.addColorStop(0.85, '#ff7a18');
+      grad.addColorStop(1, '#a62a00');
+      ctx.beginPath();
+      ctx.moveTo(13, 3.2);
+      ctx.lineTo(20.5, 13);
+      ctx.lineTo(13, 22.8);
+      ctx.lineTo(5.5, 13);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = '#180a04';
+      ctx.lineWidth = 2.0;
+      ctx.stroke();
+      cPoly(ctx, [13, 7.2, 14.8, 11.4, 18.6, 13, 14.8, 14.6, 13, 18.8, 11.2, 14.6, 7.4, 13, 11.2, 11.4], '#fffbe0');
+    },
+    SPRITE_RES,
+  );
+  // 皇家胡蜂赤红毒针弹（高辨识度黑边红芯）24×12 @ 2x
+  bake2D(
+    scene,
+    'enemy-stinger',
+    24,
+    12,
+    (ctx) => {
+      cSoftEllipse(ctx, 13, 6, 10.5, 5.2, 'rgba(255,48,72,0.45)', 'rgba(255,20,40,0)');
+      cPoly(ctx, [2, 6, 8, 2.2, 22.5, 6, 8, 9.8], '#ff3348', '#0a0406', 2.0);
+      cPoly(ctx, [6, 6, 10, 4.2, 19.5, 6, 10, 7.8], '#ffe27a');
+    },
+    SPRITE_RES,
+  );
 }
 
 /** 刷怪预警：隆起的裂土堆 + 脉冲感红色预警圈。44×30 @ 2x。 */
@@ -463,6 +504,38 @@ function dot(scene: Phaser.Scene): void {
     ctx.lineTo(24, 5);
     ctx.lineTo(14, 8.5);
     ctx.closePath();
+    ctx.fill();
+  });
+  // 爆炸地面焦黑弹坑印记（漫画焦痕 + 放射裂纹）
+  bake2D(scene, 'fx-crater', 64, 64, (ctx) => {
+    const cx = 32;
+    const cy = 32;
+    const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, 30);
+    g.addColorStop(0, 'rgba(18,12,10,0.88)');
+    g.addColorStop(0.45, 'rgba(32,20,14,0.68)');
+    g.addColorStop(0.75, 'rgba(42,28,18,0.28)');
+    g.addColorStop(1, 'rgba(20,14,10,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+    ctx.fill();
+    // 焦黑中心凹坑与放射状漫画焦纹
+    ctx.strokeStyle = 'rgba(14,9,7,0.78)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + (i % 2) * 0.16;
+      const r0 = 7 + (i % 3) * 2;
+      const r1 = 19 + (i % 2) * 7;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a + 0.08) * ((r0 + r1) * 0.55), cy + Math.sin(a + 0.08) * ((r0 + r1) * 0.55));
+      ctx.lineTo(cx + Math.cos(a - 0.05) * r1, cy + Math.sin(a - 0.05) * r1);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(12,8,6,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 10, 8.5, 0.2, 0, Math.PI * 2);
     ctx.fill();
   });
 }

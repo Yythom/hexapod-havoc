@@ -4,12 +4,14 @@ import '@fontsource/zcool-kuaile/latin.css';
 import '@fontsource/noto-sans-sc/500.css';
 import '@fontsource/noto-sans-sc/700.css';
 import Phaser from 'phaser';
+import { bgm } from './audio/bgm';
 import { sfx } from './audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from './config';
 import { touchMove } from './core/input';
 import { getSettings } from './core/settings';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
+import { CodexScene } from './scenes/CodexScene';
 import { GameScene } from './scenes/GameScene';
 import { IntermissionScene } from './scenes/IntermissionScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -25,7 +27,9 @@ factory.text = function (this: Phaser.GameObjects.GameObjectFactory, x, y, text,
   return addText.call(this, x, y, text, { resolution: RENDER_SCALE, ...style });
 };
 
-sfx.init(getSettings().volume);
+const initSettings = getSettings();
+sfx.init(initSettings.volume);
+bgm.init(initSettings.bgm, initSettings.volume);
 
 async function preloadFonts(): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts?.load) return;
@@ -119,9 +123,9 @@ void preloadFonts().then(() => {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    input: { activePointers: 3 },
+    input: { activePointers: 3, gamepad: true },
     render: { antialias: true },
-    scene: [BootScene, MenuScene, CharacterSelectScene, GameScene, UIScene, IntermissionScene, ResultScene],
+    scene: [BootScene, MenuScene, CharacterSelectScene, CodexScene, GameScene, UIScene, IntermissionScene, ResultScene],
   });
   installViewportSync(game);
 

@@ -25,6 +25,8 @@ const MAX_DIST = 650;
 const GROUP_SPREAD = 40;
 
 export class SpawnSystem {
+  /** 随机波次小事件触发回调（供 HUD 播报横幅） */
+  onEvent: ((title: string, color: string) => void) | null = null;
   private wave: WaveDef | null = null;
   private waveNo = 1;
   private timers: number[] = [];
@@ -33,7 +35,12 @@ export class SpawnSystem {
   /** 本波还没刷出的精英/Boss */
   private specials: { id: string; at: number }[] = [];
   private treeTimer = 4;
+  private shroomTimer = 11;
   private lootbugAt = Infinity;
+  /** 随机波次事件 */
+  private eventAt = Infinity;
+  private eventKind: 'swarm' | 'treasure' | 'grove' | null = null;
+  private swarmRushLeft = 0;
   private readonly pending: Pending[] = [];
   private readonly moundPool: Phaser.GameObjects.Image[] = [];
 
@@ -43,35 +50,74 @@ export class SpawnSystem {
     private readonly fx: Effects,
   ) {}
 
-  startWave(def: WaveDef, waveNo: number, difficulty: DifficultyDef, spawnRatePct = 0): void {
+  startWave(def: WaveDef, waveNo: number, difficulty: DifficultyDef, spawnRatePct = 0, alwaysLootbug = false): void {
     this.clear();
     this.wave = def;
     this.waveNo = waveNo;
     this.intervalMult = difficulty.spawnInterval / Math.max(0.5, 1 + spawnRatePct);
     this.timers = def.rules.map(() => 0);
-    this.treeTimer = 3.5;
-    this.lootbugAt = waveNo >= 2 && !def.boss ? Phaser.Math.FloatBetween(8, 18) : Infinity;
+    this.treeTimer = 6;
+    this.shroomTimer = waveNo >= 3 ? Phaser.Math.FloatBetween(12, 18) : Infinity;
+    const guaranteedLoot = waveNo === 5 || waveNo === 11 || waveNo === 17 || (alwaysLootbug && waveNo >= 2);
+    this.lootbugAt = (waveNo >= 3 || (alwaysLootbug && waveNo >= 2)) && !def.boss && (guaranteedLoot || Math.random() < 0.35) ? Phaser.Math.FloatBetween(10, 22) : Infinity;
+    this.swarmRushLeft = 0;
+    // 第 4 波起非 Boss / 非固定双精英波约 30% 概率触发中段小事件，增加节奏变化但不过度通胀
+    if (waveNo >= 4 && !def.boss && !def.elites && def.duration && Math.random() < 0.3) {
+      this.eventAt = def.duration * Phaser.Math.FloatBetween(0.38, 0.52);
+      const kinds: ('swarm' | 'treasure' | 'grove')[] = ['swarm', 'treasure', 'grove'];
+      this.eventKind = Phaser.Utils.Array.GetRandom(kinds);
+    } else {
+      this.eventAt = Infinity;
+      this.eventKind = null;
+    }
     this.specials = [];
-    if (def.boss) this.specials.push({ id: def.boss, at: 1 });
+    if (def.boss) {
+      const bossId = def.boss === 'boss_pool' ? (Math.random() < 0.5 ? 'mantis' : 'goliath_boss') : def.boss;
+      this.specials.push({ id: bossId, at: 1 });
+    }
     for (const e of def.elites ?? []) for (let k = 0; k < e.count; k++) this.specials.push({ id: e.enemy, at: e.at + k * 0.8 });
-    // 小雨及以上：第 5 波起，每隔 3 波混入一只精英（本来就有精英的波次和 Boss 波除外）
-    if (difficulty.extraElites && waveNo >= 5 && (waveNo - 5) % 3 === 0 && !def.elites && !def.boss) {
-      this.specials.push({ id: 'soldier', at: 6 });
+    // 小雨及以上：第 7 波起，每隔 3 波混入一只精英（兵蚁 / 皇家胡蜂轮换）
+    if (difficulty.extraElites && waveNo >= 7 && (waveNo - 7) % 3 === 0 && !def.elites && !def.boss) {
+      this.specials.push({ id: waveNo % 2 === 0 ? 'hornet_elite' : 'soldier', at: 6 });
     }
   }
 
   update(dt: number, elapsed: number, px: number, py: number): void {
     const w = this.wave;
     if (w) {
+      if (this.swarmRushLeft > 0) this.swarmRushLeft = Math.max(0, this.swarmRushLeft - dt);
+      const rushMult = this.swarmRushLeft > 0 ? 1.55 : 1;
       const stopAt = w.duration === null ? Infinity : w.duration - 1.5;
       w.rules.forEach((rule, i) => {
         if (elapsed < (rule.from ?? 0.5) || elapsed > (rule.until ?? stopAt)) return;
-        this.timers[i] -= dt;
+        this.timers[i] -= dt * rushMult;
         if (this.timers[i] <= 0) {
           this.timers[i] += rule.every * this.intervalMult;
           this.spawnGroup(rule, px, py);
         }
       });
+      // 随机波次中段小事件
+      if (elapsed >= this.eventAt && this.eventKind) {
+        const kind = this.eventKind;
+        this.eventAt = Infinity;
+        this.eventKind = null;
+        if (kind === 'swarm') {
+          this.swarmRushLeft = 6.5;
+          this.onEvent?.('⚡ 虫潮狂涌！', '#ff7b47');
+        } else if (kind === 'treasure') {
+          this.onEvent?.('★ 额外宝藏虫现身！', '#ffd44c');
+          const [lx, ly] = this.pickCenter(px, py, 190, 340);
+          const lb = this.enemies.spawn(ENEMIES.lootbug, lx, ly, this.waveNo);
+          this.fx.ring(lb.x, lb.y, 44, 0xffd038);
+        } else {
+          this.onEvent?.('✿ 蜜果丰收！', '#78ec74');
+          for (let k = 0; k < 2; k++) {
+            const [tx, ty] = this.pickCenter(px, py, 130, 320);
+            this.enemies.spawn(ENEMIES.tree, tx, ty, this.waveNo);
+            this.fx.ring(tx, ty, 34, 0x62c048);
+          }
+        }
+      }
       for (let i = this.specials.length - 1; i >= 0; i--) {
         if (elapsed < this.specials[i].at) continue;
         const def = ENEMIES[this.specials[i].id];
@@ -81,16 +127,28 @@ export class SpawnSystem {
         const mound = this.acquireMound().setPosition(x, y).setScale((def.boss ? 1.5 : 1) / SPRITE_RES);
         this.pending.push({ def, x, y, t, total: t, mound });
       }
-      // 蜜树：每隔几秒在场内长一棵（最多 3 棵）
+      // 蜜树：每隔 13 秒在场内长一棵（最多 3 棵）
       this.treeTimer -= dt;
       if (this.treeTimer <= 0) {
-        this.treeTimer = 7.5;
+        this.treeTimer = 13;
         let trees = 0;
         for (const e of this.enemies.active) if (e.def.id === 'tree') trees++;
         if (trees < 3 && this.enemies.count < MAX_ENEMIES) {
           const [tx, ty] = this.pickCenter(px, py, 140, 360);
           this.enemies.spawn(ENEMIES.tree, tx, ty, this.waveNo);
           this.fx.burst(tx, ty, 0x62c048, 6, 90, 0.8);
+        }
+      }
+      // 爆裂毒菇：第 3 波起偶尔长出 1 颗可打爆的战术爆炸菇（场上最多 1 颗）
+      this.shroomTimer -= dt;
+      if (this.shroomTimer <= 0) {
+        this.shroomTimer = 24;
+        let shrooms = 0;
+        for (const e of this.enemies.active) if (e.def.id === 'boomshroom') shrooms++;
+        if (shrooms < 1 && this.enemies.count < MAX_ENEMIES) {
+          const [sx, sy] = this.pickCenter(px, py, 150, 340);
+          this.enemies.spawn(ENEMIES.boomshroom, sx, sy, this.waveNo);
+          this.fx.ring(sx, sy, 32, 0xff6288);
         }
       }
       // 宝藏虫：第 2 波起每波出没一次

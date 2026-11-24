@@ -116,27 +116,27 @@ function buildShapePoints(x: number, y: number, w: number, h: number, shape: But
   return chamferPoints(x, y, w, h, c, c, c, c);
 }
 
-function tracePoly(g: Phaser.GameObjects.Graphics, pts: Pt[]): void {
+export function tracePoly(g: Phaser.GameObjects.Graphics, pts: Pt[]): void {
   g.beginPath();
   g.moveTo(pts[0].x, pts[0].y);
   for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
   g.closePath();
 }
 
-function fillPoly(g: Phaser.GameObjects.Graphics, pts: Pt[], color: number, alpha = 1): void {
+export function fillPoly(g: Phaser.GameObjects.Graphics, pts: Pt[], color: number, alpha = 1): void {
   g.fillStyle(color, alpha);
   tracePoly(g, pts);
   g.fillPath();
 }
 
-function strokePoly(g: Phaser.GameObjects.Graphics, pts: Pt[], width: number, color: number, alpha = 1): void {
+export function strokePoly(g: Phaser.GameObjects.Graphics, pts: Pt[], width: number, color: number, alpha = 1): void {
   g.lineStyle(width, color, alpha);
   tracePoly(g, pts);
   g.strokePath();
 }
 
 /** 缩小一圈用于内描边（向中心收 inset 像素） */
-function insetPoints(pts: Pt[], inset: number): Pt[] {
+export function insetPoints(pts: Pt[], inset: number): Pt[] {
   let cx = 0;
   let cy = 0;
   for (const p of pts) {

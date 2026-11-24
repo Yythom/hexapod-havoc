@@ -234,6 +234,42 @@ export function generateCreatures(scene: Phaser.Scene): void {
     SPRITE_RES,
   );
 
+  // 皇家胡蜂（远程弹幕精英）64×52
+  bake2D(
+    scene,
+    'hornet_elite',
+    64,
+    52,
+    (ctx) => {
+      cContactShadow(ctx, 31, 29, 25, 16, 0.42);
+      // 双层半透明利刃蜂翼
+      cEllipse(ctx, 29, 13, 14, 6.2, 'rgba(220,244,255,0.58)', OUT, 2.0, -0.38);
+      cEllipse(ctx, 29, 39, 14, 6.2, 'rgba(220,244,255,0.58)', OUT, 2.0, 0.38);
+      // 发光毒针尾刺
+      cPoly(ctx, [11, 23, 2, 26, 11, 29], '#ff5844', OUT, 2.2);
+      // 金红条纹巨腹
+      cCelEllipse(ctx, 20, 26, 13.5, 9.8, '#f0a828', '#8a4408', '#ffe478', OUT, 3.0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(20, 26, 12.5, 8.8, 0, 0, Math.PI * 2);
+      ctx.clip();
+      for (const x of [13, 19, 25]) cEllipse(ctx, x, 26, 2.1, 9.5, '#2b1014');
+      ctx.restore();
+      cEllipse(ctx, 20, 26, 13.5, 9.8, undefined, OUT, 3.0);
+      // 重甲赤红胸节
+      cCelEllipse(ctx, 36, 26, 8.4, 7.6, '#c42e28', '#5e1014', '#f87868', OUT, 2.8);
+      // 皇家头冠与复眼
+      cCelCircle(ctx, 47, 26, 7.6, '#e89e24', '#86420a', '#ffe272', OUT, 2.8);
+      cPoly(ctx, [43, 20, 45, 13.5, 48, 17.5, 51, 13, 52.5, 20], '#ffd84c', OUT, 1.8);
+      cComicEye(ctx, 50.5, 22.4, 2.7, '#ff3838', '#050507', 0.35, OUT);
+      cComicEye(ctx, 50.5, 29.6, 2.7, '#ff3838', '#050507', -0.35, OUT);
+      // 触角
+      cLine(ctx, [53, 22, 59, 17], OUT, 2.0);
+      cLine(ctx, [53, 30, 59, 35], OUT, 2.0);
+    },
+    SPRITE_RES,
+  );
+
   // 螳螂女王（Boss）104×88
   bake2D(
     scene,
@@ -338,6 +374,78 @@ export function generateCreatures(scene: Phaser.Scene): void {
       cCelCircle(ctx, 27, 17, 7.2, '#f0a824', '#985608', '#ffe478', OUT, 2.4);
       cComicEye(ctx, 30, 13.5, 2.5, '#ffffff', '#050507', 0.2, OUT);
       cComicEye(ctx, 30, 20.5, 2.5, '#ffffff', '#050507', -0.2, OUT);
+    },
+    SPRITE_RES,
+  );
+
+  // 爆裂毒菇（可打爆的场景战术机关，爆开大范围清怪 + 掉琥珀露珠）44×44
+  bake2D(
+    scene,
+    'boomshroom',
+    44,
+    44,
+    (ctx) => {
+      cContactShadow(ctx, 22, 33, 16, 9, 0.44);
+      // 粗壮菌柄
+      cCelEllipse(ctx, 22, 28, 7.5, 9.5, '#ebd8b8', '#987c5a', '#fff6e4', OUT, 2.5);
+      // 膨胀赤紫发光伞盖
+      cCelEllipse(ctx, 22, 18, 15.5, 11.5, '#b83268', '#5c1230', '#ff709a', OUT, 2.8);
+      // 危险橙黄爆裂斑点
+      for (const [sx, sy, sr] of [
+        [14, 17, 3.2],
+        [23, 12.5, 3.6],
+        [30.5, 18, 2.9],
+        [20, 21.5, 2.4],
+      ]) {
+        cCircle(ctx, sx, sy, sr, '#ffaa2b', OUT, 1.4);
+        cCircle(ctx, sx - 0.8, sy - 0.8, sr * 0.35, '#fff6c2');
+      }
+    },
+    SPRITE_RES,
+  );
+
+  // 泰坦兜虫（第二只最终 Boss / 无尽里程碑 Boss：重铠黑金独角巨兽）108×92
+  bake2D(
+    scene,
+    'goliath_boss',
+    108,
+    92,
+    (ctx) => {
+      const DARK = '#050507';
+      cContactShadow(ctx, 48, 48, 44, 28, 0.48);
+      // 粗壮黑金重甲六足
+      legs(ctx, '#4a301c', 3.8, 46, [
+        [62, 54, 70, 72, 82, 82],
+        [44, 56, 46, 76, 38, 86],
+        [26, 54, 18, 72, 8, 80],
+      ]);
+      // 巨型黑金厚重鞘翅（双瓣+熔金裂纹）
+      cCelEllipse(ctx, 34, 46, 29, 21, '#3b2b28', '#181010', '#7e5c4a', DARK, 3.8);
+      cCelEllipse(ctx, 32, 36, 23, 8.8, '#543c32', '#261816', '#a87d5a', DARK, 2.4);
+      cCelEllipse(ctx, 32, 56, 23, 8.8, '#46322a', '#201412', '#8e684c', DARK, 2.4);
+      cLine(ctx, [7, 46, 59, 46], DARK, 3.2);
+      // 鞘翅上的熔岩琥珀战纹
+      for (const s of [1, -1]) {
+        const y = (v: number) => 46 + (v - 46) * s;
+        cPoly(ctx, [18, y(35), 29, y(32), 26, y(39), 15, y(40)], '#ffae2b', DARK, 1.5);
+        cPoly(ctx, [36, y(33), 47, y(35), 42, y(41), 33, y(39)], '#ffd858', DARK, 1.4);
+      }
+      // 重装甲前胸背板（带皇家金冠尖刺）
+      cCelEllipse(ctx, 64, 46, 15.5, 16.5, '#6a4020', '#2b160a', '#d4964c', DARK, 3.6);
+      cPoly(ctx, [56, 35, 62, 29, 68, 35, 72, 46, 68, 57, 62, 63, 56, 57], '#ffd04c', DARK, 2.0);
+      // 头部 + 霸气巨型分叉冲锋角
+      cCelCircle(ctx, 79, 46, 10.5, '#2b1812', '#100806', '#6e4430', DARK, 3.2);
+      // 主巨角（向前弯曲带金色尖刃）
+      cPoly(ctx, [84, 42, 102, 34, 106, 46, 102, 58, 84, 50, 91, 46], '#f2b838', DARK, 3.0);
+      cPoly(ctx, [86, 44, 100, 39, 96, 46, 100, 53, 86, 48], '#fff0a4', DARK, 1.4);
+      // 两侧副角
+      for (const s of [1, -1]) {
+        const y = (v: number) => 46 + (v - 46) * s;
+        cPoly(ctx, [74, y(36), 88, y(24), 84, y(35), 76, y(40)], '#d88c28', DARK, 2.4);
+      }
+      // 炽热红金怒眼
+      cComicEye(ctx, 81, 38.5, 4.4, '#ff5436', '#fff29c', 0.3, DARK);
+      cComicEye(ctx, 81, 53.5, 4.4, '#ff5436', '#fff29c', -0.3, DARK);
     },
     SPRITE_RES,
   );

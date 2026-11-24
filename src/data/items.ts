@@ -302,7 +302,7 @@ const LIST: ItemDef[] = [
   item('whirlleaf', '旋风叶', 2, 92, {}, { mods: { bounces: 1 } }),
   item('powdergland', '爆裂腺体', 2, 102, {}, { mods: { corpseExplode: 1 } }),
   item('splitprism', '复眼棱镜', 2, 108, {}, { mods: { splitShots: 1 }, unique: true }),
-  item('glasswing', '玻璃翼膜', 2, 96, { damagePct: 0.35, attackSpeedPct: 0.2 }, { mods: { maxHpPct: -0.25 } }),
+  item('glasswing', '玻璃翼膜', 2, 96, { damagePct: 0.35, attackSpeedPct: 0.2 }, { mods: { maxHpPct: -0.25 }, unique: true }),
   item('ironmantle', '重甲壁垒', 2, 98, { armor: 4, speedPct: -0.08 }, { mods: { ramDamage: 1 } }),
   item('turretprism', '复合炮心', 2, 96, { engineering: 5 }, { mods: { turretPrism: 1 }, unique: true }),
   item('vampfang', '吸血毒牙', 2, 100, { lifesteal: 0.08, critChance: 0.08, regen: -3 }, { mods: { vampBite: 1 }, unique: true }),
@@ -313,7 +313,7 @@ const LIST: ItemDef[] = [
   item('seventhleg', '第七条腿', 3, 195, { speedPct: -0.1 }, { mods: { weaponSlots: 1 }, unique: true }),
   item('lonewolf', '独行甲刃', 3, 185, {}, { mods: { loneWolf: 1 }, unique: true }),
   item('ricochetwing', '跳弹翅鞘', 3, 190, {}, { mods: { gunRicochet: 1 } }),
-  item('giantscarab', '巨虫血清', 3, 185, { maxHp: 25, melee: 8, ranged: 8, toxin: 8, dodge: -0.1 }),
+  item('giantscarab', '巨虫血清', 3, 185, { maxHp: 25, melee: 8, ranged: 8, toxin: 8, dodge: -0.1 }, { unique: true }),
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(LIST.map((d) => [d.id, d]));

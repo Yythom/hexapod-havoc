@@ -50,6 +50,8 @@ export interface WeaponContext {
   workers: number;
   workerTier: number;
   workerHp: number;
+  /** 手瞄 / 鼠标集火目标世界坐标（未启用时为 null） */
+  aimPoint?: { x: number; y: number } | null;
 }
 
 interface Slot {
@@ -90,7 +92,7 @@ interface Device {
 
 /** 毒每层每秒伤害：1 + 毒素 × 0.2，再吃伤害% 和整体武器伤害修正 */
 export function poisonPerStack(stats: Stats, mods?: Mods): number {
-  return (1 + Math.max(0, stats.toxin) * 0.2) * (1 + stats.damagePct) * Math.max(0, 1 + (mods?.weaponDamagePct ?? 0));
+  return (1 + Math.max(0, stats.toxin) * 0.2) * Math.max(0.2, 1 + stats.damagePct) * Math.max(0, 1 + (mods?.weaponDamagePct ?? 0));
 }
 
 /**
@@ -214,39 +216,59 @@ export class WeaponSystem {
       }
 
       const range = this.rangeOf(s.def, stats, s.tier);
-      const target = this.enemies.nearest(tip.x, tip.y, range);
-      if (target) s.aim = Math.atan2(target.y - tip.y, target.x - tip.x);
-      else this.idleAim(s, i, dt);
+      const aimPt = ctx.aimPoint;
+      const target = aimPt ? this.nearestToFocus(tip.x, tip.y, range, aimPt.x, aimPt.y) : this.enemies.nearest(tip.x, tip.y, range);
+      if (aimPt) {
+        s.aim = Math.atan2(aimPt.y - tip.y, aimPt.x - tip.x);
+      } else if (target) {
+        s.aim = Math.atan2(target.y - tip.y, target.x - tip.x);
+      } else {
+        this.idleAim(s, i, dt);
+      }
 
       let kick = 0;
-      if (target && s.cd <= 0) {
+      let recoilMag = 6;
+      const canManualFire = !!aimPt && !summon && !s.def.beam && !s.def.chain && (!!target || this.enemies.count > 0);
+      if ((target || canManualFire) && s.cd <= 0) {
         const interval = this.intervalOf(s);
         s.cd = interval;
         if (summon?.type === 'web') {
-          this.placeWeb(s, target);
+          if (target) this.placeWeb(s, target);
         } else if (s.def.melee) {
-          const dist = Math.hypot(target.x - tip.x, target.y - tip.y);
+          const dist = target ? Math.hypot(target.x - tip.x, target.y - tip.y) : range * 0.85;
           this.startSwing(s, dist, range, interval);
           this.emitMeleeFx(s, tip.x, tip.y);
           this.onAttack?.();
           sfx.play('melee');
         } else if (s.def.beam) {
-          this.fireBeam(s, tip.x, tip.y, target);
-          this.onAttack?.();
+          if (target) {
+            this.fireBeam(s, tip.x, tip.y, target);
+            this.onAttack?.();
+            kick = 0.09;
+            recoilMag = 3.5;
+          }
         } else if (s.def.chain) {
-          this.fireChain(s, tip.x, tip.y, target);
-          this.onAttack?.();
-          kick = 0.1;
+          if (target) {
+            this.fireChain(s, tip.x, tip.y, target);
+            this.onAttack?.();
+            kick = 0.12;
+            recoilMag = 4.8;
+          }
         } else {
-          this.fire(s, tip.x, tip.y, range, target);
-          this.emitShotFx(s, tip.x, tip.y);
-          this.onAttack?.();
-          if (s.def.special?.turretResetOnAttack) this.resetTurrets();
-          sfx.play(shotSound(s.def));
-          kick = 0.1;
+          const lobTarget = target ?? (aimPt ? ({ x: aimPt.x, y: aimPt.y } as Enemy) : null);
+          if (lobTarget) {
+            this.fire(s, tip.x, tip.y, range, lobTarget);
+            this.emitShotFx(s, tip.x, tip.y);
+            this.onAttack?.();
+            if (s.def.special?.turretResetOnAttack) this.resetTurrets();
+            sfx.play(shotSound(s.def));
+            const heavy = (s.def.projectile?.count ?? 1) >= 4 || (s.def.projectile?.explode ?? 0) > 0 || tierOf(s.def, s.tier).damage >= 16;
+            kick = heavy ? 0.16 : 0.11;
+            recoilMag = heavy ? 9.2 : 5.6;
+          }
         }
       }
-      view.setWeaponAim(i, s.aim, kick);
+      view.setWeaponAim(i, s.aim, kick, recoilMag);
     });
 
     // 蚁后的工蚁：和蚜虫同一套逻辑
@@ -284,7 +306,7 @@ export class WeaponSystem {
     let interval = attackInterval(tierOf(s.def, s.tier).cooldown, this.ctx.stats);
     if (s.def.lowHpHaste && this.ctx.hpRatio < 0.5) interval /= 1 + s.def.lowHpHaste;
     const growth = s.def.special?.growthAttackSpeed;
-    if (growth && s.owned) interval /= 1 + growth * (s.owned.kills ?? 0);
+    if (growth && s.owned) interval /= 1 + Math.min(0.6, Math.floor((s.owned.kills ?? 0) / 12) * growth);
     return interval;
   }
 
@@ -356,7 +378,7 @@ export class WeaponSystem {
     let cur: Enemy | null = target;
     for (let k = 0; k <= extra && cur; k++) {
       const { damage, crit } = this.roll(s.def, s.tier, s.owned);
-      this.fx?.beam(x, y, cur.x, cur.y, crit ? 0xffe880 : 0xffb040, s.cd + 0.05);
+      this.fx?.beam(x, y, cur.x, cur.y, crit ? 0xffe880 : 0xffb040, s.cd + 0.05, s.tier);
       const d = Math.hypot(cur.x - x, cur.y - y) || 1;
       this.resolver.hit(cur, k === 0 ? damage : Math.max(1, Math.round(damage * 0.7)), crit, (cur.x - x) / d, (cur.y - y) / d, tierOf(s.def, s.tier).knockback, s.src);
       hit.push(cur);
@@ -399,7 +421,7 @@ export class WeaponSystem {
       fromY = cy;
       cur = this.nearestExcept(cx, cy, spec.range, hit);
     }
-    this.fx?.zap(pts);
+    this.fx?.zap(pts, s.tier);
     sfx.play('zap');
   }
 
@@ -411,6 +433,25 @@ export class WeaponSystem {
       const d = Math.hypot(e.x - x, e.y - y);
       if (d < range + e.radius && d < bd) {
         bd = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  /** 手瞄/鼠标集火：在武器射程内优先找离鼠标准星最近的怪 */
+  private nearestToFocus(tx: number, ty: number, range: number, fx: number, fy: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bd = Infinity;
+    for (const e of this.enemies.active) {
+      if (e.age < SPAWN_POP * 0.5) continue;
+      const reach = range + e.radius;
+      const dx = e.x - tx;
+      const dy = e.y - ty;
+      if (dx * dx + dy * dy > reach * reach) continue;
+      const fd = Math.hypot(e.x - fx, e.y - fy);
+      if (fd < bd) {
+        bd = fd;
         best = e;
       }
     }
@@ -525,8 +566,7 @@ export class WeaponSystem {
 
   private explodeMine(d: Device, r: number): void {
     const { damage, crit } = this.roll(d.def, d.tier, null);
-    this.fx?.ring(d.x, d.y, r, 0xffb050);
-    this.fx?.burst(d.x, d.y, 0xb07a30, 12, 220, 1.1);
+    this.fx?.explosion(d.x, d.y, r, 0xff9840, d.tier);
     sfx.play('explode');
     for (const e of this.enemies.grid.query(d.x, d.y, r + MAX_ENEMY_RADIUS, this.buf).slice()) {
       const dx = e.x - d.x;
@@ -564,29 +604,30 @@ export class WeaponSystem {
     const fx = this.fx;
     if (!fx) return;
     const melee = s.def.melee!;
+    const tier = s.tier;
     const critCol = 0xffdf68;
     const dx = Math.cos(s.aim);
     const dy = Math.sin(s.aim);
     switch (melee.style) {
       case 'sweep': {
         const col = s.crit ? critCol : 0xa0ff58;
-        fx.slash(tx, ty, s.reach * 0.85, s.aim, melee.arc ?? 1, col);
+        fx.slash(tx, ty, s.reach * 0.85, s.aim, melee.arc ?? 1, col, tier);
         break;
       }
       case 'snap': {
         const col = s.crit ? critCol : 0xffc858;
-        fx.chomp(tx, ty, s.aim, s.reach * 0.88, col);
+        fx.chomp(tx, ty, s.aim, s.reach * 0.88, col, tier);
         break;
       }
       case 'bash': {
-        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.95, s.crit ? critCol : 0x72d8ff);
+        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.95, s.crit ? critCol : 0x72d8ff, tier);
         break;
       }
       case 'charge': {
         const col = s.crit ? critCol : 0xffe49a;
         const ex = tx + dx * s.reach;
         const ey = ty + dy * s.reach;
-        fx.sonicThrust(tx, ty, ex, ey, col, melee.hitRadius * 0.72, 2);
+        fx.sonicThrust(tx, ty, ex, ey, col, melee.hitRadius * 0.72, 2, tier);
         break;
       }
       case 'flurry': {
@@ -594,22 +635,22 @@ export class WeaponSystem {
         for (const off of [-0.18, -0.05, 0.06, 0.18]) {
           const a = s.aim + off;
           const r = s.reach * (Math.abs(off) < 0.08 ? 1.02 : 0.84);
-          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 6.5);
+          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 6.5, tier);
         }
-        fx.streaks(tx + dx * s.reach * 0.7, ty + dy * s.reach * 0.7, s.aim, col, 4, 210, 0.75);
+        fx.streaks(tx + dx * s.reach * 0.7, ty + dy * s.reach * 0.7, s.aim, col, 4 + tier, 210, 0.75);
         break;
       }
       case 'pierce': {
         const col = s.crit ? critCol : 0xeb68ff;
         const ex = tx + dx * s.reach;
         const ey = ty + dy * s.reach;
-        fx.thrust(tx, ty, ex, ey, col, melee.hitRadius * 0.65);
-        fx.star(ex, ey, 18, col, s.aim + Math.PI / 4);
-        fx.streaks(ex, ey, s.aim, col, 4, 180, 0.8);
+        fx.thrust(tx, ty, ex, ey, col, melee.hitRadius * 0.65, tier);
+        fx.star(ex, ey, 18 + tier * 2, col, s.aim + Math.PI / 4);
+        fx.streaks(ex, ey, s.aim, col, 4 + tier, 180, 0.8);
         break;
       }
       default: {
-        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, melee.hitRadius * 0.45);
+        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, melee.hitRadius * 0.45, tier);
       }
     }
   }
@@ -617,19 +658,32 @@ export class WeaponSystem {
   private emitShotFx(s: Slot, tx: number, ty: number): void {
     const fx = this.fx;
     if (!fx) return;
+    const tier = s.tier;
     const col = sparkColor(s.def);
-    if (s.def.id === 'laser-gun') {
-      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 26, 5);
-      fx.ring(tx, ty, 14, 0x38f2ff);
-    } else if (s.def.classes.includes('Gun')) {
-      const heavy = (s.def.projectile?.count ?? 1) >= 4 || tierOf(s.def, s.tier).damage >= 16;
-      fx.muzzle(tx, ty, s.aim, col, heavy ? 24 : 15, heavy ? 6 : 3);
+    const proj = s.def.projectile;
+    const isGun = s.def.classes.includes('Gun');
+    const isLaser = s.def.id === 'laser-gun' || proj?.texture === 'laserbolt';
+    const isHeavySmoke = (proj?.count ?? 1) >= 4 || (proj?.explode ?? 0) > 0 || s.def.classes.includes('Explosive') || (isGun && s.def.classes.includes('Heavy'));
+    if (isLaser) {
+      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 26, 5, tier);
+      fx.ring(tx, ty, 14 + tier * 2, 0x38f2ff);
+    } else if (isGun) {
+      const heavy = isHeavySmoke || tierOf(s.def, tier).damage >= 16;
+      fx.muzzle(tx, ty, s.aim, col, heavy ? 24 : 15, heavy ? 6 : 3, tier);
+      // 枪械侧向抛壳（非纯能量/喷火类）
+      if (!proj?.fade) {
+        const ejectSide = Math.cos(s.aim) < 0 ? 1 : -1;
+        fx.shellCasing(tx, ty, s.aim + ejectSide * (Math.PI * 0.56));
+      }
+      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, (proj?.explode ?? 0) > 0 ? 3 : 2);
     } else if (s.def.classes.includes('Elemental') || s.def.onHit?.burn) {
-      fx.muzzle(tx, ty, s.aim, 0xff7824, 20, 4);
+      fx.muzzle(tx, ty, s.aim, 0xff7824, 20, 4, tier);
+      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 2, 0xd8c8b8);
     } else if (s.def.onHit?.freeze) {
-      fx.muzzle(tx, ty, s.aim, 0x7ce8ff, 16, 4);
+      fx.muzzle(tx, ty, s.aim, 0x7ce8ff, 16, 4, tier);
     } else {
-      fx.spark(tx, ty, col, tierOf(s.def, s.tier).damage >= 18 ? 5 : 3);
+      fx.spark(tx, ty, col, (tierOf(s.def, tier).damage >= 18 ? 5 : 3) + (tier >= 2 ? 2 : 0));
+      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 2);
     }
   }
 
@@ -640,56 +694,77 @@ export class WeaponSystem {
     s.swing = Math.max(0, s.swing - dt);
     const t = 1 - s.swing / s.swingTotal;
     const hitR = melee.hitRadius * (1 + 0.14 * s.tier);
+    // 出招前极短（约 0.03s）回拉蓄力再猛刺/猛挥，增强打击重量感（连刺 flurry 保持极速不蓄力）
+    const windup = melee.style === 'flurry' ? 0 : Math.min(0.13, 0.03 / Math.max(0.08, s.swingTotal));
 
     if (melee.style === 'sweep') {
-      // 扇形横扫：伸出去，从一侧扫到另一侧
+      // 扇形横扫：先微反拉蓄力，再高速从一侧扫到另一侧
       const arc = melee.arc ?? 1;
-      const ang = s.aim - arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(t);
-      const ext = s.reach * Math.min(1, t / 0.15, (1 - t) / 0.15) * 0.85;
-      view.setWeaponAim(slot, ang);
-      view.setWeaponExtend(slot, ext / view.scaleX);
-      const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
-      for (let k = 1; k <= steps; k++) {
-        const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
-        for (const f of [0.45, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb);
-      }
-      s.lastAng = ang;
-    } else if (melee.style === 'bash') {
-      // 盾击震荡波：短距猛推并在前方弧面震开敌人
-      const out = t < SWING_OUT ? t / SWING_OUT : 1 - (t - SWING_OUT) / (1 - SWING_OUT);
-      const ext = s.reach * 0.68 * Phaser.Math.Easing.Quadratic.Out(out);
-      view.setWeaponExtend(slot, ext / view.scaleX);
-      view.setWeaponAim(slot, s.aim);
-      if (ext > s.lastExt) {
-        const arc = melee.arc ?? 0.85;
-        for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
-          const a = s.aim + aOff;
-          this.strikeAt(s, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb);
-        }
-      }
-      s.lastExt = Math.max(s.lastExt, ext);
-    } else {
-      const out = t < SWING_OUT ? t / SWING_OUT : 1 - (t - SWING_OUT) / (1 - SWING_OUT);
-      const ext = s.reach * Phaser.Math.Easing.Quadratic.Out(out);
-      // 腿尖在本地坐标系里，刺出距离要换算到本地（菜单里甲虫会放大）
-      view.setWeaponExtend(slot, ext / view.scaleX);
-      view.setWeaponAim(slot, s.aim);
-      if (ext > s.lastExt) {
-        const dx = Math.cos(s.aim);
-        const dy = Math.sin(s.aim);
-        const steps = Math.max(1, Math.ceil((ext - s.lastExt) / SWEEP_STEP));
+      if (t < windup) {
+        const wk = t / windup;
+        view.setWeaponAim(slot, s.aim - arc - 0.18 * wk);
+        view.setWeaponExtend(slot, (-4.5 * wk) / view.scaleX);
+      } else {
+        const st = (t - windup) / (1 - windup);
+        const ang = s.aim - arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(st);
+        const ext = s.reach * Math.min(1, st / 0.14, (1 - st) / 0.15) * 0.85;
+        view.setWeaponAim(slot, ang);
+        view.setWeaponExtend(slot, ext / view.scaleX);
+        const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
         for (let k = 1; k <= steps; k++) {
-          const e = s.lastExt + ((ext - s.lastExt) * k) / steps;
-          this.strikeAt(s, tipX + dx * e, tipY + dy * e, hitR, kb);
+          const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
+          for (const f of [0.45, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
         }
+        s.lastAng = ang;
       }
-      s.lastExt = Math.max(s.lastExt, ext);
+    } else if (melee.style === 'bash') {
+      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人
+      view.setWeaponAim(slot, s.aim);
+      if (t < windup) {
+        const wk = t / windup;
+        view.setWeaponExtend(slot, (-6 * wk) / view.scaleX);
+      } else {
+        const st = (t - windup) / (1 - windup);
+        const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
+        const ext = s.reach * 0.68 * Phaser.Math.Easing.Quadratic.Out(out);
+        view.setWeaponExtend(slot, ext / view.scaleX);
+        if (ext > s.lastExt) {
+          const arc = melee.arc ?? 0.85;
+          for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
+            const a = s.aim + aOff;
+            this.strikeAt(s, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb, a);
+          }
+        }
+        s.lastExt = Math.max(s.lastExt, ext);
+      }
+    } else {
+      view.setWeaponAim(slot, s.aim);
+      if (t < windup) {
+        const wk = t / windup;
+        view.setWeaponExtend(slot, (-6.5 * wk) / view.scaleX);
+      } else {
+        const st = windup > 0 ? (t - windup) / (1 - windup) : t;
+        const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
+        const ext = s.reach * Phaser.Math.Easing.Quadratic.Out(out);
+        // 腿尖在本地坐标系里，刺出距离要换算到本地（菜单里甲虫会放大）
+        view.setWeaponExtend(slot, ext / view.scaleX);
+        if (ext > s.lastExt) {
+          const dx = Math.cos(s.aim);
+          const dy = Math.sin(s.aim);
+          const steps = Math.max(1, Math.ceil((ext - s.lastExt) / SWEEP_STEP));
+          for (let k = 1; k <= steps; k++) {
+            const e = s.lastExt + ((ext - s.lastExt) * k) / steps;
+            this.strikeAt(s, tipX + dx * e, tipY + dy * e, hitR, kb, s.aim);
+          }
+        }
+        s.lastExt = Math.max(s.lastExt, ext);
+      }
     }
     if (s.swing <= 0) view.setWeaponExtend(slot, 0);
   }
 
   /** 武器头扫过 (px,py) 时，命中范围内还没被这一击打过的敌人 */
-  private strikeAt(s: Slot, px: number, py: number, hitR: number, kb: number): void {
+  private strikeAt(s: Slot, px: number, py: number, hitR: number, kb: number, strikeAng: number): void {
     for (const en of this.enemies.grid.query(px, py, hitR + MAX_ENEMY_RADIUS, this.buf)) {
       if (!en.active || s.hits.includes(en)) continue;
       const rr = hitR + en.radius;
@@ -697,6 +772,8 @@ export class WeaponSystem {
       const oy = en.y - py;
       if (ox * ox + oy * oy > rr * rr) continue;
       s.hits.push(en);
+      // 命中实感：在敌人受击点顺着攻击方向劈出短促交叉白斩痕
+      this.fx?.hitSlash(en.x, en.y, strikeAng, s.crit ? 0xffe468 : 0xffffff, s.crit ? 1.28 : 0.92 + s.tier * 0.08);
       const d = Math.hypot(en.x - this.player.x, en.y - this.player.y) || 1;
       this.resolver.hit(en, s.damage, s.crit, (en.x - this.player.x) / d, (en.y - this.player.y) / d, kb, s.src);
     }

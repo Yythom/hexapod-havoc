@@ -64,6 +64,8 @@ interface Projectile extends FireOptions {
   sprite: Phaser.GameObjects.Image;
   dirX: number;
   dirY: number;
+  prevX: number;
+  prevY: number;
   traveled: number;
   hits: Enemy[];
   life: number;
@@ -82,8 +84,10 @@ const CATCH_DIST = 22;
 const MAX_LIFE = 6;
 
 export class ProjectileManager {
+  onExplode: ((r: number) => void) | null = null;
   private readonly list: Projectile[] = [];
-  private readonly pool: Phaser.GameObjects.Image[] = [];
+  /** 整包复用 Projectile 对象与 hits 数组，减少高频弹幕的 GC 抖动 */
+  private readonly pool: Projectile[] = [];
   private readonly buf: Enemy[] = [];
   private readonly aoeBuf: Enemy[] = [];
   private readonly bounceBuf: Enemy[] = [];
@@ -96,14 +100,54 @@ export class ProjectileManager {
   ) {}
 
   fire(o: FireOptions): void {
-    const sprite = this.pool.pop() ?? this.scene.add.image(0, 0, o.texture).setDepth(DEPTH.projectile);
     const scale0 = (o.crit ? 1.3 : 1) / SPRITE_RES;
-    sprite.setTexture(o.texture).setPosition(o.x, o.y).setRotation(o.angle).setScale(scale0).setAlpha(1).setVisible(true);
+    const p = this.pool.pop();
+    if (p) {
+      p.texture = o.texture;
+      p.x = o.x;
+      p.y = o.y;
+      p.angle = o.angle;
+      p.speed = o.speed;
+      p.maxDist = o.maxDist;
+      p.damage = o.damage;
+      p.crit = o.crit;
+      p.radius = o.radius;
+      p.knockback = o.knockback;
+      p.pierce = o.pierce;
+      p.spin = o.spin;
+      p.explode = o.explode;
+      p.poison = o.poison;
+      p.cloud = o.cloud;
+      p.src = o.src ?? null;
+      p.trips = o.trips ?? 0;
+      p.bounce = o.bounce ?? null;
+      p.grow = o.grow ?? 0;
+      p.fade = !!o.fade;
+      p.split = !!o.split;
+      p.dirX = Math.cos(o.angle);
+      p.dirY = Math.sin(o.angle);
+      p.prevX = o.x;
+      p.prevY = o.y;
+      p.traveled = 0;
+      p.hits.length = 0;
+      p.life = 0;
+      p.r0 = o.radius;
+      p.scale0 = scale0;
+      p.back = false;
+      p.tripsLeft = o.trips ?? 0;
+      p.bouncesLeft = o.bounce?.times ?? 0;
+      p.sprite.setTexture(o.texture).setPosition(o.x, o.y).setRotation(o.angle).setScale(scale0).setAlpha(1).setVisible(true);
+      this.list.push(p);
+      return;
+    }
+    const sprite = this.scene.add.image(o.x, o.y, o.texture).setDepth(DEPTH.projectile).setRotation(o.angle).setScale(scale0).setAlpha(1);
     this.list.push({
       ...o,
       sprite,
       dirX: Math.cos(o.angle),
       dirY: Math.sin(o.angle),
+      prevX: o.x,
+      prevY: o.y,
       traveled: 0,
       hits: [],
       life: 0,
@@ -133,6 +177,8 @@ export class ProjectileManager {
           p.dirY = dy / d;
         }
       }
+      p.prevX = p.x;
+      p.prevY = p.y;
       const dist = p.speed * dt;
       const steps = Math.max(1, Math.ceil(dist / MAX_STEP));
       const step = dist / steps;
@@ -157,8 +203,18 @@ export class ProjectileManager {
       if (p.x < 0 || p.y < 0 || p.x > WORLD_WIDTH || p.y > WORLD_HEIGHT) dead = true;
       p.sprite.setPosition(p.x, p.y);
       if (p.spin !== 0) p.sprite.rotation += dt * p.spin;
-      if (p.texture === 'rocketproj' && Math.random() < dt * 36) {
-        this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0xff8a28, 1, 90, 0.85);
+      // 轻量高速弹道线（1~2 帧渐隐拖尾）
+      if (!p.fade && !p.cloud) {
+        const moved2 = (p.x - p.prevX) * (p.x - p.prevX) + (p.y - p.prevY) * (p.y - p.prevY);
+        if (moved2 > 4) {
+          const tier = p.src?.tier ?? 0;
+          const style = tracerStyle(p.texture, p.crit, tier);
+          if (style) this.fx.tracer(p.prevX, p.prevY, p.x, p.y, style.color, style.width, style.life);
+        }
+      }
+      if (p.texture === 'rocketproj') {
+        if (Math.random() < dt * 36) this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0xff8a28, 1, 90, 0.85);
+        if (Math.random() < dt * 20) this.fx.smoke(p.x - p.dirX * 10, p.y - p.dirY * 10, Math.atan2(-p.dirY, -p.dirX), 1, 0xd4ccc2);
       } else if (p.texture === 'laserbolt' && Math.random() < dt * 32) {
         this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0x38f2ff, 1, 75, 0.75);
       } else if (p.texture === 'leafblade' && Math.random() < dt * 24) {
@@ -275,7 +331,7 @@ export class ProjectileManager {
     const ang = Math.atan2(p.dirY, p.dirX);
     if (p.poison) {
       enemies.applyPoison(e, p.poison.stacks, p.poison.perStack, p.poison.duration);
-      this.fx.burst(p.x, p.y, 0x9cf428, 3, 105, 0.65);
+      this.fx.poisonBubbles(e.x, e.y, 3);
     }
     if (p.texture === 'laserbolt') {
       this.fx.ring(p.x, p.y, 18, 0x38f2ff);
@@ -284,8 +340,10 @@ export class ProjectileManager {
       this.fx.burst(p.x, p.y, 0xffd040, 4, 120, 0.75);
     } else if (p.texture === 'bullet' || p.texture === 'heavybullet' || p.texture === 'pellet') {
       this.fx.streaks(p.x, p.y, ang, 0xffe270, p.texture === 'heavybullet' ? 3 : 2, 160, 0.65);
+      if (p.texture === 'heavybullet') this.fx.hitSlash(p.x, p.y, ang, 0xffe898, 0.92);
     } else if (p.texture === 'leafblade') {
       this.fx.star(p.x, p.y, 13, 0x9cff58, ang);
+      this.fx.hitSlash(p.x, p.y, ang, 0x9cff58, 0.85);
     }
     if (p.crit && p.src) {
       const sp = p.src.def.special;
@@ -298,9 +356,8 @@ export class ProjectileManager {
   private explode(p: Projectile, enemies: EnemyManager): void {
     sfx.play('explode');
     const rocket = p.texture === 'rocketproj';
-    this.fx.ring(p.x, p.y, p.explode, rocket ? 0xff7030 : 0xffc070);
-    if (rocket) this.fx.ring(p.x, p.y, p.explode * 0.55, 0xffe484);
-    this.fx.burst(p.x, p.y, rocket ? 0xff8a28 : 0xc08040, rocket ? 16 : 10, rocket ? 240 : 200, rocket ? 1.2 : 1);
+    this.fx.explosion(p.x, p.y, p.explode, rocket ? 0xff7028 : 0xffa848, p.src?.tier ?? 0);
+    if (p.explode >= 55) this.onExplode?.(p.explode);
     for (const e of enemies.grid.query(p.x, p.y, p.explode + MAX_ENEMY_RADIUS, this.aoeBuf).slice()) {
       const dx = e.x - p.x;
       const dy = e.y - p.y;
@@ -323,6 +380,46 @@ export class ProjectileManager {
     const last = this.list.pop()!;
     if (last !== p) this.list[i] = last;
     p.sprite.setVisible(false);
-    this.pool.push(p.sprite);
+    p.hits.length = 0;
+    p.src = null;
+    p.poison = null;
+    p.cloud = null;
+    p.bounce = null;
+    this.pool.push(p);
+  }
+}
+
+function tracerStyle(texture: string, crit: boolean, tier: number): { color: number; width: number; life: number } | null {
+  const boost = (crit ? 0.55 : 0) + tier * 0.22;
+  switch (texture) {
+    case 'bullet':
+    case 'turretshot':
+      return { color: tier >= 3 ? 0xffe066 : 0xffe898, width: 2.0 + boost, life: 0.075 };
+    case 'pellet':
+      return { color: 0xffde88, width: 1.7 + boost * 0.7, life: 0.06 };
+    case 'heavybullet':
+      return { color: tier >= 3 ? 0xff8cf0 : 0xffcf54, width: 3.1 + boost, life: 0.09 };
+    case 'laserbolt':
+      return { color: tier >= 3 ? 0xa8f8ff : 0x38f2ff, width: 2.7 + boost, life: 0.085 };
+    case 'sparkbolt':
+      return { color: 0xffe468, width: 2.1 + boost, life: 0.07 };
+    case 'frostshot':
+      return { color: 0x9ceeff, width: 2.3 + boost, life: 0.08 };
+    case 'needle':
+    case 'stinger':
+      return { color: 0xe6ffb0, width: 1.7 + boost * 0.7, life: 0.07 };
+    case 'rocketproj':
+      return { color: 0xff8a28, width: 3.4 + boost, life: 0.095 };
+    case 'leafblade':
+      return { color: 0x9cff58, width: 2.3 + boost, life: 0.08 };
+    case 'honeyblob':
+      return { color: 0xffd040, width: 2.0 + boost * 0.6, life: 0.065 };
+    case 'acorn':
+    case 'pebble':
+    case 'seed':
+    case 'fluffseed':
+      return { color: 0xefe0c2, width: 1.5 + boost * 0.6, life: 0.06 };
+    default:
+      return null;
   }
 }

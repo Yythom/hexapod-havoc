@@ -11,6 +11,7 @@
  */
 import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
+import { bus, EVT } from '../core/bus';
 import { touchMove } from '../core/input';
 import type { RunSetup, RunState } from '../core/RunState';
 import { CHARACTERS } from '../data/characters';
@@ -132,7 +133,9 @@ export function installBot(game: Phaser.Game): void {
         fy += (dy / d) * k;
       }
     };
-    for (const e of g.enemies.active) flee(e.x, e.y, keep + e.radius, e.def.boss ? 3 : 1);
+    for (const e of g.enemies.active) {
+      if (e.damage > 0) flee(e.x, e.y, keep + e.radius, e.def.boss ? 3 : 1);
+    }
     for (const s of g.shots.shots) flee(s.x, s.y, 140, 2);
     for (const s of g.tel.list) {
       if (s.kind === 'circle') flee(s.x, s.y, s.r + 30, 4);
@@ -262,6 +265,13 @@ export function installBot(game: Phaser.Game): void {
         log.gear = r.weapons.map((x) => x.id + x.tier).join(',') + ` | ${Object.values(r.items).reduce((a, b) => a + b, 0)} 件道具`;
       }
       return logs;
+    },
+    /** 第 20 波胜利后切入无尽模式并完成商店购物，准备打第 21 波 */
+    enterEndless() {
+      bus.emit(EVT.CONTINUE_ENDLESS);
+      for (let i = 0; i < 8; i++) frame();
+      if (phase() === 'intermission') shopping();
+      return phase();
     },
     stop() {
       setSaveSandbox(false);

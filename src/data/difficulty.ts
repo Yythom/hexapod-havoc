@@ -3,7 +3,7 @@ export interface DifficultyDef {
   name: string;
   /** 怪物生命、伤害倍率（Boss 也吃） */
   mult: number;
-  /** 第 5 波起每隔几波混入一只精英 */
+  /** 第 7 波起每隔几波混入一只精英 */
   extraElites: boolean;
   /** 刷怪间隔倍率（< 1 更快） */
   spawnInterval: number;
@@ -19,30 +19,30 @@ export const DIFFICULTIES: DifficultyDef[] = [
   { name: '阴天', mult: 1.12, extraElites: false, spawnInterval: 1, eliteAffix: false, bossPhase3: false, desc: '怪物生命和伤害 +12%' },
   {
     name: '小雨',
-    mult: 1.25,
+    mult: 1.28,
     extraElites: true,
-    spawnInterval: 1,
+    spawnInterval: 0.96,
     eliteAffix: false,
     bossPhase3: false,
-    desc: '怪物生命和伤害 +25%；第 5 波起，每隔 3 波混入一只精英',
+    desc: '怪物生命和伤害 +28%；第 7 波起，每隔 3 波混入一只精英',
   },
   {
     name: '暴雨',
-    mult: 1.4,
+    mult: 1.38,
     extraElites: true,
-    spawnInterval: 0.85,
+    spawnInterval: 0.88,
     eliteAffix: true,
     bossPhase3: false,
-    desc: '怪物生命和伤害 +40%；刷怪间隔 −15%；精英随机带一个词条（狂暴 / 护盾 / 再生）',
+    desc: '怪物生命和伤害 +38%；刷怪间隔 −12%；精英随机带一个词条（狂暴 / 护盾 / 再生）',
   },
   {
     name: '雷暴',
-    mult: 1.6,
+    mult: 1.55,
     extraElites: true,
-    spawnInterval: 0.85,
+    spawnInterval: 0.86,
     eliteAffix: true,
     bossPhase3: true,
-    desc: '怪物生命和伤害 +60%；包含暴雨的全部规则；螳螂女王 30% 血以下进入第三阶段，全场落雷',
+    desc: '怪物生命和伤害 +55%；包含暴雨的全部规则；螳螂女王 30% 血以下进入第三阶段，全场落雷',
   },
 ];
 

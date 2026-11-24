@@ -107,9 +107,11 @@ export function pickupRange(s: Stats): number {
   return BASE_PICKUP_RANGE * Math.max(0.2, 1 + s.pickupPct);
 }
 
-/** 甲壳减伤：受到伤害 × 15 / (15 + 甲壳)；甲壳为负时反过来增伤 */
+/** 甲壳减伤：0~20 按 15/(15+甲壳)，超过 20 软递减且最高减伤 68%（防高甲无敌）；负甲壳增伤上限 2 倍 */
 export function damageTakenMultiplier(armor: number): number {
-  return armor >= 0 ? 15 / (15 + armor) : (15 - armor) / 15;
+  if (armor < 0) return Math.min(2, (15 - armor) / 15);
+  const eff = armor <= 20 ? armor : 20 + (armor - 20) * 0.45;
+  return Math.max(0.32, 15 / (15 + eff));
 }
 
 export function dodgeChance(s: Stats): number {
