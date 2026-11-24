@@ -1,3 +1,4 @@
+import { BIOME_ORDER, type BiomeId } from '../data/biomes';
 import { CHARACTER_ORDER, CHARACTERS } from '../data/characters';
 import type { Mods } from '../data/items';
 import type { Stats } from './stats';
@@ -111,6 +112,8 @@ export interface DailyChallenge {
   character: string;
   weapon: string;
   difficulty: number;
+  biome: BiomeId;
+  seed: string;
   mutators: DailyMutatorId[];
 }
 
@@ -147,11 +150,13 @@ export function getDailyChallenge(dateKey = todayDateKey()): DailyChallenge {
   const c = CHARACTERS[charId];
   const weapon = c.startWeapons.length > 0 ? c.startWeapons[Math.floor(rng() * c.startWeapons.length)] : '';
   const difficulty = rng() < 0.5 ? 1 : 2; // 阴天或小雨，人人都能上手又有挑战性
+  const biome = BIOME_ORDER[Math.floor(rng() * BIOME_ORDER.length)];
+  const seed = `DAILY-${dateKey.replace(/-/g, '')}`;
   const pool = [...MUTATOR_ORDER];
   const mutators: DailyMutatorId[] = [];
   for (let k = 0; k < 2 && pool.length > 0; k++) {
     const idx = Math.floor(rng() * pool.length);
     mutators.push(pool.splice(idx, 1)[0]);
   }
-  return { dateKey, character: charId, weapon, difficulty, mutators };
+  return { dateKey, character: charId, weapon, difficulty, biome, seed, mutators };
 }

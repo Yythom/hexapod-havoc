@@ -1,10 +1,13 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { bgm } from '../audio/bgm';
+import { sfx } from '../audio/sfx';
 import { DISPLAY_FONT, FONT_FAMILY, fontPx, GAME_HEIGHT, GAME_WIDTH, IS_COARSE_POINTER } from '../config';
 import { CHALLENGE_ORDER, CHALLENGES, type ChallengeId } from '../core/challenges';
 import { DAILY_MUTATORS, getDailyChallenge } from '../core/daily';
 import { getDailyBest, loadActiveRun, loadSave } from '../core/save';
+import { decodeSeedChallenge, generateSeed, normalizeSeed, type SeedChallengePayload } from '../core/seed';
+import { BIOMES, DEFAULT_BIOME } from '../data/biomes';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { WEAPONS } from '../data/weapons';
@@ -310,24 +313,32 @@ export class MenuScene extends Phaser.Scene {
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, CX - 116, 502, '🏆 挑战关', () => this.openChallengeModal(), {
-        width: 108,
+      createButton(this, CX - 131, 502, '🏆 挑战关', () => this.openChallengeModal(), {
+        width: 82,
         height: 44,
-        fontSize: 16,
+        fontSize: 13.5,
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, CX, 502, '后院图鉴', () => transitionTo(this, 'Codex'), {
-        width: 108,
+      createButton(this, CX - 44, 502, '🌱 种子', () => this.openSeedModal(), {
+        width: 82,
         height: 44,
-        fontSize: 16,
+        fontSize: 13.5,
+        primary: false,
+        shape: 'slant',
+        variant: 'emerald',
+      }).setDepth(30);
+      createButton(this, CX + 44, 502, '图鉴', () => transitionTo(this, 'Codex'), {
+        width: 82,
+        height: 44,
+        fontSize: 14,
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, CX + 116, 502, '设置', () => this.openSettings(), {
-        width: 108,
+      createButton(this, CX + 131, 502, '设置', () => this.openSettings(), {
+        width: 82,
         height: 44,
-        fontSize: 16,
+        fontSize: 14,
         primary: false,
         shape: 'slant',
         leftIcon: 'ui-gear',
@@ -349,17 +360,25 @@ export class MenuScene extends Phaser.Scene {
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, CX - halfOffset, 508, '后院图鉴', () => transitionTo(this, 'Codex'), {
-        width: halfW,
+      createButton(this, CX - 116, 508, '🌱 种子挑战', () => this.openSeedModal(), {
+        width: 108,
         height: 46,
-        fontSize: 18,
+        fontSize: 15,
+        primary: false,
+        shape: 'slant',
+        variant: 'emerald',
+      }).setDepth(30);
+      createButton(this, CX, 508, '后院图鉴', () => transitionTo(this, 'Codex'), {
+        width: 108,
+        height: 46,
+        fontSize: 16,
         primary: false,
         shape: 'slant',
       }).setDepth(30);
-      createButton(this, CX + halfOffset, 508, '游戏设置', () => this.openSettings(), {
-        width: halfW,
+      createButton(this, CX + 116, 508, '设置', () => this.openSettings(), {
+        width: 108,
         height: 46,
-        fontSize: 18,
+        fontSize: 16,
         primary: false,
         shape: 'slant',
         leftIcon: 'ui-gear',
@@ -417,6 +436,16 @@ export class MenuScene extends Phaser.Scene {
     this.input.keyboard!.once('keydown-ENTER', savedRun ? resume : start);
     this.input.keyboard!.once('keydown-SPACE', savedRun ? resume : start);
     fadeInScene(this);
+
+    // 若 URL 携带好友分享的 ?challenge=HHS1:... 参数，首次进主菜单自动打开挑战书
+    if (typeof window !== 'undefined' && !this.registry.get('urlChallengeHandled')) {
+      const param = new URLSearchParams(window.location.search).get('challenge');
+      if (param) {
+        this.registry.set('urlChallengeHandled', true);
+        const decoded = decodeSeedChallenge(param);
+        if (decoded) this.openSeedModal(decoded);
+      }
+    }
   }
 
   /** 每日挑战弹窗：展示今日固定角色、初始武器、天气难度与 2 条随机突变词条 */
@@ -426,6 +455,7 @@ export class MenuScene extends Phaser.Scene {
     const daily = getDailyChallenge();
     const char = CHARACTERS[daily.character];
     const diff = DIFFICULTIES[daily.difficulty];
+    const biome = BIOMES[daily.biome];
     const weap = daily.weapon ? WEAPONS[daily.weapon] : null;
     const best = getDailyBest(daily.dateKey);
 
@@ -453,7 +483,8 @@ export class MenuScene extends Phaser.Scene {
     const view = new BeetleView(this, bx, by, char.shell).setScale(1.45).setRotation(-Math.PI / 2);
     c.add([spot, view]);
     c.add(label(this, bx, by + 70, char.name, 17, COLOR.text, true).setOrigin(0.5));
-    c.add(label(this, bx, by + 94, `${diff.name} · ${weap ? weap.name : '工蚁随从'}`, 13, COLOR.dim).setOrigin(0.5));
+    c.add(label(this, bx, by + 94, `${diff.name} · ${biome.name}`, 13, biome.css, true).setOrigin(0.5));
+    c.add(label(this, bx, by + 114, weap ? weap.name : '工蚁随从', 12.5, COLOR.dim).setOrigin(0.5));
 
     // 右侧今日两条词条
     const rx = px + 216;
@@ -492,6 +523,8 @@ export class MenuScene extends Phaser.Scene {
             character: daily.character,
             difficulty: daily.difficulty,
             weapon: daily.weapon,
+            biome: daily.biome,
+            seed: daily.seed,
             daily: daily.dateKey,
             mutators: daily.mutators,
           });
@@ -580,6 +613,211 @@ export class MenuScene extends Phaser.Scene {
     });
 
     c.add(createButton(this, W / 2, py + ph - 36, '返回主菜单', () => c.destroy(), { width: 200, height: 46, fontSize: 18, primary: false }));
+    c.setAlpha(0);
+    this.tweens.add({ targets: c, alpha: 1, duration: 120 });
+  }
+
+  /** 种子分享挑战弹窗：粘贴 HHS1:... 挑战码或输入任意自定义种子同图竞速 */
+  private openSeedModal(initial?: SeedChallengePayload, errMsg = ''): void {
+    const W = GAME_WIDTH;
+    const H = GAME_HEIGHT;
+    const save = loadSave();
+
+    const c = this.add.container(0, 0).setDepth(100);
+    const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.8).setOrigin(0).setInteractive();
+    const pw = 680;
+    const ph = initial ? 476 : 360;
+    const px = W / 2 - pw / 2;
+    const py = H / 2 - ph / 2;
+    c.add([
+      dim,
+      panel(this, px, py, pw, ph, 0x5de862, COLOR.panel, 2, 0x5de862),
+      displayLabel(this, W / 2, py + 38, '🌱 种子分享挑战', 28, '#a4ffaa').setOrigin(0.5),
+      divider(this, px + 32, py + 70, pw - 64, 0x5de862, 0.55),
+    ]);
+
+    const reopen = (p?: SeedChallengePayload, msg = '') => {
+      c.destroy();
+      this.openSeedModal(p, msg);
+    };
+
+    const askPasteCode = () => {
+      const raw = window.prompt('请粘贴好友分享的种子挑战码（HHS1:...）或输入自定义种子：');
+      if (!raw) return;
+      const decoded = decodeSeedChallenge(raw);
+      if (decoded) {
+        sfx.play('unlock');
+        reopen(decoded);
+        return;
+      }
+      const clean = normalizeSeed(raw);
+      if (clean) {
+        sfx.play('click');
+        reopen({
+          seed: clean,
+          character: save.last.character,
+          difficulty: save.last.difficulty,
+          weapon: save.last.weapon,
+          biome: save.last.biome ?? DEFAULT_BIOME,
+        });
+        return;
+      }
+      reopen(initial, '挑战码或种子格式无效，请检查后重试');
+    };
+
+    if (!initial) {
+      c.add(
+        label(
+          this,
+          W / 2,
+          py + 124,
+          '粘贴结算页导出的「种子挑战码（HHS1:...）」即可与好友挑战\n完全相同的后院生态、刷怪事件、Boss、商店、升级与宝箱！\n（无需预先解锁对应角色或天气难度）',
+          15,
+          '#e2e4ec',
+          false,
+          pw - 84,
+        ).setOrigin(0.5),
+      );
+      if (errMsg) {
+        c.add(label(this, W / 2, py + 194, errMsg, 14, COLOR.bad, true).setOrigin(0.5));
+      }
+      c.add(
+        createButton(this, W / 2 - 122, py + 244, '📋 粘贴挑战码 / 种子', askPasteCode, {
+          width: 230,
+          height: 54,
+          fontSize: 17,
+          variant: 'emerald',
+        }),
+      );
+      c.add(
+        createButton(
+          this,
+          W / 2 + 122,
+          py + 244,
+          '🎲 随机生成一局种子',
+          () => {
+            sfx.play('reroll');
+            reopen({
+              seed: generateSeed(),
+              character: save.last.character,
+              difficulty: save.last.difficulty,
+              weapon: save.last.weapon,
+              biome: save.last.biome ?? DEFAULT_BIOME,
+            });
+          },
+          { width: 220, height: 54, fontSize: 16, primary: false },
+        ),
+      );
+      c.add(createButton(this, W / 2, py + 314, '返回主菜单', () => c.destroy(), { width: 170, height: 42, fontSize: 16, primary: false }));
+    } else {
+      const char = CHARACTERS[initial.character];
+      const diff = DIFFICULTIES[initial.difficulty];
+      const biome = BIOMES[initial.biome];
+      const weap = initial.weapon ? WEAPONS[initial.weapon] : null;
+
+      // 左侧角色预览
+      const bx = px + 118;
+      const by = py + 168;
+      const spot = this.add.graphics();
+      spot.fillStyle(COLOR.panelDeep, 1);
+      spot.fillCircle(bx, by, 54);
+      spot.lineStyle(2.5, biome.accent, 0.9);
+      spot.strokeCircle(bx, by, 54);
+      const view = new BeetleView(this, bx, by, char.shell).setScale(1.45).setRotation(-Math.PI / 2);
+      c.add([spot, view]);
+      c.add(label(this, bx, by + 70, char.name, 17, COLOR.text, true).setOrigin(0.5));
+      c.add(label(this, bx, by + 94, weap ? weap.name : '工蚁随从', 13, COLOR.dim).setOrigin(0.5));
+
+      // 右侧种子战报详情
+      const rx = px + 220;
+      const rw = pw - 252;
+      c.add(pill(this, rx + 76, py + 104, `种子 #${initial.seed}`, 0x163826, 0x5de862, '#a4ffaa', 13, 12, 24));
+      c.add(pill(this, rx + 216, py + 104, `${biome.name} · ${diff.name}`, COLOR.panelDeep, biome.accent, biome.css, 13, 12, 24));
+
+      c.add(label(this, rx, py + 132, `生态特性：${biome.tagline}`, 13.5, biome.css, true, rw).setOrigin(0, 0).setAlign('left'));
+      if (initial.mutators && initial.mutators.length > 0) {
+        const mNames = initial.mutators.map((m) => DAILY_MUTATORS[m]?.name ?? m).join(' · ');
+        c.add(label(this, rx, py + 158, `附加词条：${mNames}`, 13, COLOR.goldText, true, rw).setOrigin(0, 0).setAlign('left'));
+      }
+
+      const targetBoxY = py + 190;
+      const tBox = this.add.graphics();
+      drawChamferPlate(tBox, rx, targetBoxY, rw, 126, {
+        fill: COLOR.panelDeep,
+        border: initial.target ? COLOR.gold : COLOR.borderSoft,
+        borderWidth: 1.6,
+        accentTop: initial.target ? COLOR.gold : 0x5de862,
+        cutBig: 7,
+        cutSmall: 3,
+        inkWidth: 2.2,
+      });
+      c.add(tBox);
+      if (initial.target) {
+        const t = initial.target;
+        const mvpName = t.mvpId && WEAPONS[t.mvpId] ? WEAPONS[t.mvpId].name : '';
+        c.add(label(this, rx + 14, targetBoxY + 18, '⚔ 发起者战绩目标', 14.5, COLOR.goldText, true).setOrigin(0, 0));
+        c.add(
+          label(
+            this,
+            rx + 14,
+            targetBoxY + 46,
+            `${t.win ? '★ 已通关' : '止步'} 第 ${t.wave} 波  ·  LV.${t.level}`,
+            16,
+            t.win ? COLOR.good : COLOR.text,
+            true,
+          ).setOrigin(0, 0),
+        );
+        c.add(label(this, rx + 14, targetBoxY + 74, `击杀 ${t.kills}  ·  花蜜 ${t.nectar}`, 14, '#e4e2da').setOrigin(0, 0));
+        if (mvpName) {
+          c.add(label(this, rx + 14, targetBoxY + 98, `发起者 MVP 武器：${mvpName}`, 13, COLOR.goldText).setOrigin(0, 0));
+        }
+      } else {
+        c.add(label(this, rx + 14, targetBoxY + 24, '🏁 同图盲盒竞速', 15, '#a4ffaa', true).setOrigin(0, 0));
+        c.add(
+          label(
+            this,
+            rx + 14,
+            targetBoxY + 56,
+            '本种子尚未绑定战绩目标。\n打完后在结算页点「分享种子」，即可把你的最终成绩打包发给好友！',
+            13,
+            COLOR.dim,
+            false,
+            rw - 28,
+          )
+            .setOrigin(0, 0)
+            .setAlign('left'),
+        );
+      }
+
+      if (errMsg) {
+        c.add(label(this, W / 2, py + 346, errMsg, 13.5, COLOR.bad, true).setOrigin(0.5));
+      }
+
+      c.add(
+        createButton(
+          this,
+          W / 2 - 140,
+          py + 408,
+          '接受种子挑战 ▶',
+          () => {
+            transitionTo(this, 'Game', {
+              character: initial.character,
+              difficulty: initial.difficulty,
+              weapon: initial.weapon,
+              biome: initial.biome,
+              seed: initial.seed,
+              seedTarget: initial.target,
+              mutators: initial.mutators ? [...initial.mutators] : undefined,
+              shellSkin: save.shellSkin,
+            });
+          },
+          { width: 224, height: 54, fontSize: 19, variant: 'emerald' },
+        ),
+      );
+      c.add(createButton(this, W / 2 + 56, py + 408, '更换挑战码', askPasteCode, { width: 142, height: 54, fontSize: 15, primary: false }));
+      c.add(createButton(this, W / 2 + 206, py + 408, '返回', () => c.destroy(), { width: 122, height: 54, fontSize: 16, primary: false }));
+    }
+
     c.setAlpha(0);
     this.tweens.add({ targets: c, alpha: 1, duration: 120 });
   }

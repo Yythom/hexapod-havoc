@@ -1,3 +1,4 @@
+import { resolveBiome, type BiomeDef, type BiomeId } from '../data/biomes';
 import { baseSlots, CHARACTERS, type CharacterDef } from '../data/characters';
 import { DIFFICULTIES, type DifficultyDef } from '../data/difficulty';
 import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
@@ -8,6 +9,7 @@ import type { ContractId, WeaponEnchantId } from './contracts';
 import { DAILY_MUTATORS, type DailyMutatorId } from './daily';
 import { xpToNext, type UpgradeOption } from './progression';
 import type { ShellSkinId } from './save';
+import { createScopedRng, generateSeed, normalizeSeed, type SeedChallengeTarget } from './seed';
 import { activeSets } from './sets';
 import type { Offer } from './shop';
 import { BASE_STATS, STAT_KEYS, ZERO_STATS, type Stats } from './stats';
@@ -78,6 +80,9 @@ export interface SavedRun {
   shopRerolls?: number;
   /** 本波商店货架是否已初始化刷新过 */
   shopReady?: boolean;
+  /** 本波已抽取升级与宝箱的确定性序号（保证种子续玩不漂移） */
+  upgradeRollSeq?: number;
+  chestRollSeq?: number;
   /** 幽灵蝉蜕：下一波开局生命锁为 1 */
   nextWaveOneHp?: boolean;
   /** 诱饵甜果：下一波开局额外空降的黄蜂批次数（每批 3 只） */
@@ -93,11 +98,15 @@ export interface SavedRun {
   devicesPlaced: number;
 }
 
-/** 开局选择：角色、难度、初始武器（可选每日挑战、主题挑战、自定义词条、禁用池与甲壳涂装） */
+/** 开局选择：角色、难度、初始武器（可选生态场地、确定性种子、每日/主题挑战、自定义词条、禁用池与甲壳涂装） */
 export interface RunSetup {
   character: string;
   difficulty: number;
   weapon: string;
+  biome?: BiomeId;
+  seed?: string;
+  /** 来自好友种子挑战码的目标战绩（结算时对比胜负） */
+  seedTarget?: SeedChallengeTarget;
   daily?: string;
   challenge?: ChallengeId;
   mutators?: DailyMutatorId[];
@@ -113,6 +122,8 @@ export class RunState {
   readonly setup: RunSetup;
   readonly character: CharacterDef;
   readonly difficulty: DifficultyDef;
+  readonly biome: BiomeDef;
+  readonly seed: string;
   wave = 1;
   phase: RunPhase = 'combat';
   waveTimeLeft = 0;
@@ -162,6 +173,9 @@ export class RunState {
   shopRerolls = 0;
   /** 本波商店货架是否已初始化刷新过 */
   shopReady = false;
+  /** 本波已抽取升级与宝箱的确定性序号 */
+  upgradeRollSeq = 0;
+  chestRollSeq = 0;
   /** 幽灵蝉蜕：下一波 1 血开局 */
   nextWaveOneHp = false;
   /** 诱饵甜果：下一波开局额外黄蜂批次数 */
@@ -213,13 +227,22 @@ export class RunState {
   newDifficultyUnlocked = false;
 
   constructor(setup: RunSetup) {
-    this.setup = setup;
+    const biome = resolveBiome(setup.biome);
+    const seed = setup.seed ? normalizeSeed(setup.seed) || generateSeed() : generateSeed();
+    this.setup = { ...setup, biome: biome.id, seed };
     this.character = CHARACTERS[setup.character];
     this.difficulty = DIFFICULTIES[setup.difficulty];
+    this.biome = biome;
+    this.seed = seed;
     this.activeWeather = setup.difficulty;
     this.weapons = setup.weapon && this.weaponSlotsBase > 0 ? [{ id: setup.weapon, tier: 0 }] : [];
     this.recomputeStats();
     this.hp = this.maxHp;
+  }
+
+  /** 获取本局对应作用域与步数的确定性随机数流（保证同种子同波次商店/升级/地形/事件一致） */
+  rng(scope: string, step = 0): () => number {
+    return createScopedRng(this.seed, scope, step);
   }
 
   /** 本局目标通关波数（常规 20 波，主题挑战 10 波） */
@@ -316,6 +339,9 @@ export class RunState {
       addStats(set.level.stats);
       addMods(set.level.mods);
     }
+    // 生态场地基础加成
+    if (this.biome.stats) addStats(this.biome.stats);
+    addMods(this.biome.mods);
     // 每日挑战词条加成
     for (const mid of this.setup.mutators ?? []) {
       const mdef = DAILY_MUTATORS[mid];
@@ -374,6 +400,8 @@ export class RunState {
     this.curseOfferBonus = false;
     this.shopRerolls = 0;
     this.shopReady = false;
+    this.upgradeRollSeq = 0;
+    this.chestRollSeq = 0;
   }
 
   /** 序列化当前局内进度（用于波间断点续玩） */
@@ -408,6 +436,8 @@ export class RunState {
       curseOfferBonus: this.curseOfferBonus,
       shopRerolls: this.shopRerolls,
       shopReady: this.shopReady,
+      upgradeRollSeq: this.upgradeRollSeq,
+      chestRollSeq: this.chestRollSeq,
       nextWaveOneHp: this.nextWaveOneHp,
       nextWaveBait: this.nextWaveBait,
       nextWavePeacock: this.nextWavePeacock,
@@ -457,6 +487,8 @@ export class RunState {
       typeof data.shopReady === 'boolean'
         ? data.shopReady
         : run.pendingLevelUps === 0 && run.chests === 0 && run.offers.length === run.shopOfferCount;
+    run.upgradeRollSeq = Math.max(0, Math.floor(Number(data.upgradeRollSeq) || 0));
+    run.chestRollSeq = Math.max(0, Math.floor(Number(data.chestRollSeq) || 0));
     run.nextWaveOneHp = !!data.nextWaveOneHp;
     run.nextWaveBait = Math.max(0, Math.floor(Number(data.nextWaveBait) || 0));
     run.nextWavePeacock = Math.max(0, Math.floor(Number(data.nextWavePeacock) || 0));

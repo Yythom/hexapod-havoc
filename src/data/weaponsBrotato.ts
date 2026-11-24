@@ -5605,7 +5605,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    "Gun"
   ],
   "damage": 15.0,
-  "cooldown": 0.43,
+  "cooldown": 0.65,
   "range": 450.0,
   "scaling": {
    "ranged": 1.0
@@ -5615,7 +5615,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
   "tiers": [
    {
     "damage": 15.0,
-    "cooldown": 0.43,
+    "cooldown": 0.65,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 450.0,
@@ -5628,7 +5628,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 20.0,
-    "cooldown": 0.42,
+    "cooldown": 0.62,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 450.0,
@@ -5641,7 +5641,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 25.0,
-    "cooldown": 0.4,
+    "cooldown": 0.58,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 450.0,
@@ -5654,7 +5654,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 40.0,
-    "cooldown": 0.38,
+    "cooldown": 0.54,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 450.0,
@@ -7237,7 +7237,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    "Gun"
   ],
   "damage": 7,
-  "cooldown": 0.55,
+  "cooldown": 1.5,
   "range": 220,
   "scaling": {
    "ranged": 0.8
@@ -7247,7 +7247,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
   "tiers": [
    {
     "damage": 7,
-    "cooldown": 0.55,
+    "cooldown": 1.5,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 220,
@@ -7260,7 +7260,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 10,
-    "cooldown": 0.53,
+    "cooldown": 1.45,
     "critChance": 0.03,
     "critMultiplier": 2.0,
     "range": 225,
@@ -7273,7 +7273,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 10,
-    "cooldown": 0.51,
+    "cooldown": 1.4,
     "critChance": 0.05,
     "critMultiplier": 2.0,
     "range": 230,
@@ -7286,7 +7286,7 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
    },
    {
     "damage": 14,
-    "cooldown": 0.5,
+    "cooldown": 1.35,
     "critChance": 0.08,
     "critMultiplier": 2.1,
     "range": 235,

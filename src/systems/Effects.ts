@@ -316,106 +316,70 @@ export class Effects {
     ensureDamageFont(scene);
   }
 
-  /** 扩散的圆环（爆炸、震击） */
+  /** 扩散的圆环（爆炸、震击、治疗波等）：清爽单环，不叠加刺眼外发光 */
   ring(x: number, y: number, r: number, color = 0xffffff): void {
     this.rings.push({ x, y, r, color, t: 0 });
-    if (r >= 45) this.star(x, y, r * 0.42, color);
   }
 
-  /** 近战扇形横扫刀光（品阶 I→IV 进化：高阶加厚白芯火花，IV 级双层错位二重斩弧） */
+  /** 近战扇形横扫刀光：清爽轻薄的半透明气弧，不遮挡怪物与弹幕 */
   slash(x: number, y: number, r: number, angle: number, arc: number, color = 0xfff0c0, tier = 0): void {
-    this.slashes.push({ x, y, r, a0: angle - arc, a1: angle + arc, color, tier, t: 0, total: tier >= 3 ? 0.27 : 0.24 });
-    const count = tier >= 3 ? 3 : tier >= 1 ? 2 : 1;
-    const samples = tier >= 1 ? [-0.65, -0.22, 0.22, 0.65] : [-0.5, 0, 0.5];
-    for (const f of samples) {
-      const a = angle + arc * f;
-      const sx = x + Math.cos(a) * r * 0.85;
-      const sy = y + Math.sin(a) * r * 0.85;
-      this.streaks(sx, sy, a, tier >= 3 && Math.abs(f) < 0.3 ? LEGENDARY_GOLD : color, count, 175 + tier * 15, 0.72 + tier * 0.08);
-    }
-    if (tier >= 3) {
-      this.star(x + Math.cos(angle) * r * 0.92, y + Math.sin(angle) * r * 0.92, 18, LEGENDARY_GOLD, angle);
-    }
+    this.slashes.push({ x, y, r, a0: angle - arc, a1: angle + arc, color, tier, t: 0, total: 0.16 });
   }
 
-  /** 近战直刺锋芒拖尾（品阶驱动核心厚度与传说爆星） */
-  thrust(x0: number, y0: number, x1: number, y1: number, color = 0xfff0c0, width = 7, tier = 0): void {
-    this.thrusts.push({ x0, y0, x1, y1, color, width: width * (1 + tier * 0.1), tier, t: 0, total: 0.17 + tier * 0.01 });
-    if (tier >= 2) {
-      const ang = Math.atan2(y1 - y0, x1 - x0);
-      this.streaks(x1, y1, ang, tier >= 3 ? LEGENDARY_GOLD : color, tier >= 3 ? 3 : 2, 185, 0.78);
-    }
-    if (tier >= 3) {
-      this.star(x1, y1, 15, LEGENDARY_VIOLET, Math.atan2(y1 - y0, x1 - x0));
-    }
+  /** 近战直刺/长角突刺：克制短促的空气划痕（不发光柱、不喷星光，突出武器实体戳刺） */
+  thrust(x0: number, y0: number, x1: number, y1: number, color = 0xfff2dc, width = 5, tier = 0): void {
+    this.thrusts.push({ x0, y0, x1, y1, color, width, tier, t: 0, total: 0.1 });
   }
 
-  /** 带破风冲击环的重型突刺（犄角 / 枪械） */
-  sonicThrust(x0: number, y0: number, x1: number, y1: number, color = 0xffe49a, width = 12, rings = 2, tier = 0): void {
-    this.sonics.push({ x0, y0, x1, y1, color, width: width * (1 + tier * 0.08), rings: rings + (tier >= 2 ? 1 : 0), tier, t: 0, total: 0.22 + tier * 0.015 });
-    const ang = Math.atan2(y1 - y0, x1 - x0);
-    this.star(x1, y1, width * (1.35 + tier * 0.15), tier >= 3 ? LEGENDARY_GOLD : color, ang);
-    this.streaks(x1, y1, ang, color, 4 + tier, 210 + tier * 15, 0.85 + tier * 0.06);
+  /** 带轻度破风环的重型突刺 */
+  sonicThrust(x0: number, y0: number, x1: number, y1: number, color = 0xffe49a, width = 7, rings = 1, tier = 0): void {
+    this.sonics.push({ x0, y0, x1, y1, color, width, rings, tier, t: 0, total: 0.13 });
   }
 
-  /** 大颚钳合撕咬特效：双弯月钳刃 1:1 覆盖真实打击距离 + 咬合中心爆星 */
-  chomp(x: number, y: number, ang: number, r: number, color = 0xffc858, tier = 0): void {
-    this.chomps.push({ x, y, ang, r, color, tier, t: 0, total: 0.22 + tier * 0.015 });
-    const bx = x + Math.cos(ang) * r * 0.86;
-    const by = y + Math.sin(ang) * r * 0.86;
-    this.star(bx, by, 17 + tier * 3, tier >= 3 ? LEGENDARY_GOLD : color, ang);
-    this.streaks(bx, by, ang, color, 3 + tier, 165 + tier * 15, 0.78 + tier * 0.06);
+  /** 大颚钳合撕咬特效：利落轻薄的双弯月咬痕，无多余爆星 */
+  chomp(x: number, y: number, ang: number, r: number, color = 0xffe4a8, tier = 0): void {
+    this.chomps.push({ x, y, ang, r, color, tier, t: 0, total: 0.15 });
   }
 
-  /** 甲壳盾猛击震荡扇形波（精准贴合真实锤/盾击外缘） */
-  bash(x: number, y: number, ang: number, arc: number, r: number, color = 0x72d8ff, tier = 0): void {
-    this.bashes.push({ x, y, ang, arc, r, color, tier, t: 0, total: 0.26 + tier * 0.015 });
-    const hx = x + Math.cos(ang) * r * 0.76;
-    const hy = y + Math.sin(ang) * r * 0.76;
-    this.star(hx, hy, 19 + tier * 3, tier >= 3 ? LEGENDARY_GOLD : color, ang);
-    this.streaks(hx, hy, ang, color, 5 + tier, 200 + tier * 14, 0.9 + tier * 0.06);
+  /** 甲壳盾/重锤猛击震荡扇形波：干净轻盈的气浪弧，精准贴合真实砸击外缘 */
+  bash(x: number, y: number, ang: number, arc: number, r: number, color = 0xa8e4ff, tier = 0): void {
+    this.bashes.push({ x, y, ang, arc, r, color, tier, t: 0, total: 0.18 });
   }
 
-  /** 四芒爆闪星光（暴击、破甲、枪口、冲击点） */
-  star(x: number, y: number, r = 16, color = 0xffe878, rot = Math.random() * Math.PI): void {
-    this.stars.push({ x, y, r, rot, color, t: 0, total: 0.18 });
+  /** 四芒爆闪星光（收短收小，克制点缀） */
+  star(x: number, y: number, r = 12, color = 0xffe878, rot = Math.random() * Math.PI): void {
+    this.stars.push({ x, y, r: r * 0.72, rot, color, t: 0, total: 0.11 });
   }
 
-  /** 定向速度线火花粒子 */
-  streaks(x: number, y: number, ang: number, color: number, count: number, speed = 180, size = 0.8): void {
+  /** 定向漫画速度线碎屑（普通混合模式，绝不 ADD 叠加过曝） */
+  streaks(x: number, y: number, ang: number, color: number, count: number, speed = 165, size = 0.7): void {
     for (let i = 0; i < count; i++) {
       const p = this.acquireParticle();
       if (!p) return;
-      const a = ang + (Math.random() - 0.5) * 1.1;
-      const v = speed * (0.45 + Math.random() * 0.65);
+      const a = ang + (Math.random() - 0.5) * 0.95;
+      const v = speed * (0.45 + Math.random() * 0.55);
       p.vx = Math.cos(a) * v;
       p.vy = Math.sin(a) * v;
-      p.maxLife = p.life = 0.16 + Math.random() * 0.16;
-      p.size = size * (0.7 + Math.random() * 0.5);
+      p.maxLife = p.life = 0.12 + Math.random() * 0.1;
+      p.size = size * 0.75 * (0.7 + Math.random() * 0.45);
       p.streak = true;
-      p.glow = true;
+      p.glow = false;
       p.img
         .setTexture('fx-streak')
-        .setBlendMode(Phaser.BlendModes.ADD)
+        .setBlendMode(Phaser.BlendModes.NORMAL)
         .setPosition(x, y)
         .setRotation(a)
         .setTint(color)
-        .setAlpha(1)
+        .setAlpha(0.88)
         .setScale(p.size)
         .setVisible(true);
     }
   }
 
-  /** 枪械/元素发射口定向光束与星芒火花（IV 级升级为金紫高能枪口焰） */
-  muzzle(x: number, y: number, ang: number, color = 0xffe498, len = 20, count = 4, tier = 0): void {
-    const reach = len * (1 + tier * 0.12);
-    this.thrust(x, y, x + Math.cos(ang) * reach, y + Math.sin(ang) * reach, tier >= 3 ? LEGENDARY_GOLD : color, 8.5 + tier * 1.1, Math.min(tier, 2));
-    this.star(x + Math.cos(ang) * 4, y + Math.sin(ang) * 4, reach * 0.56, tier >= 3 ? LEGENDARY_GOLD : color, ang);
-    if (tier >= 3) {
-      this.star(x + Math.cos(ang) * 5, y + Math.sin(ang) * 5, reach * 0.44, LEGENDARY_VIOLET, ang + Math.PI / 4);
-      this.rings.push({ x: x + Math.cos(ang) * 4, y: y + Math.sin(ang) * 4, r: Math.max(12, reach * 0.55), color: LEGENDARY_VIOLET, t: 0.12 });
-    }
-    this.streaks(x, y, ang, tier >= 3 ? LEGENDARY_GOLD : color, count + (tier >= 2 ? 2 : tier >= 1 ? 1 : 0), 190 + tier * 18, 0.76 + tier * 0.06);
+  /** 枪械/元素发射口极短小闪焰（不画光束、不刺眼） */
+  muzzle(x: number, y: number, ang: number, color = 0xffe498, len = 10, count = 2, _tier = 0): void {
+    this.star(x + Math.cos(ang) * 4, y + Math.sin(ang) * 4, Math.min(9, len * 0.45), color, ang);
+    if (count > 0) this.streaks(x, y, ang, color, Math.min(2, count), 120, 0.5);
   }
 
   /** 轻量高速弹道拖尾线段（1~2 帧渐隐，统一画在 Graphics 层） */
@@ -490,19 +454,18 @@ export class Effects {
     this.crater(x, y, r * 0.85);
   }
 
-  /** 子弹穿透敌人时在背后迸出的定向破空锥 + 亮白穿透尾线（清晰区分穿透与单体） */
+  /** 子弹穿透敌人时在背后迸出的克制定向穿透线（清晰区分穿透与单体，不抢戏） */
   pierceBreak(x: number, y: number, ang: number, color = 0xfff0a8): void {
     const c = Math.cos(ang);
     const s = Math.sin(ang);
-    this.tracer(x - c * 10, y - s * 10, x + c * 28, y + s * 28, color, 3.2, 0.11);
-    this.streaks(x + c * 8, y + s * 8, ang, color, 3, 220, 0.72);
-    this.star(x + c * 6, y + s * 6, 11, 0xffffff, ang);
+    this.tracer(x - c * 6, y - s * 6, x + c * 20, y + s * 20, color, 2.2, 0.09);
+    this.streaks(x + c * 6, y + s * 6, ang, color, 2, 175, 0.55);
   }
 
-  /** 单体子弹命中并立刻消散时的干脆收敛火花（明确表示子弹已在此终止） */
+  /** 单体子弹命中并立刻消散时的极简小碎屑（无多余闪光） */
   bulletImpact(x: number, y: number, ang: number, color = 0xffe498): void {
-    this.burst(x, y, color, 3, 95, 0.55);
-    this.streaks(x, y, ang + Math.PI, color, 2, 130, 0.55);
+    this.burst(x, y, color, 2, 75, 0.45, false);
+    this.streaks(x, y, ang + Math.PI, color, 1, 95, 0.42);
   }
 
   /** 爆炸地面焦黑弹坑印记（约 3 秒淡出，复用地面痕迹对象池） */
@@ -713,7 +676,7 @@ export class Effects {
     this.splats.push({ img, life: SPLAT_LIFE, maxLife: SPLAT_LIFE, baseAlpha });
   }
 
-  burst(x: number, y: number, color: number, count: number, speed = 160, size = 1, glow = true): void {
+  burst(x: number, y: number, color: number, count: number, speed = 150, size = 1, _glow = false): void {
     for (let i = 0; i < count; i++) {
       const p = this.acquireParticle();
       if (!p) return;
@@ -721,17 +684,17 @@ export class Effects {
       const v = speed * (0.35 + Math.random() * 0.65);
       p.vx = Math.cos(a) * v;
       p.vy = Math.sin(a) * v;
-      p.maxLife = p.life = 0.25 + Math.random() * 0.28;
-      p.size = size * 0.68 * (0.6 + Math.random() * 0.6);
+      p.maxLife = p.life = 0.2 + Math.random() * 0.22;
+      p.size = size * 0.6 * (0.6 + Math.random() * 0.55);
       p.streak = false;
-      p.glow = glow;
+      p.glow = false;
       p.img
-        .setTexture(glow && i % 3 === 0 ? 'fx-flare' : 'dot')
-        .setBlendMode(glow ? Phaser.BlendModes.ADD : Phaser.BlendModes.NORMAL)
+        .setTexture('dot')
+        .setBlendMode(Phaser.BlendModes.NORMAL)
         .setPosition(x, y)
         .setRotation(a)
         .setTint(color)
-        .setAlpha(1)
+        .setAlpha(0.92)
         .setScale(p.size)
         .setVisible(true);
     }
@@ -892,7 +855,7 @@ export class Effects {
     this.glowMult += (targetGlow - this.glowMult) * Math.min(1, dt * 10);
     glow.setAlpha(this.glowMult);
 
-    // 轻量高速弹道拖尾线（1~2 帧渐隐）
+    // 轻量高速弹道细尾线（单层清爽细线，不再三层发光把普通子弹画成激光）
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const tr = this.tracers[i];
       tr.t += dt;
@@ -901,21 +864,11 @@ export class Effects {
         continue;
       }
       const a = 1 - tr.t / tr.total;
-      glow.lineStyle(tr.width * 1.9 * a + 0.6, tr.color, 0.34 * a);
-      glow.beginPath();
-      glow.moveTo(tr.x0, tr.y0);
-      glow.lineTo(tr.x1, tr.y1);
-      glow.strokePath();
-      g.lineStyle(tr.width * a + 0.4, tr.color, 0.72 * a);
+      g.lineStyle(Math.max(1, tr.width * 0.72 * a), tr.color, 0.52 * a);
       g.beginPath();
       g.moveTo(tr.x0, tr.y0);
       g.lineTo(tr.x1, tr.y1);
       g.strokePath();
-      glow.lineStyle(Math.max(0.8, tr.width * 0.42 * a), 0xffffff, 0.78 * a);
-      glow.beginPath();
-      glow.moveTo(tr.x0, tr.y0);
-      glow.lineTo(tr.x1, tr.y1);
-      glow.strokePath();
     }
 
     // 枪口抛出的黄铜弹壳（抛物线 + 落地轻弹一下淡出）
@@ -1042,7 +995,7 @@ export class Effects {
       }
     }
 
-    // 扇形横扫刀光（I 级干净单弧 -> II~III 级加厚白芯 -> IV 级双层错位二重斩弧）
+    // 扇形横扫刀光（清爽克制的半透明漫画风挥砍气弧，不遮挡怪物）
     for (let i = this.slashes.length - 1; i >= 0; i--) {
       const s = this.slashes[i];
       s.t += dt;
@@ -1054,29 +1007,13 @@ export class Effects {
       const a = 1 - k;
       const head = s.a0 + (s.a1 - s.a0) * Math.min(1, k * 2.2);
       const tail = s.a0 + (s.a1 - s.a0) * Math.max(0, (k - 0.18) * 1.15);
-      // 视觉弧半径与厚度 1:1 贴合真实横扫内外圈，避免刀光外侧或内侧“无特效却死怪”
-      const rad = s.r * (0.94 + 0.1 * Phaser.Math.Easing.Quadratic.Out(k));
-      const tierBoost = 1 + s.tier * 0.1;
-      const thick = Math.max(22, s.r * 0.34) * (0.45 + 0.55 * a) * tierBoost;
-      const coreRatio = s.tier >= 1 ? 0.52 : 0.36;
-      this.fillCrescent(glow, s.x, s.y, rad, thick * 1.32, tail, head, s.color, 0.48 * a);
-      this.fillCrescent(g, s.x, s.y, rad, thick * 0.88, tail, head, s.color, 0.84 * a);
-      this.fillCrescent(glow, s.x, s.y, rad + 2, thick * coreRatio, tail + 0.06, head, 0xffffff, (s.tier >= 1 ? 0.96 : 0.86) * a);
-      // IV 级传说：错位延迟的二重金紫斩弧
-      if (s.tier >= 3) {
-        const k2 = Math.max(0, (s.t - 0.025) / (s.total - 0.025));
-        if (k2 > 0) {
-          const a2 = 1 - k2;
-          const h2 = s.a0 + (s.a1 - s.a0) * Math.min(1, k2 * 2.05);
-          const t2 = s.a0 + (s.a1 - s.a0) * Math.max(0, (k2 - 0.22) * 1.18);
-          this.fillCrescent(glow, s.x, s.y, rad * 1.11, thick * 0.78, t2, h2, LEGENDARY_VIOLET, 0.56 * a2);
-          this.fillCrescent(g, s.x, s.y, rad * 0.78, thick * 0.52, t2 + 0.05, h2, LEGENDARY_GOLD, 0.78 * a2);
-          this.fillCrescent(glow, s.x, s.y, rad * 1.12, thick * 0.28, t2 + 0.1, h2, 0xffffff, 0.9 * a2);
-        }
-      }
+      const rad = s.r * (0.94 + 0.08 * Phaser.Math.Easing.Quadratic.Out(k));
+      const thick = Math.min(26, Math.max(12, s.r * 0.22)) * (0.4 + 0.6 * a);
+      this.fillCrescent(g, s.x, s.y, rad, thick, tail, head, s.color, 0.44 * a);
+      this.fillCrescent(g, s.x, s.y, rad + 1.5, thick * 0.34, tail + 0.06, head, 0xffffff, 0.62 * a);
     }
 
-    // 锋芒矛形直刺
+    // 直刺 / 长角突刺（极淡空气划痕，不做发光激光柱）
     for (let i = this.thrusts.length - 1; i >= 0; i--) {
       const tr = this.thrusts[i];
       tr.t += dt;
@@ -1085,17 +1022,12 @@ export class Effects {
         continue;
       }
       const a = 1 - tr.t / tr.total;
-      const hw = (tr.width * 0.72 + 1.5) * a;
-      const coreRatio = tr.tier >= 1 ? 0.54 : 0.4;
-      if (tr.tier >= 3) {
-        this.fillLance(glow, tr.x0, tr.y0, tr.x1, tr.y1, hw * 2.1, LEGENDARY_VIOLET, 0.45 * a);
-      }
-      this.fillLance(glow, tr.x0, tr.y0, tr.x1, tr.y1, hw * 1.65, tr.tier >= 3 ? LEGENDARY_GOLD : tr.color, 0.52 * a);
-      this.fillLance(g, tr.x0, tr.y0, tr.x1, tr.y1, hw, tr.color, 0.86 * a);
-      this.fillLance(glow, tr.x0, tr.y0, tr.x1, tr.y1, hw * coreRatio, 0xffffff, 0.96 * a);
+      const hw = Math.max(1.2, tr.width * 0.45 * a);
+      this.fillLance(g, tr.x0, tr.y0, tr.x1, tr.y1, hw, tr.color, 0.42 * a);
+      this.fillLance(g, tr.x0, tr.y0, tr.x1, tr.y1, hw * 0.42, 0xffffff, 0.56 * a);
     }
 
-    // 破风冲击锥刺
+    // 轻型破风突刺（柔和克制）
     for (let i = this.sonics.length - 1; i >= 0; i--) {
       const sn = this.sonics[i];
       sn.t += dt;
@@ -1105,38 +1037,9 @@ export class Effects {
       }
       const k = sn.t / sn.total;
       const a = 1 - k;
-      const hw = (sn.width * 0.75 + 2) * a;
-      if (sn.tier >= 3) {
-        this.fillLance(glow, sn.x0, sn.y0, sn.x1, sn.y1, hw * 2.05, LEGENDARY_VIOLET, 0.42 * a);
-      }
-      this.fillLance(glow, sn.x0, sn.y0, sn.x1, sn.y1, hw * 1.6, sn.tier >= 3 ? LEGENDARY_GOLD : sn.color, 0.55 * a);
-      this.fillLance(g, sn.x0, sn.y0, sn.x1, sn.y1, hw, sn.color, 0.9 * a);
-      this.fillLance(glow, sn.x0, sn.y0, sn.x1, sn.y1, hw * (sn.tier >= 1 ? 0.52 : 0.42), 0xffffff, 0.95 * a);
-      const ang = Math.atan2(sn.y1 - sn.y0, sn.x1 - sn.x0);
-      const nx = -Math.sin(ang);
-      const ny = Math.cos(ang);
-      for (let r = 1; r <= sn.rings; r++) {
-        const frac = 0.32 + (r / (sn.rings + 1)) * 0.58;
-        const cx = Phaser.Math.Linear(sn.x0, sn.x1, frac);
-        const cy = Phaser.Math.Linear(sn.y0, sn.y1, frac);
-        const span = (12 + r * 6) * (0.45 + 0.8 * k);
-        const back = 10 * (0.5 + 0.5 * k);
-        const tx = cx - Math.cos(ang) * back;
-        const ty = cy - Math.sin(ang) * back;
-        const ringCol = sn.tier >= 3 && r === sn.rings ? LEGENDARY_GOLD : sn.color;
-        glow.lineStyle(4 * a + 1, ringCol, 0.65 * a);
-        glow.beginPath();
-        glow.moveTo(tx + nx * span, ty + ny * span);
-        glow.lineTo(cx, cy);
-        glow.lineTo(tx - nx * span, ty - ny * span);
-        glow.strokePath();
-        g.lineStyle(1.8 * a + 0.6, 0xffffff, 0.85 * a);
-        g.beginPath();
-        g.moveTo(tx + nx * span * 0.8, ty + ny * span * 0.8);
-        g.lineTo(cx, cy);
-        g.lineTo(tx - nx * span * 0.8, ty - ny * span * 0.8);
-        g.strokePath();
-      }
+      const hw = Math.max(1.4, sn.width * 0.48 * a);
+      this.fillLance(g, sn.x0, sn.y0, sn.x1, sn.y1, hw, sn.color, 0.46 * a);
+      this.fillLance(g, sn.x0, sn.y0, sn.x1, sn.y1, hw * 0.42, 0xffffff, 0.58 * a);
     }
 
     // 光束（高阶加粗高能内核，IV 级附加金紫外鞘）
@@ -1227,7 +1130,7 @@ export class Effects {
       }
     }
 
-    // 扩散冲击波环
+    // 扩散冲击波环（清爽单环，不叠粗发光圈）
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i];
       r.t += dt;
@@ -1236,18 +1139,14 @@ export class Effects {
         continue;
       }
       const k = r.t / RING_TIME;
-      const rad = r.r * (0.34 + 0.66 * Phaser.Math.Easing.Quadratic.Out(k));
-      glow.lineStyle(10 * (1 - k) + 2, r.color, 0.55 * (1 - k));
-      glow.strokeCircle(r.x, r.y, rad);
-      g.lineStyle(4.5 * (1 - k) + 1.2, r.color, 0.92 * (1 - k));
+      const rad = r.r * (0.38 + 0.62 * Phaser.Math.Easing.Quadratic.Out(k));
+      g.lineStyle(2.4 * (1 - k) + 1.0, r.color, 0.78 * (1 - k));
       g.strokeCircle(r.x, r.y, rad);
-      glow.lineStyle(2, 0xffffff, 0.72 * (1 - k));
-      glow.strokeCircle(r.x, r.y, rad * 0.92);
-      g.fillStyle(r.color, 0.14 * (1 - k));
+      g.fillStyle(r.color, 0.06 * (1 - k));
       g.fillCircle(r.x, r.y, rad);
     }
 
-    // 钳颚撕咬双新月刃
+    // 钳颚撕咬双新月刃（清爽克制的轻弧）
     for (let i = this.chomps.length - 1; i >= 0; i--) {
       const c = this.chomps[i];
       c.t += dt;
@@ -1257,25 +1156,19 @@ export class Effects {
       }
       const k = c.t / c.total;
       const a = 1 - k;
-      const clamp = 0.55 * (1 - Phaser.Math.Easing.Cubic.Out(Math.min(1, k * 1.5)));
-      // 视觉咬合范围直抵 100% 真实射程 c.r（不再缩水到 42%~66%）
-      const rad = c.r * (0.76 + 0.24 * Phaser.Math.Easing.Quadratic.Out(k));
-      const tb = 1 + c.tier * 0.1;
+      const clamp = 0.5 * (1 - Phaser.Math.Easing.Cubic.Out(Math.min(1, k * 1.5)));
+      const rad = c.r * (0.78 + 0.22 * Phaser.Math.Easing.Quadratic.Out(k));
       for (const side of [-1, 1]) {
         const jawA = c.ang + side * (clamp + 0.05);
-        const startA = jawA - side * 0.52;
+        const startA = jawA - side * 0.45;
         const a0 = Math.min(startA, jawA);
         const a1 = Math.max(startA, jawA);
-        this.fillCrescent(glow, c.x, c.y, rad, 18 * tb * a, a0, a1, c.color, 0.58 * a, 12);
-        this.fillCrescent(g, c.x, c.y, rad, 12 * tb * a, a0, a1, c.color, 0.9 * a, 12);
-        this.fillCrescent(glow, c.x, c.y, rad + 1, (c.tier >= 1 ? 6.2 : 4.8) * tb * a, a0, a1, 0xffffff, 0.95 * a, 12);
-        if (c.tier >= 3) {
-          this.fillCrescent(glow, c.x, c.y, rad * 1.12, 7 * a, a0, a1, LEGENDARY_VIOLET, 0.52 * a, 10);
-        }
+        this.fillCrescent(g, c.x, c.y, rad, 7.5 * a, a0, a1, c.color, 0.48 * a, 12);
+        this.fillCrescent(g, c.x, c.y, rad + 0.8, 3.0 * a, a0, a1, 0xffffff, 0.62 * a, 12);
       }
     }
 
-    // 盾击扇形震荡波（1:1 覆盖真实砸击外缘 b.r）
+    // 盾击/重锤扇形震荡波（克制清爽的气浪弧）
     for (let i = this.bashes.length - 1; i >= 0; i--) {
       const b = this.bashes[i];
       b.t += dt;
@@ -1286,21 +1179,14 @@ export class Effects {
       const k = b.t / b.total;
       const a = 1 - k;
       const ease = Phaser.Math.Easing.Quadratic.Out(k);
-      const rOuter = b.r * (0.48 + 0.52 * ease);
-      const rInner = rOuter * 0.58;
+      const rOuter = b.r * (0.52 + 0.48 * ease);
       const a0 = b.ang - b.arc;
       const a1 = b.ang + b.arc;
-      const tb = 1 + b.tier * 0.1;
-      this.fillCrescent(glow, b.x, b.y, rOuter, (24 * a + 4) * tb, a0, a1, b.color, 0.6 * a, 18);
-      this.fillCrescent(g, b.x, b.y, rOuter, (15 * a + 2) * tb, a0, a1, b.color, 0.88 * a, 18);
-      this.fillCrescent(glow, b.x, b.y, rOuter + 2, (b.tier >= 1 ? 7.2 : 5.8) * a, a0 + 0.08, a1 - 0.08, 0xffffff, 0.95 * a, 16);
-      this.fillCrescent(glow, b.x, b.y, rInner, 10 * tb * a, a0 + 0.15, a1 - 0.15, b.tier >= 3 ? LEGENDARY_GOLD : b.color, 0.52 * a, 12);
-      if (b.tier >= 3) {
-        this.fillCrescent(glow, b.x, b.y, rOuter * 1.08, 8 * a, a0 + 0.1, a1 - 0.1, LEGENDARY_VIOLET, 0.55 * a, 14);
-      }
+      this.fillCrescent(g, b.x, b.y, rOuter, 10 * a + 2, a0, a1, b.color, 0.46 * a, 16);
+      this.fillCrescent(g, b.x, b.y, rOuter + 1, 3.6 * a, a0 + 0.08, a1 - 0.08, 0xffffff, 0.62 * a, 14);
     }
 
-    // 近战/重击定向命中交叉斩痕（Hit-Spark）
+    // 暴击/重击定向交叉斩痕（干脆实线，不叠 ADD 发光）
     for (let i = this.hitSlashes.length - 1; i >= 0; i--) {
       const hs = this.hitSlashes[i];
       hs.t += dt;
@@ -1310,19 +1196,15 @@ export class Effects {
       }
       const k = hs.t / hs.total;
       const a = 1 - k;
-      const grow = 0.65 + 0.55 * Phaser.Math.Easing.Quadratic.Out(k);
-      const mainLen = 19 * hs.scale * grow;
-      const crossLen = 10 * hs.scale * grow;
+      const grow = 0.65 + 0.45 * Phaser.Math.Easing.Quadratic.Out(k);
+      const mainLen = 14 * hs.scale * grow;
+      const crossLen = 7.5 * hs.scale * grow;
       const ca = Math.cos(hs.ang);
       const sa = Math.sin(hs.ang);
       const pa = -sa;
       const pb = ca;
-      // 主斩痕（黑墨微边 + 亮白锐利刃芒）
-      this.fillLance(glow, hs.x - ca * mainLen, hs.y - sa * mainLen, hs.x + ca * mainLen, hs.y + sa * mainLen, 4.4 * hs.scale * a, hs.color, 0.65 * a);
-      this.fillLance(g, hs.x - ca * mainLen, hs.y - sa * mainLen, hs.x + ca * mainLen, hs.y + sa * mainLen, 2.4 * hs.scale * a, 0xffffff, 0.98 * a);
-      // 垂直交叉细闪
-      this.fillLance(glow, hs.x - pa * crossLen, hs.y - pb * crossLen, hs.x + pa * crossLen, hs.y + pb * crossLen, 2.2 * hs.scale * a, hs.color, 0.62 * a);
-      this.fillLance(g, hs.x - pa * crossLen, hs.y - pb * crossLen, hs.x + pa * crossLen, hs.y + pb * crossLen, 1.2 * hs.scale * a, 0xffffff, 0.92 * a);
+      this.fillLance(g, hs.x - ca * mainLen, hs.y - sa * mainLen, hs.x + ca * mainLen, hs.y + sa * mainLen, 2.2 * hs.scale * a, hs.color, 0.85 * a);
+      this.fillLance(g, hs.x - pa * crossLen, hs.y - pb * crossLen, hs.x + pa * crossLen, hs.y + pb * crossLen, 1.2 * hs.scale * a, 0xffffff, 0.82 * a);
     }
 
     // 吸血 / 回血光丝（二次贝塞尔曲线从敌人飞入甲虫）
@@ -1441,7 +1323,7 @@ export class Effects {
       glow.fillTriangle(pts[0].x, pts[0].y, pts[1].x, pts[1].y, sh.x, sh.y);
     }
 
-    // 四芒爆闪星光
+    // 四芒小闪星（去掉外层 ADD 炫光，保持清爽小巧）
     for (let i = this.stars.length - 1; i >= 0; i--) {
       const st = this.stars[i];
       st.t += dt;
@@ -1451,11 +1333,10 @@ export class Effects {
       }
       const k = st.t / st.total;
       const a = 1 - k;
-      const pop = k < 0.25 ? 0.55 + (k / 0.25) * 0.65 : 1.2 - (k - 0.25) * 0.4;
+      const pop = k < 0.25 ? 0.6 + (k / 0.25) * 0.45 : 1.05 - (k - 0.25) * 0.35;
       const rad = st.r * pop;
-      this.fillStar(glow, st.x, st.y, rad * 1.25, rad * 0.24, st.rot, st.color, 0.65 * a);
-      this.fillStar(g, st.x, st.y, rad, rad * 0.2, st.rot, st.color, 0.9 * a);
-      this.fillStar(glow, st.x, st.y, rad * 0.68, rad * 0.12, st.rot, 0xffffff, 0.98 * a);
+      this.fillStar(g, st.x, st.y, rad, rad * 0.22, st.rot, st.color, 0.78 * a);
+      this.fillStar(g, st.x, st.y, rad * 0.55, rad * 0.14, st.rot, 0xffffff, 0.85 * a);
     }
 
     // 闪电

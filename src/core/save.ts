@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_BIOME, isBiomeId, type BiomeId } from '../data/biomes';
 import { CHARACTER_ORDER, CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { ITEMS } from '../data/items';
@@ -41,7 +42,7 @@ export interface SaveData {
   banishedItems: string[];
   /** 当前选用的甲壳涂装 */
   shellSkin: ShellSkinId;
-  last: { character: string; difficulty: number; weapon: string };
+  last: { character: string; difficulty: number; weapon: string; biome?: BiomeId };
   runs: number;
   wins: number;
   /** 图鉴：使用过的武器 id → 历史最高品阶（0~3） */
@@ -60,7 +61,7 @@ export interface SaveStoreState extends SaveData {
   toggleBanishItem: (itemId: string) => boolean;
   setShellSkin: (skin: ShellSkinId) => void;
   recordRun: (character: string, difficulty: number, win: boolean) => boolean;
-  rememberChoice: (character: string, difficulty: number, weapon: string) => void;
+  rememberChoice: (character: string, difficulty: number, weapon: string, biome?: BiomeId) => void;
   recordWeaponSeen: (id: string, tier: number) => void;
   recordItemSeen: (id: string) => void;
   recordEnemyKillsBatch: (kills: Record<string, number>) => void;
@@ -90,7 +91,7 @@ function freshSaveData(): SaveData {
     challengesCleared: [],
     banishedItems: [],
     shellSkin: 'default',
-    last: { character: CHARACTER_ORDER[0], difficulty: 0, weapon: CHARACTERS[CHARACTER_ORDER[0]].startWeapons[0] },
+    last: { character: CHARACTER_ORDER[0], difficulty: 0, weapon: CHARACTERS[CHARACTER_ORDER[0]].startWeapons[0], biome: DEFAULT_BIOME },
     runs: 0,
     wins: 0,
     seenWeapons: {},
@@ -118,7 +119,11 @@ function sanitizeSaveData(parsed: Partial<SaveData> | undefined): SaveData {
     data.shellSkin = parsed.shellSkin as ShellSkinId;
   }
   if (parsed.last && typeof parsed.last === 'object' && CHARACTERS[parsed.last.character]) {
-    data.last = { ...data.last, ...parsed.last };
+    data.last = {
+      ...data.last,
+      ...parsed.last,
+      biome: isBiomeId(parsed.last.biome) ? parsed.last.biome : DEFAULT_BIOME,
+    };
   }
   data.runs = Math.max(0, Number(parsed.runs) || 0);
   data.wins = Math.max(0, Number(parsed.wins) || 0);
@@ -249,8 +254,8 @@ export const useSaveStore = createStore<SaveStoreState>()(
         return newTier;
       },
 
-      rememberChoice: (character, difficulty, weapon) => {
-        set({ last: { character, difficulty, weapon } });
+      rememberChoice: (character, difficulty, weapon, biome = DEFAULT_BIOME) => {
+        set({ last: { character, difficulty, weapon, biome } });
       },
 
       recordWeaponSeen: (id, tier) => {
@@ -432,8 +437,8 @@ export function recordRun(character: string, difficulty: number, win: boolean): 
   return useSaveStore.getState().recordRun(character, difficulty, win);
 }
 
-export function rememberChoice(character: string, difficulty: number, weapon: string): void {
-  useSaveStore.getState().rememberChoice(character, difficulty, weapon);
+export function rememberChoice(character: string, difficulty: number, weapon: string, biome?: BiomeId): void {
+  useSaveStore.getState().rememberChoice(character, difficulty, weapon, biome);
 }
 
 /** 保存波间局中进度（断点续玩） */

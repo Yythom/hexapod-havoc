@@ -29,6 +29,8 @@ export interface CombatHost {
   onCritSpark?(x: number, y: number, count: number): void;
   /** 极短微顿帧反馈（重击/爆炸/精英击杀） */
   onHitstop?(sec: number): void;
+  /** 火焰/灼烧命中坐标回调（用于枯叶树洞引燃干叶堆） */
+  onFireHit?(x: number, y: number, dps: number): void;
   /** 命中时向周围发射弹片（Cacti Club / Sniper Gun / Thunder Sword） */
   burst?(x: number, y: number, count: number, damage: number, texture: string, radius: number, speed: number, src: HitSource): void;
 }
@@ -98,15 +100,11 @@ export class HitResolver {
     if (killed && (e.def.elite || e.def.boss)) {
       this.host.onHitstop?.(e.def.boss ? 0.07 : 0.042);
     }
-    if (src.tier >= 3) {
-      // IV 级传说武器命中自带额外小爆星
-      this.fx?.star(x, y, crit ? 18 : 13, 0xff8ce8, Math.random() * Math.PI);
-    }
     if (crit) {
-      this.fx?.star(x, y, 14 + src.tier * 1.5, 0xffe258);
+      // 暴击数字本身已足够醒目，仅在远程暴击时补一记小巧轻闪，不再满屏放星光
       if (def.kind !== 'melee') {
         const hitAng = Math.hypot(dirX, dirY) > 0.01 ? Math.atan2(dirY, dirX) : Math.random() * Math.PI;
-        this.fx?.hitSlash(x, y, hitAng, 0xffe468, 1.12);
+        this.fx?.hitSlash(x, y, hitAng, 0xffe468, 0.88);
       }
       if (mods.critNova > 0) {
         const nr = 58;
@@ -127,25 +125,23 @@ export class HitResolver {
     if (fx) {
       if (!killed) {
         if (fx.burn) {
-          this.enemies.applyBurn(e, damage * BURN_RATIO * (1 + mods.burnDamagePct));
-          this.fx?.burst(x, y, 0xff7828, 4, 115, 0.72);
+          const burnDps = damage * BURN_RATIO * (1 + mods.burnDamagePct);
+          this.enemies.applyBurn(e, burnDps);
+          this.host.onFireHit?.(x, y, burnDps);
+          this.fx?.burst(x, y, 0xff7828, 2, 95, 0.6);
         }
         if (fx.freeze) {
           this.enemies.applyFreeze(e, fx.freeze);
-          this.fx?.ring(x, y, 24, 0x7ce8ff);
-          this.fx?.star(x, y, 13, 0x9cf2ff, 0);
         }
         if (fx.vulnerable) {
           this.enemies.applyVulnerable(e);
-          this.fx?.star(x, y, 14, 0xeb68ff, Math.PI / 4);
         }
         if (fx.poison) {
           this.enemies.applyPoison(e, fx.poison, 1, 3 + this.host.mods.poisonDuration);
-          this.fx?.poisonBubbles(x, y, 3);
+          this.fx?.poisonBubbles(x, y, 2);
         }
         if (fx.slow) {
           this.enemies.applySlow(e, 2, Math.max(0.2, 1 - fx.slow));
-          this.fx?.ring(x, y, 18, 0x7ce8ff);
         }
         if (fx.burst && this.host.burst) {
           this.host.burst(x, y, fx.burst.count, Math.max(1, Math.round(damage * fx.burst.damage)), fx.burst.texture, fx.burst.radius, fx.burst.speed, src);
@@ -171,8 +167,10 @@ export class HitResolver {
     }
 
     // 蜗老板武器附魔效果（炽焰 / 寒霜 / 贪婪）
-    if (!killed && enchant === 'ignite') {
-      this.enemies.applyBurn(e, damage * BURN_RATIO * 1.2 * (1 + mods.burnDamagePct));
+    if (enchant === 'ignite') {
+      const burnDps = damage * BURN_RATIO * 1.2 * (1 + mods.burnDamagePct);
+      if (!killed) this.enemies.applyBurn(e, burnDps);
+      this.host.onFireHit?.(x, y, burnDps);
       this.fx?.burst(x, y, 0xff7828, 3, 100, 0.65);
     }
     if (!killed && enchant === 'frost') {

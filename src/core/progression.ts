@@ -26,10 +26,10 @@ export function tierWeights(wave: number, luck: number): number[] {
   return row.weights.map((w, i) => (i === 0 ? w : w * Math.pow(f, LUCK_EXP[i])));
 }
 
-export function rollTier(wave: number, luck: number): number {
+export function rollTier(wave: number, luck: number, rng: () => number = Math.random): number {
   const weights = tierWeights(wave, luck);
   const total = weights.reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
+  let r = rng() * total;
   for (let i = 0; i < weights.length; i++) {
     r -= weights[i];
     if (r < 0) return i;
@@ -118,13 +118,19 @@ function upgradeWeight(stat: keyof Stats, run?: RunState): number {
 }
 
 /** 按构筑权重随机出 count 个不重复的属性升级选项 */
-export function rollUpgrades(wave: number, luck: number, count = 4, run?: RunState): UpgradeOption[] {
+export function rollUpgrades(
+  wave: number,
+  luck: number,
+  count = 4,
+  run?: RunState,
+  rng: () => number = Math.random,
+): UpgradeOption[] {
   const pool = UPGRADES.map((u) => ({ u, w: upgradeWeight(u.stat, run) })).filter((x) => x.w > 0);
   const out: UpgradeOption[] = [];
   while (out.length < count && pool.length > 0) {
     let total = 0;
     for (const p of pool) total += p.w;
-    let r = Math.random() * total;
+    let r = rng() * total;
     let idx = pool.length - 1;
     for (let i = 0; i < pool.length; i++) {
       r -= pool[i].w;
@@ -134,7 +140,7 @@ export function rollUpgrades(wave: number, luck: number, count = 4, run?: RunSta
       }
     }
     const picked = pool.splice(idx, 1)[0].u;
-    const tier = rollTier(wave, luck);
+    const tier = rollTier(wave, luck, rng);
     out.push({ stat: picked.stat, tier, value: picked.values[tier] });
   }
   return out;

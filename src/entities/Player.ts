@@ -30,6 +30,9 @@ export class Player {
   dashStartY = 0;
   dashDirX = 1;
   dashDirY = 0;
+  /** 青苔池塘湿滑惯性速度缓存 */
+  vx = 0;
+  vy = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, shell: string, skin?: ShellSkinId) {
     this.view = new BeetleView(scene, x, y, shell);
@@ -82,8 +85,24 @@ export class Player {
     return true;
   }
 
-  /** ix/iy：移动方向，长度 0~1；windX/windY：暴雨阵风偏置 */
-  update(dt: number, ix: number, iy: number, baseSpeed: number, shield = false, windX = 0, windY = 0): boolean {
+  /** 波次开局清空惯性速度 */
+  resetMotion(): void {
+    this.vx = 0;
+    this.vy = 0;
+  }
+
+  /** ix/iy：移动方向，长度 0~1；windX/windY：暴雨阵风偏置；slippery：青苔池塘湿滑轻惯性 */
+  update(
+    dt: number,
+    ix: number,
+    iy: number,
+    baseSpeed: number,
+    shield = false,
+    windX = 0,
+    windY = 0,
+    slippery = false,
+    obstacles?: readonly { x: number; y: number; r: number }[],
+  ): boolean {
     if (!Number.isFinite(ix) || !Number.isFinite(iy)) {
       ix = 0;
       iy = 0;
@@ -112,6 +131,8 @@ export class Player {
     if (this.dashTime > 0) {
       this.dashTime = Math.max(0, this.dashTime - dt);
       const dashSpeed = 650;
+      this.vx = this.dashDirX * baseSpeed * 0.7;
+      this.vy = this.dashDirY * baseSpeed * 0.7;
       v.x = Phaser.Math.Clamp(v.x + this.dashDirX * dashSpeed * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
       v.y = Phaser.Math.Clamp(v.y + this.dashDirY * dashSpeed * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
       v.rotation = Math.atan2(this.dashDirY, this.dashDirX);
@@ -129,15 +150,47 @@ export class Player {
         iy /= len;
         len = 1;
       }
-      if (len > 0.01) {
-        v.x = Phaser.Math.Clamp(v.x + (ix * speed + windX) * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
-        v.y = Phaser.Math.Clamp(v.y + (iy * speed + windY) * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
-        v.rotation = Phaser.Math.Angle.RotateTo(v.rotation, Math.atan2(iy, ix), 12 * dt);
-      } else if (Math.abs(windX) > 0.1 || Math.abs(windY) > 0.1) {
-        v.x = Phaser.Math.Clamp(v.x + windX * 0.35 * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
-        v.y = Phaser.Math.Clamp(v.y + windY * 0.35 * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
+      if (slippery) {
+        const tx = len > 0.01 ? ix * speed + windX : windX * 0.35;
+        const ty = len > 0.01 ? iy * speed + windY : windY * 0.35;
+        const k = 1 - Math.exp(-dt * (len > 0.01 ? 8.5 : 6.0));
+        this.vx += (tx - this.vx) * k;
+        this.vy += (ty - this.vy) * k;
+        if (Math.hypot(this.vx, this.vy) > 1.5) {
+          v.x = Phaser.Math.Clamp(v.x + this.vx * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
+          v.y = Phaser.Math.Clamp(v.y + this.vy * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
+          const aimAng = len > 0.01 ? Math.atan2(iy, ix) : Math.atan2(this.vy, this.vx);
+          v.rotation = Phaser.Math.Angle.RotateTo(v.rotation, aimAng, 12 * dt);
+        }
+        animLen = Math.min(1, Math.hypot(this.vx, this.vy) / Math.max(1, speed));
+      } else {
+        this.vx = 0;
+        this.vy = 0;
+        if (len > 0.01) {
+          v.x = Phaser.Math.Clamp(v.x + (ix * speed + windX) * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
+          v.y = Phaser.Math.Clamp(v.y + (iy * speed + windY) * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
+          v.rotation = Phaser.Math.Angle.RotateTo(v.rotation, Math.atan2(iy, ix), 12 * dt);
+        } else if (Math.abs(windX) > 0.1 || Math.abs(windY) > 0.1) {
+          v.x = Phaser.Math.Clamp(v.x + windX * 0.35 * dt, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
+          v.y = Phaser.Math.Clamp(v.y + windY * 0.35 * dt, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
+        }
+        animLen = len;
       }
-      animLen = len;
+    }
+
+    // 柔和绕过木桩掩体，不卡顿
+    if (obstacles && obstacles.length > 0) {
+      for (const o of obstacles) {
+        const dx = v.x - o.x;
+        const dy = v.y - o.y;
+        const minD = this.radius + o.r;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 0 && d2 < minD * minD) {
+          const d = Math.sqrt(d2);
+          v.x = Phaser.Math.Clamp(o.x + (dx / d) * minD, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
+          v.y = Phaser.Math.Clamp(o.y + (dy / d) * minD, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
+        }
+      }
     }
 
     v.setStatus(shield, this.hasteTime > 0 || this.dashTime > 0, this.slowTime > 0, this.frenzyTime > 0 || this.mantisCritTime > 0);

@@ -66,10 +66,10 @@ export function isContractWave(wave: number): boolean {
 }
 
 /** 抽取两条不同的赌约供选择 */
-export function rollContracts(): [ContractId, ContractId] {
+export function rollContracts(rng: () => number = Math.random): [ContractId, ContractId] {
   const pool = [...CONTRACT_ORDER];
-  const a = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-  const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+  const a = pool.splice(Math.floor(rng() * pool.length), 1)[0];
+  const b = pool.splice(Math.floor(rng() * pool.length), 1)[0];
   return [a, b];
 }
 

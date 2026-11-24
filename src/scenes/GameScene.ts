@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
+import { ensureBiomeGround } from '../art/biomeGrounds';
 import { bgm } from '../audio/bgm';
 import { sfx } from '../audio/sfx';
 import { CAMERA_ZOOM, DEPTH, IS_COARSE_POINTER, RENDER_SCALE, WORLD_HEIGHT, WORLD_MARGIN, WORLD_WIDTH } from '../config';
 import { bus, EVT, listen } from '../core/bus';
 import { MAX_SCREEN_RANGE } from '../core/combat';
+import type { DailyMutatorId } from '../core/daily';
 import { touchMove } from '../core/input';
 import { RunState, type RunSetup, type SavedRun } from '../core/RunState';
 import {
@@ -17,11 +19,13 @@ import {
   recordWeaponSeen,
   saveActiveRun,
 } from '../core/save';
+import type { SeedChallengeTarget } from '../core/seed';
 import { activeSets } from '../core/sets';
 import { getSettings, useSettingsStore } from '../core/settings';
 import { weaponPool } from '../core/shop';
 import { checkUnlocks } from '../core/unlocks';
 import { damageTakenMultiplier, dodgeChance, moveSpeed, pickupRange, regenPerSecond } from '../core/stats';
+import type { BiomeId } from '../data/biomes';
 import { ENEMIES } from '../data/enemies';
 import { waveDefFor, WAVES } from '../data/waves';
 import { WEAPONS, type WeaponClass } from '../data/weapons';
@@ -51,6 +55,11 @@ export interface ResultData {
   nectar: number;
   character: string;
   difficulty: number;
+  weapon: string;
+  biome: BiomeId;
+  seed: string;
+  mutators?: DailyMutatorId[];
+  seedTarget?: SeedChallengeTarget;
   /** 这局通关后解锁了下一档难度 */
   newDifficulty: boolean;
   /** 这局无尽模式是否刷新最高波次纪录 */
@@ -77,9 +86,9 @@ export interface ResultData {
 const CLEANUP_TIME = 0.9;
 /** 受伤后的无敌时间 */
 const INVULN_TIME = 0.5;
-/** 普通怪掉宝箱的基础概率；幸运每 1 点相对提高 1%（最多 ×3），总概率不超过 0.8% */
-const CHEST_CHANCE = 0.003;
-const CHEST_CHANCE_MAX = 0.008;
+/** 普通怪掉宝箱的基础概率；幸运每 1 点相对提高 1%（最多 ×3），总概率不超过 0.42% */
+const CHEST_CHANCE = 0.0015;
+const CHEST_CHANCE_MAX = 0.0042;
 /** 普通怪掉果实（回 3 血）的概率 */
 const FRUIT_CHANCE = 0.02;
 const HEAL_AMOUNT = 3;
@@ -237,7 +246,8 @@ export class GameScene extends Phaser.Scene {
     this.registry.set('run', this.run);
 
     const groundTint = GROUND_WEATHER_TINT[this.run.activeWeather] ?? 0xffffff;
-    this.groundImg = this.add.image(0, 0, 'ground').setOrigin(0).setDepth(DEPTH.ground).setTint(groundTint);
+    const groundKey = ensureBiomeGround(this, this.run.biome.id);
+    this.groundImg = this.add.image(0, 0, groundKey).setOrigin(0).setDepth(DEPTH.ground).setTint(groundTint);
     this.fx = new Effects(this);
     this.tel = new Telegraphs(this);
     this.arena = new BackyardArena(this, this.fx, this.tel);
@@ -336,6 +346,9 @@ export class GameScene extends Phaser.Scene {
       },
       onCritSpark: (x, y, count) => this.fireSeekingSparks(x, y, count, 10 + 0.5 * this.run.stats.ranged),
       onHitstop: (sec) => this.triggerHitstop(sec),
+      onFireHit: (x, y, dps) => {
+        this.arena.igniteAt(x, y, dps);
+      },
       burst: (x, y, count, damage, texture, radius, speed, src) => {
         const bCol = texture === 'laserbolt' ? 0x4ef4ff : 0xd8ff78;
         this.fx.star(x, y, 16, bCol);
@@ -440,7 +453,17 @@ export class GameScene extends Phaser.Scene {
     this.overhealCd = Math.max(0, this.overhealCd - dt);
     this.player.syncDashConfig(run.maxDashCharges, stats.speedPct, run.mods.dashCooldownPct);
     const [windX, windY] = run.phase === 'combat' ? this.arena.windVector : [0, 0];
-    const dashEnded = this.player.update(dt, ix, iy, moveSpeed(stats), run.shield > 0, windX, windY);
+    const dashEnded = this.player.update(
+      dt,
+      ix,
+      iy,
+      moveSpeed(stats),
+      run.shield > 0,
+      windX,
+      windY,
+      !!run.biome.slippery,
+      this.arena.obstacles,
+    );
     run.dashCharges = this.player.dashCharges;
     run.dashRatio =
       this.player.dashCharges >= this.player.maxDashCharges
@@ -509,9 +532,17 @@ export class GameScene extends Phaser.Scene {
         }
       }
       run.maxSummons = Math.max(run.maxSummons, this.summons.aliveCount);
-      this.shots.update(dt, this.player.x, this.player.y, this.player.radius, (d, kind) => {
-        if (this.damagePlayer(d) && kind === 'silk') this.player.slowTime = SILK_SLOW_TIME;
-      });
+      this.shots.update(
+        dt,
+        this.player.x,
+        this.player.y,
+        this.player.radius,
+        (d, kind) => {
+          if (this.damagePlayer(d) && kind === 'silk') this.player.slowTime = SILK_SLOW_TIME;
+        },
+        this.arena.obstacles,
+        (bx, by) => this.fx.burst(bx, by, 0xc89862, 4, 85, 0.7),
+      );
       if (!run.waveNoHeal) {
         if (run.mods.torture > 0) {
           run.hp = Math.min(run.maxHp, run.hp + 5 * dt);
@@ -655,13 +686,15 @@ export class GameScene extends Phaser.Scene {
     if (contract === 'swarm_harvest') run.waveNectarMult = 1.55;
     if (contract === 'glass_frenzy') run.waveContractDamagePct = 0.4;
 
+    const waveRng = run.rng('wave', n);
+    const arenaRng = run.rng('arena', n);
     // 百变武器词条：第 2 波起每波开局所有武器随机重铸为同品阶新武器（继承诅咒与附魔）
     let chaosReforged = false;
     if (run.hasMutator('chaos') && n > 1 && run.weapons.length > 0) {
       for (const ow of run.weapons) {
         const pool = weaponPool(run, ow.tier);
         if (pool.length > 0) {
-          const pick = pool[Math.floor(Math.random() * pool.length)];
+          const pick = pool[Math.floor(waveRng() * pool.length)];
           ow.id = pick.id;
         }
       }
@@ -725,6 +758,7 @@ export class GameScene extends Phaser.Scene {
     this.player.mantisCritTime = 0;
     this.player.dashTime = 0;
     this.player.dashCd = 0;
+    this.player.resetMotion();
     this.player.syncDashConfig(run.maxDashCharges, run.stats.speedPct, run.mods.dashCooldownPct);
     this.player.dashCharges = this.player.maxDashCharges;
     this.waveKillsById = {};
@@ -734,11 +768,13 @@ export class GameScene extends Phaser.Scene {
       recordWeaponSeen(w.id, w.tier);
     }
     this.weapons.sync(run.weapons, run.weaponSlots);
-    this.arena.startWave(run.activeWeather);
+    this.arena.startWave(run.activeWeather, run.biome, arenaRng);
     const spawnBonus = run.mods.spawnRatePct + (contract === 'swarm_harvest' ? 0.4 : 0);
     this.spawner.startWave(def, n, run.difficulty, spawnBonus, run.hasMutator('treasure'), {
       boomParty: run.hasMutator('boom_party'),
       extraElite: contract === 'elite_bounty',
+      dewIntervalMult: run.biome.dewIntervalMult,
+      rng: waveRng,
     });
     // 诱饵甜果（Bait）：开局立刻空降专属突袭怪——噬蜜飞鳗（冲锋并向两侧甩弹幕）
     if (baitWaves > 0) {
@@ -1073,7 +1109,8 @@ export class GameScene extends Phaser.Scene {
       this.corpseDepth--;
     }
     if (run.stats.curse > 0) {
-      const cRaw = run.stats.curse * 0.16;
+      // 每点诅咒每杀额外 0.04 蜜（原 0.16，过度雪球）
+      const cRaw = run.stats.curse * 0.04;
       const cExtra = Math.floor(cRaw) + (Math.random() < cRaw - Math.floor(cRaw) ? 1 : 0);
       if (cExtra > 0) this.pickups.dropNectar(e.x, e.y, cExtra);
     }
@@ -1540,7 +1577,8 @@ export class GameScene extends Phaser.Scene {
     run.nectar += n;
     run.waveNectar += n;
     run.totalNectar += n;
-    const xpGain = n * (1 + run.mods.xpGainPct) * run.waveXpMult;
+    // 约 1.54 花蜜 = 1 经验：把 20 波的等级压回 35~50 级，避免 70+ 次属性升级
+    const xpGain = n * 0.65 * (1 + run.mods.xpGainPct) * run.waveXpMult;
     if (run.addXp(xpGain) > 0) {
       this.fx.number(this.player.x, this.player.y - 44, '升级！', 'level');
       sfx.play('levelUp');
@@ -1701,6 +1739,11 @@ export class GameScene extends Phaser.Scene {
       nectar: run.totalNectar,
       character,
       difficulty,
+      weapon: run.setup.weapon,
+      biome: run.biome.id,
+      seed: run.seed,
+      mutators: run.setup.mutators,
+      seedTarget: run.setup.seedTarget,
       newDifficulty,
       newEndlessRecord,
       daily: run.setup.daily,

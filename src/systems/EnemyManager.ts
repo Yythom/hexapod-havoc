@@ -201,7 +201,8 @@ export class EnemyManager {
     const e = this.pool.pop() ?? new Enemy(this.scene, def.texture);
     const mult = this.host.difficulty.mult;
     e.def = def;
-    const curseMult = 1 + Math.max(0, this.host.curse) * 0.01;
+    // 每点诅咒 +2% 敌人生命/伤害：诅咒必须是真实风险，而不只是收益
+    const curseMult = 1 + Math.max(0, this.host.curse) * 0.02;
     e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult;
     e.lastHitCrit = false;
     e.lastHitMelee = false;
@@ -975,8 +976,8 @@ export class EnemyManager {
       }
 
       case 'pursuer': {
-        // 疾影猎虫（Pursuer）：存活越久越快，最高叠到基础移速 2.4 倍，逼迫优先击杀
-        e.speed = Math.min(e.baseSpeed * 2.4, e.speed + 14 * dt);
+        // 疾影猎虫（Pursuer）：存活越久越快，最高叠到基础移速 2.0 倍，逼迫优先击杀
+        e.speed = Math.min(e.baseSpeed * 2.0, e.speed + 14 * dt);
         if (e.speed > e.baseSpeed * 1.45 && Math.random() < dt * 10) {
           this.fx.burst(e.x, e.y, 0xff7a34, 1, 55, 0.55);
         }

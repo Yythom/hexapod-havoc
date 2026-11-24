@@ -64,8 +64,16 @@ export class EnemyShots {
     this.list.push(s);
   }
 
-  /** onHit 返回后子弹消失 */
-  update(dt: number, px: number, py: number, pr: number, onHit: (damage: number, kind: EnemyShotKind) => void): void {
+  /** onHit 返回后子弹消失；obstacles 用于枯叶树洞木桩挡弹 */
+  update(
+    dt: number,
+    px: number,
+    py: number,
+    pr: number,
+    onHit: (damage: number, kind: EnemyShotKind) => void,
+    obstacles?: readonly { x: number; y: number; r: number }[],
+    onBlock?: (x: number, y: number) => void,
+  ): void {
     this.pulse += dt;
     const g = this.auraG;
     g.clear();
@@ -82,6 +90,18 @@ export class EnemyShots {
       const dy = s.y - py;
       const rr = SHOT_RADIUS + pr;
       let dead = s.life <= 0 || s.x < 0 || s.y < 0 || s.x > WORLD_WIDTH || s.y > WORLD_HEIGHT;
+      if (!dead && obstacles && obstacles.length > 0) {
+        for (const o of obstacles) {
+          const ox = s.x - o.x;
+          const oy = s.y - o.y;
+          const orr = SHOT_RADIUS + o.r;
+          if (ox * ox + oy * oy <= orr * orr) {
+            onBlock?.(s.x, s.y);
+            dead = true;
+            break;
+          }
+        }
+      }
       if (!dead && dx * dx + dy * dy < rr * rr) {
         onHit(s.damage, s.kind);
         dead = true;

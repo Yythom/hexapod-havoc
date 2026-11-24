@@ -11,11 +11,11 @@ export const OFFER_COUNT = 4;
 const WEAPON_OFFER_CHANCE = 0.23;
 const WEAPON_OFFER_CHANCE_FILLING = 0.35;
 const SELL_RATIO = 0.25;
-/** 诅咒商品每次购买附加的诅咒值 */
-export const CURSED_OFFER_CURSE = 3;
-/** 非唯一道具堆叠上限：普通~稀有最多 4 件，传说最多 2 件，防后期高幸运叠出爆炸面板 */
+/** 诅咒商品每次购买附加的诅咒值（原 3，配合出现率会形成 +9/波的雪球） */
+export const CURSED_OFFER_CURSE = 1;
+/** 非唯一道具堆叠上限：普通最多 3 件，精良/稀有/传说最多 2 件，压住后期把整个道具池买空 */
 function maxItemStack(d: ItemDef): number {
-  return d.rarity >= 3 ? 2 : 4;
+  return d.rarity === 0 ? 3 : 2;
 }
 const MAX_TIER = TIERS.length - 1;
 
@@ -46,14 +46,14 @@ interface BuildProfile {
   hasProjectiles: boolean;
 }
 
-function pickWeighted<T>(items: T[], weightOf: (item: T) => number): T {
+function pickWeighted<T>(items: T[], weightOf: (item: T) => number, rng: () => number = Math.random): T {
   let total = 0;
   const weights = items.map((it) => {
     const w = Math.max(0.01, weightOf(it));
     total += w;
     return w;
   });
-  let r = Math.random() * total;
+  let r = rng() * total;
   for (let i = 0; i < items.length; i++) {
     r -= weights[i];
     if (r < 0) return items[i];
@@ -290,14 +290,20 @@ export function weaponPool(run: RunState, tier = 0) {
 }
 
 /** 按品质和构筑加权挑一件道具；该品质没有就往低品质找。同一次刷新尽量不重复。 */
-function rollItem(tier: number, run: RunState, prof: BuildProfile, avoidIds?: Set<string>): string | null {
+function rollItem(
+  tier: number,
+  run: RunState,
+  prof: BuildProfile,
+  avoidIds?: Set<string>,
+  rng: () => number = Math.random,
+): string | null {
   for (let t = tier; t >= 0; t--) {
     let pool = Object.values(ITEMS).filter((d) => d.rarity === t && itemAllowed(d.id, run));
     if (avoidIds && pool.length > 1) {
       const fresh = pool.filter((d) => !avoidIds.has(d.id));
       if (fresh.length > 0) pool = fresh;
     }
-    if (pool.length > 0) return pickWeighted(pool, (d) => itemWeight(d, run, prof)).id;
+    if (pool.length > 0) return pickWeighted(pool, (d) => itemWeight(d, run, prof), rng).id;
   }
   return null;
 }
@@ -305,32 +311,38 @@ function rollItem(tier: number, run: RunState, prof: BuildProfile, avoidIds?: Se
 /** 商店刷新出紫火诅咒商品的概率（第 2 波起出现；随诅咒值与诅咒黑市词条提高） */
 export function cursedOfferChance(run: RunState): number {
   if (run.wave < 2 && !run.hasMutator('cursed_market')) return 0;
-  let p = Math.min(0.32, 0.08 + Math.max(0, run.stats.curse) * 0.012);
+  let p = Math.min(0.2, 0.08 + Math.max(0, run.stats.curse) * 0.006);
   if (run.hasMutator('cursed_market')) p = Math.max(0.45, p * 2);
   if (run.curseOfferBonus) p = Math.min(0.7, p + 0.28);
   return p;
 }
 
-function rollOffer(run: RunState, prof: BuildProfile, forceWeapon: boolean, avoidItems: Set<string>): Offer {
-  const tier = rollTier(run.wave, run.stats.luck);
+function rollOffer(
+  run: RunState,
+  prof: BuildProfile,
+  forceWeapon: boolean,
+  avoidItems: Set<string>,
+  rng: () => number = Math.random,
+): Offer {
+  const tier = rollTier(run.wave, run.stats.luck, rng);
   const pool = weaponPool(run, tier);
   const wChance = run.weapons.length < run.weaponSlots ? WEAPON_OFFER_CHANCE_FILLING : WEAPON_OFFER_CHANCE;
-  const pickWeapon = pool.length > 0 && (forceWeapon || Math.random() < wChance);
-  const cursed = Math.random() < cursedOfferChance(run);
+  const pickWeapon = pool.length > 0 && (forceWeapon || rng() < wChance);
+  const cursed = rng() < cursedOfferChance(run);
   if (!pickWeapon) {
-    const itemId = rollItem(tier, run, prof, avoidItems);
+    const itemId = rollItem(tier, run, prof, avoidItems, rng);
     if (itemId) {
       avoidItems.add(itemId);
       const hasPositiveStat = Object.values(ITEMS[itemId].stats).some((v) => typeof v === 'number' && v > 0);
       return { kind: 'item', id: itemId, tier: ITEMS[itemId].rarity, locked: false, cursed: cursed && hasPositiveStat ? true : undefined };
     }
   }
-  const w = pickWeighted(pool, (d) => weaponWeight(d, run, prof));
+  const w = pickWeighted(pool, (d) => weaponWeight(d, run, prof), rng);
   return { kind: 'weapon', id: w.id, tier, locked: false, cursed: cursed ? true : undefined };
 }
 
 /** 进商店或刷新：锁定的商品保留，其余（包括已买走的空位）重新随机 */
-export function refreshOffers(run: RunState): void {
+export function refreshOffers(run: RunState, rng: () => number = Math.random): void {
   const prof = buildProfile(run);
   const avoidItems = new Set<string>();
   for (const o of run.offers) {
@@ -346,7 +358,7 @@ export function refreshOffers(run: RunState): void {
     if (!o || !o.locked) {
       const forceW = needWeaponSlot && !forced;
       if (forceW) forced = true;
-      run.offers[i] = rollOffer(run, prof, forceW, avoidItems);
+      run.offers[i] = rollOffer(run, prof, forceW, avoidItems, rng);
     }
   }
 }
@@ -482,7 +494,7 @@ export interface SmeltResult {
 }
 
 /** 蜗老板蜕壳台：熔炼 1 件非唯一道具，返还 60% 花蜜并永久奖励随机基础属性 */
-export function smeltItem(run: RunState, itemId: string): SmeltResult | null {
+export function smeltItem(run: RunState, itemId: string, rng: () => number = Math.random): SmeltResult | null {
   const def = ITEMS[itemId];
   if (!def || def.unique || (run.items[itemId] ?? 0) <= 0 || run.forgeUsed) return null;
   run.items[itemId] -= 1;
@@ -495,7 +507,7 @@ export function smeltItem(run: RunState, itemId: string): SmeltResult | null {
     { stat: 'maxHp', amount: 4 },
     { stat: 'luck', amount: 6 },
   ];
-  const pick = rewardPool[Math.floor(Math.random() * rewardPool.length)];
+  const pick = rewardPool[Math.floor(rng() * rewardPool.length)];
   run.bonus[pick.stat] += pick.amount;
   run.forgeUsed = true;
   run.recomputeStats();
@@ -516,9 +528,9 @@ export function sellWeapon(run: RunState, i: number): number {
   return v;
 }
 
-export function rollChestItem(run: RunState): string {
+export function rollChestItem(run: RunState, rng: () => number = Math.random): string {
   const prof = buildProfile(run);
-  return rollItem(rollTier(run.wave, run.stats.luck), run, prof) ?? Object.keys(ITEMS)[0];
+  return rollItem(rollTier(run.wave, run.stats.luck, rng), run, prof, undefined, rng) ?? Object.keys(ITEMS)[0];
 }
 
 export function chestSellValue(id: string, wave: number): number {

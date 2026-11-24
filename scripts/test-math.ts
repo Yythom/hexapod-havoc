@@ -33,8 +33,10 @@ import {
   updateSettings,
   useSettingsStore,
 } from '../src/core/settings';
-import { addItem, buyOffer, enchantWeapon, mergeWeapons, refreshOffers, rerollCost, smeltItem } from '../src/core/shop';
+import { compareSeedTarget, decodeSeedChallenge, encodeSeedChallenge, generateSeed, normalizeSeed } from '../src/core/seed';
+import { addItem, buyOffer, CURSED_OFFER_CURSE, enchantWeapon, mergeWeapons, refreshOffers, rerollCost, rollChestItem, smeltItem } from '../src/core/shop';
 import { BASE_STATS, damageTakenMultiplier, dodgeChance, ZERO_STATS } from '../src/core/stats';
+import { BIOME_ORDER, BIOMES, resolveBiome } from '../src/data/biomes';
 import { ENEMIES, enemyDamage, enemyHp } from '../src/data/enemies';
 import { ITEMS, ZERO_MODS } from '../src/data/items';
 import { waveDefFor } from '../src/data/waves';
@@ -103,14 +105,14 @@ test('商店刷新费随波次与连刷次数单调递增且后期步长放大',
   assert.ok(stepW20 > stepW1 * 4, `expected wave 20 reroll step (${stepW20}) >> wave 1 (${stepW1})`);
 });
 
-test('道具堆叠上限：传说唯一件不可叠加、非唯一传说上限 2、普通上限 4', () => {
+test('道具堆叠上限：传说唯一件不可叠加、精良/稀有/传说上限 2、普通上限 3', () => {
   assert.equal(ITEMS.giantscarab.unique, true);
   assert.equal(ITEMS.glasswing.unique, true);
   const run = new RunState({ character: 'stag', difficulty: 0, weapon: 'slingshot' });
   for (let i = 0; i < 6; i++) addItem(run, 'royaljelly');
   assert.equal(run.itemCount('royaljelly'), 2);
   for (let i = 0; i < 6; i++) addItem(run, 'leaf');
-  assert.equal(run.itemCount('leaf'), 4);
+  assert.equal(run.itemCount('leaf'), 3);
 });
 
 test('升级四选一严格过滤角色死属性（蚁后 / 蚊子 / 刺蛾 / 螳螂）', () => {
@@ -358,7 +360,7 @@ test('紫火诅咒商品强化、诅咒累加、合成继承与 IV 阶传说觉�
   run.offers = [{ kind: 'weapon', id: 'pistol', tier: 0, locked: false, cursed: true }];
   const curseBefore = run.stats.curse;
   assert.equal(buyOffer(run, 0), true);
-  assert.equal(run.stats.curse, curseBefore + 3);
+  assert.equal(run.stats.curse, curseBefore + CURSED_OFFER_CURSE);
   assert.equal(run.weapons[1].cursed, true);
 
   const normalDmg = weaponDamage(WEAPONS.pistol, 0, run.stats, run.mods, run.weapons[0]);
@@ -450,6 +452,82 @@ test('后院赌约、主题挑战与图鉴里程碑持久化', () => {
   setShellSkin('cosmic');
   assert.equal(useSaveStore.getState().shellSkin, 'cosmic');
   setSaveSandbox(false);
+});
+
+test('多生态场地属性偏置、规则配置与断点续玩保留', () => {
+  assert.deepEqual(BIOME_ORDER, ['meadow', 'pond', 'hollow']);
+  assert.equal(resolveBiome('unknown').id, 'meadow');
+
+  const meadow = new RunState({ character: 'stag', difficulty: 0, weapon: 'pistol', biome: 'meadow' });
+  const pond = new RunState({ character: 'stag', difficulty: 0, weapon: 'pistol', biome: 'pond' });
+  const hollow = new RunState({ character: 'stag', difficulty: 0, weapon: 'pistol', biome: 'hollow' });
+
+  assert.equal(pond.biome.slippery, true);
+  assert.equal(pond.biome.extraPuddles, 4);
+  assert.ok(pond.stats.speedPct >= meadow.stats.speedPct + 0.08 - 1e-6);
+  assert.equal(pond.stats.elemental, meadow.stats.elemental + 1);
+
+  assert.equal(hollow.biome.leafPiles, 5);
+  assert.equal(hollow.biome.stumpCount, 2);
+  assert.equal(hollow.stats.melee, meadow.stats.melee + 2);
+  assert.ok(hollow.mods.burnDamagePct >= 0.2 - 1e-6);
+  assert.ok(hollow.mods.burnSpreadPct >= 0.3 - 1e-6);
+
+  const restored = RunState.restore(hollow.serialize());
+  assert.equal(restored.biome.id, 'hollow');
+  assert.equal(restored.seed, hollow.seed);
+  assert.ok(BIOMES.pond.groundKey === 'ground-pond' && BIOMES.hollow.groundKey === 'ground-hollow');
+});
+
+test('种子分享挑战：确定性分流（商店/升级/宝箱/赌约一致）、挑战码编解码与战绩对比', () => {
+  assert.equal(normalizeSeed('  bug-2026!@# '), 'BUG-2026');
+  assert.equal(generateSeed().length, 8);
+
+  // 同种子两局：商店、升级、宝箱、赌约完全一致
+  const r1 = new RunState({ character: 'stag', difficulty: 2, weapon: 'pistol', biome: 'pond', seed: 'RACE2026' });
+  const r2 = new RunState({ character: 'stag', difficulty: 2, weapon: 'pistol', biome: 'pond', seed: 'race2026' });
+  const r3 = new RunState({ character: 'stag', difficulty: 2, weapon: 'pistol', biome: 'pond', seed: 'OTHER999' });
+  r1.wave = r2.wave = r3.wave = 5;
+
+  refreshOffers(r1, r1.rng('shop', 500));
+  refreshOffers(r2, r2.rng('shop', 500));
+  refreshOffers(r3, r3.rng('shop', 500));
+  assert.deepEqual(r1.offers, r2.offers);
+
+  const u1 = rollUpgrades(5, 10, 4, r1, r1.rng('level', 500));
+  const u2 = rollUpgrades(5, 10, 4, r2, r2.rng('level', 500));
+  assert.deepEqual(u1, u2);
+  assert.equal(rollChestItem(r1, r1.rng('chest', 500)), rollChestItem(r2, r2.rng('chest', 500)));
+  assert.deepEqual(rollContracts(r1.rng('contract', 5)), rollContracts(r2.rng('contract', 5)));
+
+  // 挑战码编解码（支持周围附带聊天文字自动提取）
+  const code = encodeSeedChallenge({
+    seed: 'RACE2026',
+    character: 'mantis',
+    difficulty: 3,
+    weapon: 'light-saber',
+    biome: 'hollow',
+    mutators: ['turbo', 'treasure'],
+    target: { win: true, wave: 20, kills: 1520, nectar: 6400, level: 26, mvpId: 'light-saber', mvpTier: 3 },
+  });
+  assert.ok(code.startsWith('HHS1:'));
+  const decoded = decodeSeedChallenge(`快来挑战我的六足战虫种子：${code} 看看能不能打过我！`);
+  assert.ok(decoded);
+  assert.equal(decoded!.seed, 'RACE2026');
+  assert.equal(decoded!.character, 'mantis');
+  assert.equal(decoded!.difficulty, 3);
+  assert.equal(decoded!.biome, 'hollow');
+  assert.deepEqual(decoded!.mutators, ['turbo', 'treasure']);
+  assert.equal(decoded!.target?.kills, 1520);
+  assert.equal(decoded!.target?.mvpId, 'light-saber');
+  assert.equal(decodeSeedChallenge('HHS1:invalid!!!'), null);
+  assert.equal(decodeSeedChallenge('random text'), null);
+
+  // 战绩对比：通关 > 波次 > 击杀 > 花蜜
+  const target = decoded!.target!;
+  assert.equal(compareSeedTarget({ win: true, wave: 20, kills: 1600, nectar: 5000 }, target), 'beat');
+  assert.equal(compareSeedTarget({ win: true, wave: 20, kills: 1520, nectar: 6400 }, target), 'tie');
+  assert.equal(compareSeedTarget({ win: false, wave: 20, kills: 9999, nectar: 9999 }, target), 'behind');
 });
 
 console.log(`\nAll ${passed} invariant tests passed!`);

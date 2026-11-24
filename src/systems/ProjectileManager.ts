@@ -252,16 +252,10 @@ export class ProjectileManager {
       if (p.waveColor !== undefined && !dead) {
         // 新月穿透剑气波：严格按真实碰撞半径 p.radius 画出飞驰月牙弧刃
         this.drawBladeWave(p);
-        if (Math.random() < dt * 36) this.fx.burst(p.x, p.y, p.waveColor, 1, 60, 0.6);
       } else if (p.texture === 'rocketproj') {
-        if (Math.random() < dt * 36) this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0xff8a28, 1, 90, 0.85);
-        if (Math.random() < dt * 20) this.fx.smoke(p.x - p.dirX * 10, p.y - p.dirY * 10, Math.atan2(-p.dirY, -p.dirX), 1, 0xd4ccc2);
-      } else if (p.texture === 'laserbolt' && Math.random() < dt * 32) {
-        this.fx.streaks(p.x - p.dirX * 8, p.y - p.dirY * 8, Math.atan2(-p.dirY, -p.dirX), 0x38f2ff, 1, 75, 0.75);
-      } else if (p.texture === 'leafblade' && Math.random() < dt * 24) {
-        this.fx.burst(p.x, p.y, 0x9cff58, 1, 45, 0.55);
-      } else if (p.texture === 'dungball' && Math.random() < dt * 16) {
-        this.fx.burst(p.x, p.y, 0xa8824c, 1, 38, 0.65, false);
+        if (Math.random() < dt * 22) this.fx.smoke(p.x - p.dirX * 10, p.y - p.dirY * 10, Math.atan2(-p.dirY, -p.dirX), 1, 0xd4ccc2);
+      } else if (p.texture === 'dungball' && Math.random() < dt * 12) {
+        this.fx.burst(p.x, p.y, 0xa8824c, 1, 35, 0.55, false);
       }
       const k = Math.min(1, p.traveled / p.maxDist);
       if (p.cloud) {
@@ -430,22 +424,14 @@ export class ProjectileManager {
   }
 
   private strike(p: Projectile, e: Enemy, enemies: EnemyManager): void {
-    const ang = Math.atan2(p.dirY, p.dirX);
     if (p.poison) {
       enemies.applyPoison(e, p.poison.stacks, p.poison.perStack, p.poison.duration);
-      this.fx.poisonBubbles(e.x, e.y, 3);
+      this.fx.poisonBubbles(e.x, e.y, 2);
     }
-    if (p.texture === 'laserbolt') {
-      this.fx.ring(p.x, p.y, 18, 0x38f2ff);
-      this.fx.star(p.x, p.y, 14, 0x38f2ff, ang);
-    } else if (p.texture === 'honeyblob') {
-      this.fx.burst(p.x, p.y, 0xffd040, 4, 120, 0.75);
-    } else if (p.texture === 'bullet' || p.texture === 'heavybullet' || p.texture === 'pellet') {
-      this.fx.streaks(p.x, p.y, ang, 0xffe270, p.texture === 'heavybullet' ? 3 : 2, 160, 0.65);
-      if (p.texture === 'heavybullet') this.fx.hitSlash(p.x, p.y, ang, 0xffe898, 0.92);
-    } else if (p.texture === 'leafblade') {
-      this.fx.star(p.x, p.y, 13, 0x9cff58, ang);
-      this.fx.hitSlash(p.x, p.y, ang, 0x9cff58, 0.85);
+    if (p.texture === 'honeyblob') {
+      this.fx.burst(p.x, p.y, 0xffd040, 3, 95, 0.6, false);
+    } else if (p.texture === 'laserbolt') {
+      this.fx.burst(p.x, p.y, 0x38f2ff, 2, 90, 0.55, false);
     }
     if (p.crit && p.src) {
       const sp = p.src.def.special;
@@ -507,35 +493,24 @@ export class ProjectileManager {
 }
 
 function tracerStyle(texture: string, crit: boolean, tier: number): { color: number; width: number; life: number } | null {
-  const boost = (crit ? 0.55 : 0) + tier * 0.22;
+  const boost = (crit ? 0.35 : 0) + tier * 0.12;
   switch (texture) {
     case 'bullet':
     case 'turretshot':
-      return { color: tier >= 3 ? 0xffe066 : 0xffe898, width: 2.0 + boost, life: 0.075 };
+      return { color: 0xffe8a8, width: 1.5 + boost, life: 0.055 };
     case 'pellet':
-      return { color: 0xffde88, width: 1.7 + boost * 0.7, life: 0.06 };
+      return { color: 0xffdf94, width: 1.3 + boost * 0.5, life: 0.045 };
     case 'heavybullet':
-      return { color: tier >= 3 ? 0xff8cf0 : 0xffcf54, width: 3.1 + boost, life: 0.09 };
+      return { color: 0xffd068, width: 2.2 + boost, life: 0.07 };
     case 'laserbolt':
-      return { color: tier >= 3 ? 0xa8f8ff : 0x38f2ff, width: 2.7 + boost, life: 0.085 };
+      return { color: 0x38f2ff, width: 2.2 + boost, life: 0.075 };
     case 'sparkbolt':
-      return { color: 0xffe468, width: 2.1 + boost, life: 0.07 };
+      return { color: 0xffe468, width: 1.6 + boost, life: 0.055 };
     case 'frostshot':
-      return { color: 0x9ceeff, width: 2.3 + boost, life: 0.08 };
-    case 'needle':
-    case 'stinger':
-      return { color: 0xe6ffb0, width: 1.7 + boost * 0.7, life: 0.07 };
+      return { color: 0x9ceeff, width: 1.7 + boost, life: 0.06 };
     case 'rocketproj':
-      return { color: 0xff8a28, width: 3.4 + boost, life: 0.095 };
-    case 'leafblade':
-      return { color: 0x9cff58, width: 2.3 + boost, life: 0.08 };
-    case 'honeyblob':
-      return { color: 0xffd040, width: 2.0 + boost * 0.6, life: 0.065 };
-    case 'acorn':
-    case 'pebble':
-    case 'seed':
-    case 'fluffseed':
-      return { color: 0xefe0c2, width: 1.5 + boost * 0.6, life: 0.06 };
+      return { color: 0xff9a48, width: 2.2 + boost, life: 0.065 };
+    // 石子/种子/针刺/飞叶/蜂蜜球等实体投射物凭自身贴图飞行即可，不画多余拖尾光
     default:
       return null;
   }

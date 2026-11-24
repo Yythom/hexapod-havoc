@@ -313,7 +313,7 @@ const LIST: EnemyDef[] = [
   {
     id: 'mantis',
     name: '螳螂女王',
-    hp: 15000,
+    hp: 120000,
     damage: 15,
     speed: 90,
     nectar: [0, 0],
@@ -329,7 +329,7 @@ const LIST: EnemyDef[] = [
   {
     id: 'goliath_boss',
     name: '泰坦兜虫',
-    hp: 16500,
+    hp: 132000,
     damage: 16,
     speed: 82,
     nectar: [0, 0],

@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
+import { ensureBiomeGround } from '../art/biomeGrounds';
 import { bgm } from '../audio/bgm';
+import { sfx } from '../audio/sfx';
 import { weaponTex } from '../art/icons';
 import { DISPLAY_FONT, GAME_HEIGHT, GAME_WIDTH } from '../config';
 import { CHALLENGES, type ChallengeId } from '../core/challenges';
+import { compareSeedTarget, encodeSeedChallenge } from '../core/seed';
+import { resolveBiome } from '../data/biomes';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { WAVES } from '../data/waves';
@@ -45,11 +49,12 @@ export class ResultScene extends Phaser.Scene {
     const r = this.result;
     const character = CHARACTERS[r.character];
     const diff = DIFFICULTIES[r.difficulty];
+    const biome = resolveBiome(r.biome);
     this.elapsed = 0;
     this.sparkles = [];
     this.sunrays = null;
 
-    this.add.image(W / 2, H / 2, 'ground');
+    this.add.image(W / 2, H / 2, ensureBiomeGround(this, biome.id));
     const bg = this.add.graphics();
     bg.fillStyle(r.win ? 0x111316 : 0x160e10, 0.8);
     bg.fillRect(0, 0, W, H);
@@ -129,15 +134,30 @@ export class ResultScene extends Phaser.Scene {
       this.beetle.setWeaponAim(0, this.beetle.rotation + this.beetle.tipLocalAngle(0) - 0.55);
     }
 
-    displayLabel(this, leftCx, py + 226, character.name, 22, COLOR.goldText).setOrigin(0.5);
-    const badgeY = py + 264;
-    const diffPill = pill(this, leftCx, badgeY, `      ${diff.name}难度`, COLOR.panelDeep, COLOR.border, COLOR.text, 14, 16, 28);
-    this.add.image(diffPill.x - diffPill.width / 2 + 20, badgeY, `weather-${r.difficulty}`).setDisplaySize(18, 18);
+    displayLabel(this, leftCx, py + 220, character.name, 22, COLOR.goldText).setOrigin(0.5);
+    const badgeY = py + 252;
+    const diffPill = pill(this, leftCx, badgeY, `      ${diff.name}难度`, COLOR.panelDeep, COLOR.border, COLOR.text, 13.5, 14, 26);
+    this.add.image(diffPill.x - diffPill.width / 2 + 19, badgeY, `weather-${r.difficulty}`).setDisplaySize(17, 17);
+    const seedShort = r.seed ? `#${r.seed.slice(0, 10)}` : '';
+    pill(
+      this,
+      leftCx,
+      badgeY + 30,
+      seedShort ? `${biome.name} · ${seedShort}` : biome.name,
+      COLOR.panelDeep,
+      biome.accent,
+      biome.css,
+      11.5,
+      10,
+      22,
+    );
     if (r.daily) {
-      pill(this, leftCx, badgeY + 34, `★ 每日挑战 ${r.daily}`, 0x3b2c10, COLOR.gold, COLOR.goldText, 12, 12, 22);
+      pill(this, leftCx, badgeY + 58, `★ 每日挑战 ${r.daily}`, 0x3b2c10, COLOR.gold, COLOR.goldText, 11.5, 10, 20);
     } else if (r.challenge) {
       const ch = CHALLENGES[r.challenge as ChallengeId];
-      pill(this, leftCx, badgeY + 34, `🏆 挑战 · ${ch?.name ?? r.challenge}`, 0x2a1842, 0xc068ff, '#e4b8ff', 12, 12, 22);
+      pill(this, leftCx, badgeY + 58, `🏆 挑战 · ${ch?.name ?? r.challenge}`, 0x2a1842, 0xc068ff, '#e4b8ff', 11.5, 10, 20);
+    } else if (r.seedTarget) {
+      pill(this, leftCx, badgeY + 58, '🌱 种子挑战局', 0x163826, 0x5de862, '#a4ffaa', 11.5, 10, 20);
     }
 
     // 竖向分割线
@@ -215,6 +235,12 @@ export class ResultScene extends Phaser.Scene {
     });
 
     const news: string[] = [];
+    if (r.seedTarget) {
+      const cmp = compareSeedTarget({ win: r.win, wave: r.wave, kills: r.kills, nectar: r.nectar }, r.seedTarget);
+      if (cmp === 'beat') news.push(`种子挑战胜出！超越了发起者（对方第 ${r.seedTarget.wave} 波 / ${r.seedTarget.kills} 杀）`);
+      else if (cmp === 'tie') news.push(`种子挑战平手！与发起者战绩完全一致！`);
+      else news.push(`未超越发起者目标（对方 ${r.seedTarget.win ? '通关' : '止步'} 第 ${r.seedTarget.wave} 波 / ${r.seedTarget.kills} 杀）`);
+    }
     if (r.newDifficulty) news.push(`${character.name} 解锁新难度：${DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, r.difficulty + 1)].name}`);
     if (r.newEndlessRecord) news.push(`无尽新纪录！${character.name} 到达第 ${r.wave} 波`);
     if (r.newDailyBest && r.daily) news.push(`刷新今日每日挑战最佳成绩！`);
@@ -293,10 +319,56 @@ export class ResultScene extends Phaser.Scene {
     }
 
     const btnY = hasBuild ? 626 : 588;
-    const again = () => transitionTo(this, 'Game');
-    createButton(this, W / 2 - 280, btnY, '再来一局', again, { width: 250, height: 60 });
-    createButton(this, W / 2, btnY, '更换角色', () => transitionTo(this, 'CharacterSelect'), { width: 250, height: 60, primary: false });
-    createButton(this, W / 2 + 280, btnY, '返回菜单', () => transitionTo(this, 'Menu'), { width: 250, height: 60, primary: false });
+    const shareMsg = label(this, W / 2, btnY + 46, '', 14, COLOR.good, true).setOrigin(0.5);
+    const shareSeed = () => {
+      let mvp: { id: string; tier: number } | undefined;
+      let bestD = 0;
+      for (const w of r.weapons ?? []) {
+        if (w.totalDamage > bestD) {
+          bestD = w.totalDamage;
+          mvp = { id: w.id, tier: w.tier };
+        }
+      }
+      const code = encodeSeedChallenge({
+        seed: r.seed,
+        character: r.character,
+        difficulty: r.difficulty,
+        weapon: r.weapon,
+        biome: biome.id,
+        mutators: r.mutators,
+        target: {
+          win: r.win,
+          wave: r.wave,
+          kills: r.kills,
+          nectar: r.nectar,
+          level: r.level,
+          mvpId: mvp?.id,
+          mvpTier: mvp?.tier,
+        },
+      });
+      sfx.play('unlock');
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(code).then(
+          () => shareMsg.setText(`已复制种子挑战码（#${r.seed}）！发给好友同图竞速`),
+          () => window.prompt('请复制以下种子挑战码发给好友：', code),
+        );
+      } else {
+        window.prompt('请复制以下种子挑战码发给好友：', code);
+      }
+    };
+    const again = () => {
+      const prev = this.registry.get('setup') as Record<string, unknown> | undefined;
+      if (prev) {
+        // 种子挑战重打保留同种子与目标；常规局再来一局换新种子
+        transitionTo(this, 'Game', { ...prev, seed: r.seedTarget ? r.seed : undefined });
+      } else {
+        transitionTo(this, 'Game');
+      }
+    };
+    createButton(this, W / 2 - 330, btnY, '再来一局', again, { width: 204, height: 58, fontSize: 21 });
+    createButton(this, W / 2 - 110, btnY, '📋 分享种子', shareSeed, { width: 204, height: 58, fontSize: 20, primary: false, variant: 'emerald' });
+    createButton(this, W / 2 + 110, btnY, '更换角色', () => transitionTo(this, 'CharacterSelect'), { width: 204, height: 58, fontSize: 21, primary: false });
+    createButton(this, W / 2 + 330, btnY, '返回菜单', () => transitionTo(this, 'Menu'), { width: 204, height: 58, fontSize: 21, primary: false });
     this.input.keyboard!.once('keydown-ENTER', again);
     fadeInScene(this);
   }

@@ -39,8 +39,10 @@ export class SpawnSystem {
   private treeTimer = 4;
   private shroomTimer = 11;
   private dewTimer = 16;
+  private dewIntervalMult = 1;
   private boomParty = false;
   private lootbugAt = Infinity;
+  private rng: () => number = Math.random;
   /** 随机波次事件 */
   private eventAt = Infinity;
   private eventKind: 'swarm' | 'treasure' | 'grove' | 'bloom' | null = null;
@@ -54,35 +56,45 @@ export class SpawnSystem {
     private readonly fx: Effects,
   ) {}
 
+  private randRange(min: number, max: number): number {
+    return min + this.rng() * (max - min);
+  }
+
+  private randInt(min: number, max: number): number {
+    return min + Math.floor(this.rng() * (max - min + 1));
+  }
+
   startWave(
     def: WaveDef,
     waveNo: number,
     difficulty: DifficultyDef,
     spawnRatePct = 0,
     alwaysLootbug = false,
-    extraOpts?: { boomParty?: boolean; extraElite?: boolean },
+    extraOpts?: { boomParty?: boolean; extraElite?: boolean; dewIntervalMult?: number; rng?: () => number },
   ): void {
     this.clear();
     this.wave = def;
     this.waveNo = waveNo;
+    this.rng = extraOpts?.rng ?? Math.random;
+    this.dewIntervalMult = Math.max(0.4, extraOpts?.dewIntervalMult ?? 1);
     this.boomParty = !!extraOpts?.boomParty;
     this.intervalMult = difficulty.spawnInterval / Math.max(0.5, 1 + spawnRatePct);
     this.timers = def.rules.map(() => 0);
     this.treeTimer = 6;
-    this.shroomTimer = this.boomParty ? 5 : waveNo >= 3 ? Phaser.Math.FloatBetween(12, 18) : Infinity;
-    this.dewTimer = waveNo >= 4 && !def.boss ? Phaser.Math.FloatBetween(14, 22) : Infinity;
+    this.shroomTimer = this.boomParty ? 5 : waveNo >= 3 ? this.randRange(12, 18) : Infinity;
+    this.dewTimer = waveNo >= 4 && !def.boss ? this.randRange(14, 22) * this.dewIntervalMult : Infinity;
     const guaranteedLoot = waveNo === 5 || waveNo === 11 || waveNo === 17 || (alwaysLootbug && waveNo >= 2);
-    this.lootbugAt = (waveNo >= 3 || (alwaysLootbug && waveNo >= 2)) && !def.boss && (guaranteedLoot || Math.random() < 0.35) ? Phaser.Math.FloatBetween(10, 22) : Infinity;
+    this.lootbugAt = (waveNo >= 3 || (alwaysLootbug && waveNo >= 2)) && !def.boss && (guaranteedLoot || this.rng() < 0.35) ? this.randRange(10, 22) : Infinity;
     this.swarmRushLeft = 0;
     // 第 6 / 12 / 18 波必出「金露花绽放」动态抢点，其余波次 35% 概率触发中段事件
     if (waveNo >= 4 && !def.boss && def.duration) {
       if ((waveNo === 6 || waveNo === 12 || waveNo === 18) && !def.elites) {
         this.eventAt = def.duration * 0.34;
         this.eventKind = 'bloom';
-      } else if (!def.elites && Math.random() < 0.35) {
-        this.eventAt = def.duration * Phaser.Math.FloatBetween(0.36, 0.5);
+      } else if (!def.elites && this.rng() < 0.35) {
+        this.eventAt = def.duration * this.randRange(0.36, 0.5);
         const kinds: ('swarm' | 'treasure' | 'grove' | 'bloom')[] = ['swarm', 'treasure', 'grove', 'bloom'];
-        this.eventKind = Phaser.Utils.Array.GetRandom(kinds);
+        this.eventKind = kinds[Math.floor(this.rng() * kinds.length)];
       } else {
         this.eventAt = Infinity;
         this.eventKind = null;
@@ -93,7 +105,7 @@ export class SpawnSystem {
     }
     this.specials = [];
     if (def.boss) {
-      const bossId = def.boss === 'boss_pool' ? (Math.random() < 0.5 ? 'mantis' : 'goliath_boss') : def.boss;
+      const bossId = def.boss === 'boss_pool' ? (this.rng() < 0.5 ? 'mantis' : 'goliath_boss') : def.boss;
       this.specials.push({ id: bossId, at: 1 });
     }
     for (const e of def.elites ?? []) for (let k = 0; k < e.count; k++) this.specials.push({ id: e.enemy, at: e.at + k * 0.8 });
@@ -104,8 +116,8 @@ export class SpawnSystem {
       this.specials.push({ id: pool[idx], at: 6 });
     }
     // 第 6~10 波偶尔游走刷出 1 只厄运紫蛞蝓（Sea Pig），让玩家自由决定是否叠诅咒刷钱
-    if (waveNo >= 6 && waveNo <= 10 && !def.boss && Math.random() < 0.32) {
-      this.specials.push({ id: 'curse_slug', at: Phaser.Math.FloatBetween(12, 24) });
+    if (waveNo >= 6 && waveNo <= 10 && !def.boss && this.rng() < 0.32) {
+      this.specials.push({ id: 'curse_slug', at: this.randRange(12, 24) });
     }
     // 猎王悬赏赌约：额外空降一只精英怪
     if (extraOpts?.extraElite) {
@@ -193,7 +205,7 @@ export class SpawnSystem {
       // 露珠冰球：第 4 波起偶尔刷出可打爆的冰冻水浪球（场上最多 1 颗）
       this.dewTimer -= dt;
       if (this.dewTimer <= 0) {
-        this.dewTimer = 26;
+        this.dewTimer = 26 * this.dewIntervalMult;
         let orbs = 0;
         for (const e of this.enemies.active) if (e.def.id === 'deworb') orbs++;
         if (orbs < 1 && this.enemies.count < MAX_ENEMIES) {
@@ -239,12 +251,12 @@ export class SpawnSystem {
   private spawnGroup(rule: SpawnRule, px: number, py: number): void {
     const def = ENEMIES[rule.enemy];
     const room = MAX_ENEMIES - this.enemies.count - this.pending.length;
-    const n = Math.min(Phaser.Math.Between(rule.group[0], rule.group[1]), room);
+    const n = Math.min(this.randInt(rule.group[0], rule.group[1]), room);
     if (n <= 0) return;
     const [cx, cy] = this.pickCenter(px, py);
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * GROUP_SPREAD;
+      const a = this.rng() * Math.PI * 2;
+      const r = this.rng() * GROUP_SPREAD;
       const x = Phaser.Math.Clamp(cx + Math.cos(a) * r, WORLD_MARGIN, WORLD_WIDTH - WORLD_MARGIN);
       const y = Phaser.Math.Clamp(cy + Math.sin(a) * r, WORLD_MARGIN, WORLD_HEIGHT - WORLD_MARGIN);
       const mound = this.acquireMound().setPosition(x, y).setScale(0.5 / SPRITE_RES);
@@ -256,16 +268,16 @@ export class SpawnSystem {
   private pickCenter(px: number, py: number, minD = MIN_DIST, maxD = MAX_DIST): [number, number] {
     const m = WORLD_MARGIN + GROUP_SPREAD;
     for (let tries = 0; tries < 16; tries++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Phaser.Math.Between(minD, maxD);
+      const a = this.rng() * Math.PI * 2;
+      const r = this.randRange(minD, maxD);
       const x = px + Math.cos(a) * r;
       const y = py + Math.sin(a) * r;
       if (x > m && x < WORLD_WIDTH - m && y > m && y < WORLD_HEIGHT - m) return [x, y];
     }
     // 兜底：全图随机找一个够远的点
     for (;;) {
-      const x = Phaser.Math.Between(m, WORLD_WIDTH - m);
-      const y = Phaser.Math.Between(m, WORLD_HEIGHT - m);
+      const x = this.randRange(m, WORLD_WIDTH - m);
+      const y = this.randRange(m, WORLD_HEIGHT - m);
       if (Math.hypot(x - px, y - py) >= minD) return [x, y];
     }
   }

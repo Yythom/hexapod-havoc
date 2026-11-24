@@ -165,22 +165,22 @@ export class IntermissionScene extends Phaser.Scene {
     if (run.pendingLevelUps > 0) {
       this.page = 'level';
       if (run.pendingUpgrades.length === 0) {
-        run.pendingUpgrades = rollUpgrades(run.wave, run.stats.luck, 4, run);
+        run.pendingUpgrades = rollUpgrades(run.wave, run.stats.luck, 4, run, run.rng('level', run.wave * 100 + run.upgradeRollSeq++));
       }
     } else if (run.chests > 0) {
       this.page = 'chest';
       if (!run.pendingChestItem || !ITEMS[run.pendingChestItem]) {
-        run.pendingChestItem = rollChestItem(run);
+        run.pendingChestItem = rollChestItem(run, run.rng('chest', run.wave * 100 + run.chestRollSeq++));
       }
     } else if (!run.endless && !run.setup.challenge && isContractWave(run.wave) && !run.contractDone) {
       this.page = 'contract';
       if (run.pendingContracts.length < 2) {
-        run.pendingContracts = rollContracts();
+        run.pendingContracts = rollContracts(run.rng('contract', run.wave));
       }
     } else {
       this.page = 'shop';
       if (!run.shopReady) {
-        refreshOffers(run);
+        refreshOffers(run, run.rng('shop', run.wave * 100 + run.shopRerolls));
         run.shopReady = true;
       }
     }
@@ -370,7 +370,7 @@ export class IntermissionScene extends Phaser.Scene {
     if (run.nectar < cost) return;
     run.nectar -= cost;
     sfx.play('reroll');
-    run.pendingUpgrades = rollUpgrades(run.wave, run.stats.luck, 4, run);
+    run.pendingUpgrades = rollUpgrades(run.wave, run.stats.luck, 4, run, run.rng('level', run.wave * 100 + run.upgradeRollSeq++));
     this.animateOffers = true;
     this.render();
   }
@@ -730,7 +730,7 @@ export class IntermissionScene extends Phaser.Scene {
     run.nectar -= cost;
     run.shopRerolls++;
     sfx.play('reroll');
-    refreshOffers(run);
+    refreshOffers(run, run.rng('shop', run.wave * 100 + run.shopRerolls));
     this.animateOffers = true;
     this.render();
   }
@@ -1298,7 +1298,7 @@ export class IntermissionScene extends Phaser.Scene {
           c.add(this.add.image(sx, sy, def.icon).setDisplaySize(40, 40));
           c.add(label(this, sx, sy + 39, def.name.slice(0, 4), 11, COLOR.text).setOrigin(0.5));
           const z = this.tapZone(sx - 29, sy - 29, 58, 58, () => {
-            const res = smeltItem(run, id);
+            const res = smeltItem(run, id, run.rng('smelt', run.wave));
             if (res) {
               sfx.play('merge');
               this.toast(`熔炼 ${def.name}：+${res.refund} 花蜜 · ${STAT_META[res.stat].label} ${formatStatDelta(res.stat, res.amount)}`);

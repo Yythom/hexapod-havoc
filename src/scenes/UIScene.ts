@@ -860,9 +860,23 @@ export class UIScene extends Phaser.Scene {
       568,
       (c, top, px) => {
         const leftCx = px + 296;
-        c.add(createButton(this, leftCx, top + 120, '继续战斗', () => this.resume(), { width: 268, height: 54 }));
-        c.add(createButton(this, leftCx - 134, top + 190, '重新开始', () => this.restart(), { width: 238, height: 48, fontSize: 19, primary: false }));
-        c.add(createButton(this, leftCx + 134, top + 190, '放弃本局', () => this.toMenu(), { width: 238, height: 48, fontSize: 19, primary: false }));
+        c.add(
+          pill(
+            this,
+            leftCx,
+            top + 86,
+            `${r.biome.name} · 种子 #${r.seed}`,
+            COLOR.panelDeep,
+            r.biome.accent,
+            r.biome.css,
+            12,
+            12,
+            22,
+          ),
+        );
+        c.add(createButton(this, leftCx, top + 130, '继续战斗', () => this.resume(), { width: 268, height: 50 }));
+        c.add(createButton(this, leftCx - 134, top + 194, '重新开始', () => this.restart(), { width: 238, height: 46, fontSize: 19, primary: false }));
+        c.add(createButton(this, leftCx + 134, top + 194, '放弃本局', () => this.toMenu(), { width: 238, height: 46, fontSize: 19, primary: false }));
         addSettingsButtons(this, c, leftCx, top + 258);
 
         // 左侧底部：当前局内构筑预览（武器槽 + 激活羁绊）

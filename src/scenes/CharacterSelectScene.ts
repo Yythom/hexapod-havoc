@@ -16,8 +16,10 @@ import {
   SHELL_SKINS,
   toggleBanishItem,
 } from '../core/save';
+import { decodeSeedChallenge, encodeSeedChallenge, generateSeed, normalizeSeed } from '../core/seed';
 import { weaponDamage } from '../core/combat';
 import { BASE_STATS, type Stats } from '../core/stats';
+import { BIOME_ORDER, BIOMES, DEFAULT_BIOME, resolveBiome, type BiomeId } from '../data/biomes';
 import { CHARACTER_ORDER, CHARACTERS, unlockText } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
@@ -68,6 +70,8 @@ export class CharacterSelectScene extends Phaser.Scene {
   private character = '';
   private difficulty = 0;
   private weapon = '';
+  private biome: BiomeId = DEFAULT_BIOME;
+  private customSeed = '';
   private customMutators: DailyMutatorId[] = [];
   private root: Container | null = null;
   private modal: Container | null = null;
@@ -85,11 +89,13 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.root = null;
     this.modal = null;
     this.customMutators = [];
+    this.customSeed = '';
     this.beetles = [];
     this.animateDetail = false;
     this.character = isUnlocked(last.character) ? last.character : CHARACTER_ORDER[0];
     this.difficulty = last.difficulty;
     this.weapon = last.weapon;
+    this.biome = resolveBiome(last.biome).id;
     this.normalize();
 
     warmBackdrop(this, W, H);
@@ -126,6 +132,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const c = CHARACTERS[pick];
     this.difficulty = Math.min(this.difficulty, maxDifficulty(pick));
     this.weapon = c.startWeapons.length > 0 ? Phaser.Utils.Array.GetRandom(c.startWeapons) : '';
+    this.biome = Phaser.Utils.Array.GetRandom(BIOME_ORDER);
     this.animateDetail = true;
     sfx.play('reroll');
     this.render();
@@ -139,15 +146,16 @@ export class CharacterSelectScene extends Phaser.Scene {
 
     const title = displayLabel(this, CARD_X0, 35, '出战准备', 30, COLOR.text).setOrigin(0, 0.5);
     root.add(title);
-    root.add(label(this, CARD_X0 + title.width + 16, 36, '选择战虫、天气难度与初始武器', 15, COLOR.dim).setOrigin(0, 0.5));
+    root.add(label(this, CARD_X0 + title.width + 16, 36, '选择战虫、天气、生态与初始武器', 15, COLOR.dim).setOrigin(0, 0.5));
     const save = loadSave();
-    const customTagCount = this.customMutators.length + save.banishedItems.length + (save.shellSkin !== 'default' ? 1 : 0);
+    const customTagCount =
+      this.customMutators.length + save.banishedItems.length + (save.shellSkin !== 'default' ? 1 : 0) + (this.customSeed ? 1 : 0);
     root.add(
       createButton(
         this,
         W - 434,
         35,
-        customTagCount > 0 ? `⚙ 局前定制 (${customTagCount})` : '⚙ 词条/禁用/涂装',
+        customTagCount > 0 ? `⚙ 局前定制 (${customTagCount})` : '⚙ 词条/禁用/种子',
         () => this.openCustomModal('mutators'),
         { width: 186, height: 42, fontSize: 16, primary: false, variant: customTagCount > 0 ? 'emerald' : undefined },
       ),
@@ -172,6 +180,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.animateDetail = false;
     this.difficultyRow(root);
     this.weaponRow(root);
+    this.biomeRow(root);
 
     const locked = !isUnlocked(this.character);
     root.add(
@@ -494,20 +503,21 @@ export class CharacterSelectScene extends Phaser.Scene {
       return;
     }
     const choose = c.startWeapons.length > 1;
+    const stepX = c.startWeapons.length >= 4 ? 114 : 136;
     root.add(displayLabel(this, CARD_X0, 536, choose ? '初始武器（点击切换）' : '专属初始武器', 20, COLOR.text).setOrigin(0, 0.5));
     c.startWeapons.forEach((id, i) => {
       const def = WEAPONS[id];
-      const cx = CARD_X0 + 52 + i * 144;
+      const cx = CARD_X0 + 50 + i * stepX;
       const cy = 604;
       const selected = id === this.weapon;
       const itemWrap = this.add.container(cx, cy);
-      itemWrap.add(slotBox(this, 0, 0, 86, selected ? COLOR.gold : COLOR.border, selected, 0));
+      itemWrap.add(slotBox(this, 0, 0, 84, selected ? COLOR.gold : COLOR.border, selected, 0));
       const img = this.add.image(0, -2, weaponTex(def.icon, 0, true));
-      itemWrap.add(img.setScale(64 / Math.max(img.width, img.height)));
-      const nameLbl = label(this, 0, 56, def.name, 16, selected ? COLOR.goldText : COLOR.text, selected).setOrigin(0.5);
+      itemWrap.add(img.setScale(62 / Math.max(img.width, img.height)));
+      const nameLbl = label(this, 0, 55, def.name, 15, selected ? COLOR.goldText : COLOR.text, selected).setOrigin(0.5);
       itemWrap.add(nameLbl);
       if (choose) {
-        const z = this.tapZone(-45, -45, 90, 114, () => {
+        const z = this.tapZone(-44, -44, 88, 112, () => {
           this.weapon = id;
           this.render();
         });
@@ -527,13 +537,72 @@ export class CharacterSelectScene extends Phaser.Scene {
     });
   }
 
+  /** 右下后院生态场地选择（经典草坪 / 青苔池塘 / 枯叶树洞） */
+  private biomeRow(root: Container): void {
+    const bx0 = 516;
+    const bw = CARD_X0 + GRID_W - bx0;
+    const active = BIOMES[this.biome];
+    root.add(displayLabel(this, bx0, 536, '后院生态', 20, COLOR.text).setOrigin(0, 0.5));
+    if (this.customSeed) {
+      const sp = pill(this, bx0 + bw - 68, 536, `🌱 #${this.customSeed}`, 0x163826, 0x5de862, '#a4ffaa', 11.5, 9, 22);
+      sp.x = bx0 + bw - sp.width / 2;
+      root.add(sp);
+    } else {
+      root.add(label(this, bx0 + bw, 536, active.tagline, 13, active.css, true).setOrigin(1, 0.5));
+    }
+
+    const gap = 10;
+    const btnW = Math.floor((bw - gap * (BIOME_ORDER.length - 1)) / BIOME_ORDER.length);
+    BIOME_ORDER.forEach((bid, i) => {
+      const def = BIOMES[bid];
+      root.add(
+        createButton(
+          this,
+          bx0 + btnW / 2 + i * (btnW + gap),
+          580,
+          def.name,
+          () => {
+            this.biome = bid;
+            this.render();
+          },
+          {
+            width: btnW,
+            height: 44,
+            fontSize: 16,
+            primary: bid === this.biome,
+            shape: 'bevel',
+            accentColor: def.accent,
+          },
+        ),
+      );
+    });
+
+    const box = this.add.graphics();
+    const boxY = 612;
+    const boxH = 74;
+    drawChamferPlate(box, bx0, boxY, bw, boxH, {
+      fill: COLOR.panelDeep,
+      border: COLOR.borderSoft,
+      borderWidth: 1.4,
+      shadowX: 3,
+      shadowY: 4,
+      cutBig: 8,
+      cutSmall: 3,
+      inkWidth: 2.5,
+    });
+    box.fillStyle(active.accent, 0.92);
+    box.fillRect(bx0 + 3, boxY + 7, 4, boxH - 14);
+    root.add(box);
+    root.add(label(this, bx0 + 16, boxY + 11, active.desc, 13, COLOR.text, false, bw - 26).setOrigin(0, 0).setAlign('left'));
+  }
+
   private closeModal(): void {
     this.modal?.destroy();
     this.modal = null;
   }
 
-  /** 局前定制弹窗：自定义词条 / 商店禁用池（Banish）/ 炫彩甲壳涂装 */
-  private openCustomModal(tab: 'mutators' | 'banish' | 'skins'): void {
+  /** 局前定制弹窗：自定义词条 / 商店禁用池（Banish）/ 炫彩甲壳涂装 / 种子设定 */
+  private openCustomModal(tab: 'mutators' | 'banish' | 'skins' | 'seed', statusMsg = ''): void {
     this.closeModal();
     const save = loadSave();
     const ms = codexMilestones(save);
@@ -548,24 +617,28 @@ export class CharacterSelectScene extends Phaser.Scene {
     c.add([dim, panel(this, px, py, pw, ph, COLOR.gold, COLOR.panel, 2, COLOR.gold), blocker]);
     c.add(displayLabel(this, W / 2, py + 36, '⚙ 局前定制', 26, COLOR.goldText).setOrigin(0.5));
 
-    // 三个子标签
-    const tabs: { id: 'mutators' | 'banish' | 'skins'; label: string }[] = [
-      { id: 'mutators', label: `自定义词条 (${this.customMutators.length}/3)` },
-      { id: 'banish', label: `商店禁用池 (${save.banishedItems.length}/${ms.banishCap})` },
-      { id: 'skins', label: `甲壳涂装 (${ms.unlockedSkins.length}/${SHELL_SKIN_ORDER.length})` },
+    // 四个子标签
+    const tabs: { id: 'mutators' | 'banish' | 'skins' | 'seed'; label: string }[] = [
+      { id: 'mutators', label: `词条 (${this.customMutators.length}/3)` },
+      { id: 'banish', label: `禁用池 (${save.banishedItems.length}/${ms.banishCap})` },
+      { id: 'skins', label: `涂装 (${ms.unlockedSkins.length}/${SHELL_SKIN_ORDER.length})` },
+      { id: 'seed', label: this.customSeed ? `🌱 #${this.customSeed.slice(0, 8)}` : '🌱 种子设定' },
     ];
+    const tabW = 196;
+    const tabGap = 12;
+    const tabX0 = W / 2 - (tabs.length * tabW + (tabs.length - 1) * tabGap) / 2;
     tabs.forEach((t, idx) => {
       c.add(
         createButton(
           this,
-          px + 170 + idx * 270,
+          tabX0 + tabW / 2 + idx * (tabW + tabGap),
           py + 82,
           t.label,
           () => {
             sfx.play('click');
             this.openCustomModal(t.id);
           },
-          { width: 250, height: 38, fontSize: 15, primary: tab === t.id },
+          { width: tabW, height: 38, fontSize: 14.5, primary: tab === t.id },
         ),
       );
     });
@@ -652,7 +725,7 @@ export class CharacterSelectScene extends Phaser.Scene {
         });
         c.add(z);
       });
-    } else {
+    } else if (tab === 'skins') {
       c.add(label(this, W / 2, py + 128, '通过通关与图鉴里程碑解锁炫彩甲壳涂装（纯视觉纪念，不影响数值）', 13.5, COLOR.dim).setOrigin(0.5));
       const cw = 156;
       const ch = 220;
@@ -689,6 +762,148 @@ export class CharacterSelectScene extends Phaser.Scene {
           c.add(z);
         }
       });
+    } else {
+      c.add(
+        label(
+          this,
+          W / 2,
+          py + 132,
+          '使用相同种子与配置开局时，每波商店、升级、宝箱、赌约、地形与 Boss 均完全同步',
+          13.5,
+          COLOR.dim,
+        ).setOrigin(0.5),
+      );
+      const boxW = 540;
+      const boxH = 84;
+      const bx = W / 2 - boxW / 2;
+      const by = py + 160;
+      const box = this.add.graphics();
+      drawChamferPlate(box, bx, by, boxW, boxH, {
+        fill: COLOR.panelDeep,
+        border: this.customSeed ? 0x5de862 : COLOR.border,
+        borderWidth: 2,
+        cutBig: 8,
+        cutSmall: 3,
+        inkWidth: 2.4,
+      });
+      c.add(box);
+      c.add(label(this, W / 2, by + 24, '当前本局种子', 13, COLOR.dim).setOrigin(0.5));
+      c.add(
+        displayLabel(
+          this,
+          W / 2,
+          by + 54,
+          this.customSeed ? `#${this.customSeed}` : '随机生成（开战时自动分配）',
+          this.customSeed ? 26 : 19,
+          this.customSeed ? '#a4ffaa' : COLOR.goldText,
+        ).setOrigin(0.5),
+      );
+
+      const copySetupCode = () => {
+        const seed = this.customSeed || generateSeed();
+        this.customSeed = seed;
+        const code = encodeSeedChallenge({
+          seed,
+          character: this.character,
+          difficulty: this.difficulty,
+          weapon: this.weapon,
+          biome: this.biome,
+          mutators: this.customMutators.length > 0 ? this.customMutators : undefined,
+        });
+        const done = () => {
+          this.render();
+          this.openCustomModal('seed', `已复制开局挑战码（种子 #${seed}），发给好友同局竞速！`);
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(code).then(done, () => {
+            window.prompt('请手动复制以下种子挑战码：', code);
+            done();
+          });
+        } else {
+          window.prompt('请手动复制以下种子挑战码：', code);
+          done();
+        }
+      };
+
+      c.add(
+        createButton(
+          this,
+          W / 2 - 196,
+          py + 286,
+          '✎ 输入种子 / 挑战码',
+          () => {
+            const raw = window.prompt('输入自定义种子（如 BUG2026）或粘贴好友挑战码（HHS1:...）：', this.customSeed);
+            if (raw === null) return;
+            const decoded = decodeSeedChallenge(raw);
+            if (decoded) {
+              this.customSeed = decoded.seed;
+              this.biome = decoded.biome;
+              if (isUnlocked(decoded.character)) {
+                this.character = decoded.character;
+                this.difficulty = Math.min(decoded.difficulty, maxDifficulty(decoded.character));
+                this.weapon = decoded.weapon;
+              }
+              this.customMutators = decoded.mutators ? [...decoded.mutators] : [];
+              sfx.play('unlock');
+              this.render();
+              this.openCustomModal('seed', `已载入种子 #${decoded.seed} 与场地「${BIOMES[decoded.biome].name}」！`);
+              return;
+            }
+            const clean = normalizeSeed(raw);
+            this.customSeed = clean;
+            sfx.play('click');
+            this.render();
+            this.openCustomModal('seed', clean ? `已设定自定义种子 #${clean}` : '已切回随机种子');
+          },
+          { width: 184, height: 48, fontSize: 15, primary: false },
+        ),
+      );
+      c.add(
+        createButton(
+          this,
+          W / 2,
+          py + 286,
+          '🎲 随机新种子',
+          () => {
+            this.customSeed = generateSeed();
+            sfx.play('reroll');
+            this.render();
+            this.openCustomModal('seed', `已生成新种子 #${this.customSeed}`);
+          },
+          { width: 176, height: 48, fontSize: 15, primary: false },
+        ),
+      );
+      c.add(
+        createButton(this, W / 2 + 196, py + 286, '📋 复制开局挑战码', copySetupCode, {
+          width: 184,
+          height: 48,
+          fontSize: 15,
+          primary: false,
+          variant: 'emerald',
+        }),
+      );
+      if (this.customSeed) {
+        c.add(
+          createButton(
+            this,
+            W / 2,
+            py + 346,
+            '清除固定种子（恢复随机）',
+            () => {
+              this.customSeed = '';
+              sfx.play('click');
+              this.render();
+              this.openCustomModal('seed', '已恢复开局随机种子');
+            },
+            { width: 240, height: 38, fontSize: 14, primary: false },
+          ),
+        );
+      }
+      if (statusMsg) {
+        c.add(label(this, W / 2, py + 402, statusMsg, 14, COLOR.good, true).setOrigin(0.5));
+      } else {
+        c.add(label(this, W / 2, py + 402, '提示：主菜单「🌱 种子挑战」可直接导入他人战绩挑战码（无需解锁角色）', 13, COLOR.dim).setOrigin(0.5));
+      }
     }
 
     c.add(createButton(this, W / 2, py + ph - 34, '完成', () => this.closeModal(), { width: 180, height: 44, fontSize: 18 }));
@@ -702,11 +917,13 @@ export class CharacterSelectScene extends Phaser.Scene {
       character: this.character,
       difficulty: this.difficulty,
       weapon: this.weapon,
+      biome: this.biome,
+      seed: this.customSeed || undefined,
       mutators: this.customMutators.length > 0 ? [...this.customMutators] : undefined,
       banished: save.banishedItems.length > 0 ? [...save.banishedItems] : undefined,
       shellSkin: save.shellSkin,
     };
-    rememberChoice(setup.character, setup.difficulty, setup.weapon);
+    rememberChoice(setup.character, setup.difficulty, setup.weapon, this.biome);
     this.registry.set('setup', setup);
     transitionTo(this, 'Game', setup);
   }

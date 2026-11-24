@@ -712,55 +712,51 @@ export class WeaponSystem {
     const melee = s.def.melee!;
     const tier = s.tier;
     const hitR = this.meleeHitRadius(melee, tier);
-    const critCol = 0xffdf68;
+    const critCol = 0xffe078;
     const dx = Math.cos(s.aim);
     const dy = Math.sin(s.aim);
     switch (melee.style) {
       case 'sweep': {
-        const col = s.crit ? critCol : 0xa0ff58;
-        fx.slash(tx, ty, s.reach * 0.85 + hitR * 0.35, s.aim, melee.arc ?? 1, col, tier);
+        const col = s.crit ? critCol : 0xd8f8c8;
+        fx.slash(tx, ty, s.reach * 0.85 + hitR * 0.25, s.aim, melee.arc ?? 1, col, tier);
         break;
       }
       case 'snap': {
-        const col = s.crit ? critCol : 0xffc858;
-        // 1:1 覆盖真实打击距离 s.reach
-        fx.chomp(tx, ty, s.aim, s.reach + hitR * 0.4, col, tier);
+        const col = s.crit ? critCol : 0xffe4a8;
+        fx.chomp(tx, ty, s.aim, s.reach + hitR * 0.25, col, tier);
         break;
       }
       case 'bash': {
-        // 1:1 覆盖真实重砸弧面 s.reach * 0.72 + hitR * 0.65
-        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.72 + hitR * 0.65, s.crit ? critCol : 0x72d8ff, tier);
+        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.72 + hitR * 0.55, s.crit ? critCol : 0xa8e4ff, tier);
         break;
       }
       case 'charge': {
-        const col = s.crit ? critCol : 0xffe49a;
-        const ex = tx + dx * s.reach;
-        const ey = ty + dy * s.reach;
-        fx.sonicThrust(tx, ty, ex, ey, col, hitR * 1.1, 2, tier);
+        // 长角 / 长枪等突刺：克制的单道细淡破风线，由武器实体动作唱主角，不画激光柱
+        const sx = tx + dx * Math.min(18, s.reach * 0.2);
+        const sy = ty + dy * Math.min(18, s.reach * 0.2);
+        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xfff2d8, Math.min(7, hitR * 0.42), tier);
         break;
       }
       case 'flurry': {
-        const col = s.crit ? critCol : 0xb8ff58;
-        for (const off of [-0.14, -0.04, 0.05, 0.14]) {
+        const col = s.crit ? critCol : 0xe4ffc8;
+        for (const off of [-0.07, 0.07]) {
           const a = s.aim + off;
-          const r = s.reach * (Math.abs(off) < 0.08 ? 1.0 : 0.88);
-          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, hitR * 0.85, tier);
+          const r = s.reach * 0.94;
+          fx.thrust(tx + Math.cos(a) * 10, ty + Math.sin(a) * 10, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 4.2, tier);
         }
-        fx.streaks(tx + dx * s.reach * 0.7, ty + dy * s.reach * 0.7, s.aim, col, 4 + tier, 210, 0.75);
         break;
       }
       case 'pierce': {
-        const col = s.crit ? critCol : 0xeb68ff;
-        const ex = tx + dx * s.reach;
-        const ey = ty + dy * s.reach;
-        fx.thrust(tx, ty, ex, ey, col, hitR * 1.15, tier);
-        fx.star(ex, ey, 18 + tier * 2, col, s.aim + Math.PI / 4);
-        fx.streaks(ex, ey, s.aim, col, 4 + tier, 180, 0.8);
+        const sx = tx + dx * 12;
+        const sy = ty + dy * 12;
+        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xe8b8ff, Math.min(6.5, hitR * 0.42), tier);
         break;
       }
       default: {
-        // 直刺宽度 1:1 匹配真实判定半径 hitR
-        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, hitR * 1.15, tier);
+        // 普通直刺：极简淡白风痕
+        const sx = tx + dx * 10;
+        const sy = ty + dy * 10;
+        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xfff2dc, Math.min(6, hitR * 0.38), tier);
       }
     }
   }
@@ -775,26 +771,22 @@ export class WeaponSystem {
     const isLaser = s.def.id === 'laser-gun' || proj?.texture === 'laserbolt';
     const isHeavySmoke = (proj?.count ?? 1) >= 4 || (proj?.explode ?? 0) > 0 || s.def.classes.includes('Explosive') || (isGun && s.def.classes.includes('Heavy'));
     if (isLaser) {
-      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 26, 5, tier);
-      fx.ring(tx, ty, 14 + tier * 2, 0x38f2ff);
+      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 12, 1, tier);
     } else if (isGun) {
       const heavy = isHeavySmoke || tierOf(s.def, tier).damage >= 16;
-      fx.muzzle(tx, ty, s.aim, col, heavy ? 24 : 15, heavy ? 6 : 3, tier);
+      fx.muzzle(tx, ty, s.aim, col, heavy ? 13 : 9, heavy ? 2 : 1, tier);
       // 枪械侧向抛壳（非纯能量/喷火类）
       if (!proj?.fade) {
         const ejectSide = Math.cos(s.aim) < 0 ? 1 : -1;
         fx.shellCasing(tx, ty, s.aim + ejectSide * (Math.PI * 0.56));
       }
-      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, (proj?.explode ?? 0) > 0 ? 3 : 2);
+      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, (proj?.explode ?? 0) > 0 ? 2 : 1);
     } else if (s.def.classes.includes('Elemental') || s.def.onHit?.burn) {
-      fx.muzzle(tx, ty, s.aim, 0xff7824, 20, 4, tier);
-      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 2, 0xd8c8b8);
-    } else if (s.def.onHit?.freeze) {
-      fx.muzzle(tx, ty, s.aim, 0x7ce8ff, 16, 4, tier);
-    } else {
-      fx.spark(tx, ty, col, (tierOf(s.def, tier).damage >= 18 ? 5 : 3) + (tier >= 2 ? 2 : 0));
-      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 2);
+      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 1, 0xd8c8b8);
+    } else if (isHeavySmoke) {
+      fx.smoke(tx, ty, s.aim, 1);
     }
+    // 弹弓/弓箭/吹箭/石子/投矛等物理投掷物直接凭武器后坐力与弹体本体表现，不再喷多余闪光粒子
   }
 
   private updateSwing(s: Slot, slot: number, tipX: number, tipY: number, dt: number, mods: Mods): void {
@@ -882,8 +874,8 @@ export class WeaponSystem {
       const oy = en.y - py;
       if (ox * ox + oy * oy > rr * rr) continue;
       s.hits.push(en);
-      // 命中实感：在敌人受击点顺着攻击方向劈出短促交叉白斩痕
-      this.fx?.hitSlash(en.x, en.y, strikeAng, s.crit ? 0xffe468 : 0xffffff, s.crit ? 1.28 : 0.92 + s.tier * 0.08);
+      // 怪物本身已有受击闪白/挤压/击退反馈，仅暴击时补一记轻巧金白斩痕，避免普通命中满屏白光
+      if (s.crit) this.fx?.hitSlash(en.x, en.y, strikeAng, 0xffe468, 0.92);
       const d = Math.hypot(en.x - this.player.x, en.y - this.player.y) || 1;
       this.resolver.hit(en, s.damage, s.crit, (en.x - this.player.x) / d, (en.y - this.player.y) / d, kb, s.src);
     }
