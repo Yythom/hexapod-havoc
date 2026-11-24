@@ -92,6 +92,8 @@ export function installBot(game: Phaser.Game): void {
   let circleT = 0;
   /** false 时波次间不买东西（单独测某把武器） */
   let shopOn = true;
+  /** false 时后院赌约一律稳健跳过（隔离契约带来的波动） */
+  let contractsOn = true;
   /** 固定和怪保持的距离（不传则按武器射程自动算） */
   let keepFixed = 0;
   const frame = () => {
@@ -176,10 +178,16 @@ export function installBot(game: Phaser.Game): void {
     const r = run();
     let guard = 0;
     while (sc.page === 'level' && guard++ < 30) {
-      const u = [...sc.upgrades].sort((a: any, b: any) => upgradeRank(a.stat, r) - upgradeRank(b.stat, r))[0];
+      const u = [...r.pendingUpgrades].sort((a, b) => upgradeRank(a.stat, r) - upgradeRank(b.stat, r))[0];
       sc.chooseUpgrade(u);
     }
     while (sc.page === 'chest' && guard++ < 60) sc.takeChest();
+    // 后院赌约：默认签下第一个选项；contracts=false 时稳健跳过
+    if (sc.page === 'contract' && guard++ < 90) {
+      const id = contractsOn ? r.pendingContracts[0] : null;
+      if (id) sc.chooseContract(id);
+      else sc.skipContract();
+    }
     let rerolls = 0;
     for (let k = 0; k < (shopOn ? 9 : 0); k++) {
       const cands = r.offers
@@ -192,7 +200,7 @@ export function installBot(game: Phaser.Game): void {
         sc.buy(cands[0].i);
         continue;
       }
-      if (rerolls < 2 && r.nectar >= shop.rerollCost(r.wave, sc.shopRerolls) + 20) {
+      if (rerolls < 2 && r.nectar >= shop.rerollCost(r.wave, r.shopRerolls) + 20) {
         sc.rerollShop();
         rerolls++;
         continue;
@@ -211,10 +219,11 @@ export function installBot(game: Phaser.Game): void {
 
   const api = {
     /** setup 不传时用：锹甲、晴天、种子弹弓 */
-    start(m: Mode = 'smart', setup: Partial<RunSetup> = {}, opts: { shop?: boolean; keep?: number } = {}) {
+    start(m: Mode = 'smart', setup: Partial<RunSetup> = {}, opts: { shop?: boolean; keep?: number; contracts?: boolean } = {}) {
       mode = m;
       circleT = 0;
       shopOn = opts.shop ?? true;
+      contractsOn = opts.contracts ?? true;
       keepFixed = opts.keep ?? 0;
       // 模拟出来的胜负和解锁不写进真实存档；跑局时静音
       setSaveSandbox(true);

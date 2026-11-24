@@ -358,20 +358,20 @@ export class Effects {
     this.streaks(x1, y1, ang, color, 4 + tier, 210 + tier * 15, 0.85 + tier * 0.06);
   }
 
-  /** 大颚钳合撕咬特效：双弯月钳刃向中心咬合 + 中心爆星 */
+  /** 大颚钳合撕咬特效：双弯月钳刃 1:1 覆盖真实打击距离 + 咬合中心爆星 */
   chomp(x: number, y: number, ang: number, r: number, color = 0xffc858, tier = 0): void {
     this.chomps.push({ x, y, ang, r, color, tier, t: 0, total: 0.22 + tier * 0.015 });
-    const bx = x + Math.cos(ang) * r * 0.55;
-    const by = y + Math.sin(ang) * r * 0.55;
+    const bx = x + Math.cos(ang) * r * 0.86;
+    const by = y + Math.sin(ang) * r * 0.86;
     this.star(bx, by, 17 + tier * 3, tier >= 3 ? LEGENDARY_GOLD : color, ang);
     this.streaks(bx, by, ang, color, 3 + tier, 165 + tier * 15, 0.78 + tier * 0.06);
   }
 
-  /** 甲壳盾猛击震荡扇形波 */
+  /** 甲壳盾猛击震荡扇形波（精准贴合真实锤/盾击外缘） */
   bash(x: number, y: number, ang: number, arc: number, r: number, color = 0x72d8ff, tier = 0): void {
     this.bashes.push({ x, y, ang, arc, r, color, tier, t: 0, total: 0.26 + tier * 0.015 });
-    const hx = x + Math.cos(ang) * r * 0.55;
-    const hy = y + Math.sin(ang) * r * 0.55;
+    const hx = x + Math.cos(ang) * r * 0.76;
+    const hy = y + Math.sin(ang) * r * 0.76;
     this.star(hx, hy, 19 + tier * 3, tier >= 3 ? LEGENDARY_GOLD : color, ang);
     this.streaks(hx, hy, ang, color, 5 + tier, 200 + tier * 14, 0.9 + tier * 0.06);
   }
@@ -464,30 +464,45 @@ export class Effects {
     }
   }
 
-  /** 漫画感三段式爆破：纯白核心闪球 -> 黑墨边缘橙红火球转暗灰烟云 -> 地面焦黑弹坑 */
+  /** 漫画感三段式爆破：纯白核心闪球 -> 黑墨边缘橙红火球转暗灰烟云 -> 精确 1:1 伤害外环 + 地面焦黑弹坑 */
   explosion(x: number, y: number, r: number, color = 0xff7830, tier = 0): void {
-    const puffCount = Math.min(6, Math.max(4, Math.round(r / 18) + (tier >= 3 ? 1 : 0)));
+    const puffCount = Math.min(7, Math.max(5, Math.round(r / 15) + (tier >= 3 ? 1 : 0)));
     const puffs: ExplosionPuff[] = [
-      { ox: 0, oy: 0, dx: 0, dy: -6, r: Math.max(14, r * 0.42), delay: 0.02 },
+      { ox: 0, oy: 0, dx: 0, dy: -4, r: Math.max(14, r * 0.44), delay: 0.015 },
     ];
     for (let i = 0; i < puffCount; i++) {
-      const a = (i / puffCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
-      const dist = r * (0.22 + Math.random() * 0.26);
-      const drift = r * (0.18 + Math.random() * 0.2);
+      const a = (i / puffCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
+      const dist = r * (0.34 + Math.random() * 0.24);
+      const drift = r * (0.24 + Math.random() * 0.16);
       puffs.push({
         ox: Math.cos(a) * dist,
         oy: Math.sin(a) * dist,
         dx: Math.cos(a) * drift,
-        dy: Math.sin(a) * drift - 8,
-        r: Math.max(10, r * (0.24 + Math.random() * 0.14)),
-        delay: 0.03 + Math.random() * 0.04,
+        dy: Math.sin(a) * drift - 5,
+        r: Math.max(11, r * (0.28 + Math.random() * 0.12)),
+        delay: 0.025 + Math.random() * 0.035,
       });
     }
     this.explosions.push({ x, y, r, color, tier, puffs, t: 0, total: 0.42 });
     this.rings.push({ x, y, r, color, t: 0 });
-    this.star(x, y, Math.max(18, r * 0.46), tier >= 3 ? LEGENDARY_GOLD : 0xfff2a6);
-    this.streaks(x, y, Math.random() * Math.PI * 2, color, 4 + Math.min(4, Math.round(r / 22)), 210, 0.88);
-    this.crater(x, y, r * 0.72);
+    this.star(x, y, Math.max(18, r * 0.48), tier >= 3 ? LEGENDARY_GOLD : 0xfff2a6);
+    this.streaks(x, y, Math.random() * Math.PI * 2, color, 5 + Math.min(4, Math.round(r / 20)), 215, 0.9);
+    this.crater(x, y, r * 0.85);
+  }
+
+  /** 子弹穿透敌人时在背后迸出的定向破空锥 + 亮白穿透尾线（清晰区分穿透与单体） */
+  pierceBreak(x: number, y: number, ang: number, color = 0xfff0a8): void {
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    this.tracer(x - c * 10, y - s * 10, x + c * 28, y + s * 28, color, 3.2, 0.11);
+    this.streaks(x + c * 8, y + s * 8, ang, color, 3, 220, 0.72);
+    this.star(x + c * 6, y + s * 6, 11, 0xffffff, ang);
+  }
+
+  /** 单体子弹命中并立刻消散时的干脆收敛火花（明确表示子弹已在此终止） */
+  bulletImpact(x: number, y: number, ang: number, color = 0xffe498): void {
+    this.burst(x, y, color, 3, 95, 0.55);
+    this.streaks(x, y, ang + Math.PI, color, 2, 130, 0.55);
   }
 
   /** 爆炸地面焦黑弹坑印记（约 3 秒淡出，复用地面痕迹对象池） */
@@ -1039,13 +1054,14 @@ export class Effects {
       const a = 1 - k;
       const head = s.a0 + (s.a1 - s.a0) * Math.min(1, k * 2.2);
       const tail = s.a0 + (s.a1 - s.a0) * Math.max(0, (k - 0.18) * 1.15);
-      const rad = s.r * (0.86 + 0.18 * Phaser.Math.Easing.Quadratic.Out(k));
-      const tierBoost = 1 + s.tier * 0.11;
-      const thick = (20 * a + 4) * tierBoost;
+      // 视觉弧半径与厚度 1:1 贴合真实横扫内外圈，避免刀光外侧或内侧“无特效却死怪”
+      const rad = s.r * (0.94 + 0.1 * Phaser.Math.Easing.Quadratic.Out(k));
+      const tierBoost = 1 + s.tier * 0.1;
+      const thick = Math.max(22, s.r * 0.34) * (0.45 + 0.55 * a) * tierBoost;
       const coreRatio = s.tier >= 1 ? 0.52 : 0.36;
-      this.fillCrescent(glow, s.x, s.y, rad, thick * 1.42, tail, head, s.color, 0.52 * a);
-      this.fillCrescent(g, s.x, s.y, rad, thick * 0.84, tail, head, s.color, 0.86 * a);
-      this.fillCrescent(glow, s.x, s.y, rad + 2, thick * coreRatio, tail + 0.06, head, 0xffffff, (s.tier >= 1 ? 0.98 : 0.88) * a);
+      this.fillCrescent(glow, s.x, s.y, rad, thick * 1.32, tail, head, s.color, 0.48 * a);
+      this.fillCrescent(g, s.x, s.y, rad, thick * 0.88, tail, head, s.color, 0.84 * a);
+      this.fillCrescent(glow, s.x, s.y, rad + 2, thick * coreRatio, tail + 0.06, head, 0xffffff, (s.tier >= 1 ? 0.96 : 0.86) * a);
       // IV 级传说：错位延迟的二重金紫斩弧
       if (s.tier >= 3) {
         const k2 = Math.max(0, (s.t - 0.025) / (s.total - 0.025));
@@ -1241,24 +1257,25 @@ export class Effects {
       }
       const k = c.t / c.total;
       const a = 1 - k;
-      const clamp = 0.65 * (1 - Phaser.Math.Easing.Cubic.Out(Math.min(1, k * 1.45)));
-      const rad = c.r * (0.48 + 0.28 * k);
+      const clamp = 0.55 * (1 - Phaser.Math.Easing.Cubic.Out(Math.min(1, k * 1.5)));
+      // 视觉咬合范围直抵 100% 真实射程 c.r（不再缩水到 42%~66%）
+      const rad = c.r * (0.76 + 0.24 * Phaser.Math.Easing.Quadratic.Out(k));
       const tb = 1 + c.tier * 0.1;
       for (const side of [-1, 1]) {
-        const jawA = c.ang + side * (clamp + 0.06);
-        const startA = jawA - side * 0.56;
+        const jawA = c.ang + side * (clamp + 0.05);
+        const startA = jawA - side * 0.52;
         const a0 = Math.min(startA, jawA);
         const a1 = Math.max(startA, jawA);
-        this.fillCrescent(glow, c.x, c.y, rad, 16 * tb * a, a0, a1, c.color, 0.58 * a, 12);
-        this.fillCrescent(g, c.x, c.y, rad, 10 * tb * a, a0, a1, c.color, 0.9 * a, 12);
-        this.fillCrescent(glow, c.x, c.y, rad + 1, (c.tier >= 1 ? 5.6 : 4.5) * tb * a, a0, a1, 0xffffff, 0.95 * a, 12);
+        this.fillCrescent(glow, c.x, c.y, rad, 18 * tb * a, a0, a1, c.color, 0.58 * a, 12);
+        this.fillCrescent(g, c.x, c.y, rad, 12 * tb * a, a0, a1, c.color, 0.9 * a, 12);
+        this.fillCrescent(glow, c.x, c.y, rad + 1, (c.tier >= 1 ? 6.2 : 4.8) * tb * a, a0, a1, 0xffffff, 0.95 * a, 12);
         if (c.tier >= 3) {
-          this.fillCrescent(glow, c.x, c.y, rad * 1.16, 7 * a, a0, a1, LEGENDARY_VIOLET, 0.52 * a, 10);
+          this.fillCrescent(glow, c.x, c.y, rad * 1.12, 7 * a, a0, a1, LEGENDARY_VIOLET, 0.52 * a, 10);
         }
       }
     }
 
-    // 盾击扇形震荡波（尖锐收尾新月波 + 二重/传说三重音波）
+    // 盾击扇形震荡波（1:1 覆盖真实砸击外缘 b.r）
     for (let i = this.bashes.length - 1; i >= 0; i--) {
       const b = this.bashes[i];
       b.t += dt;
@@ -1269,17 +1286,17 @@ export class Effects {
       const k = b.t / b.total;
       const a = 1 - k;
       const ease = Phaser.Math.Easing.Quadratic.Out(k);
-      const rOuter = b.r * (0.34 + 0.72 * ease);
-      const rInner = rOuter * 0.62;
+      const rOuter = b.r * (0.48 + 0.52 * ease);
+      const rInner = rOuter * 0.58;
       const a0 = b.ang - b.arc;
       const a1 = b.ang + b.arc;
       const tb = 1 + b.tier * 0.1;
-      this.fillCrescent(glow, b.x, b.y, rOuter, (22 * a + 3) * tb, a0, a1, b.color, 0.6 * a, 18);
-      this.fillCrescent(g, b.x, b.y, rOuter, (13 * a + 2) * tb, a0, a1, b.color, 0.88 * a, 18);
-      this.fillCrescent(glow, b.x, b.y, rOuter + 2, (b.tier >= 1 ? 6.8 : 5.5) * a, a0 + 0.1, a1 - 0.1, 0xffffff, 0.95 * a, 16);
-      this.fillCrescent(glow, b.x, b.y, rInner, 9 * tb * a, a0 + 0.18, a1 - 0.18, b.tier >= 3 ? LEGENDARY_GOLD : b.color, 0.52 * a, 12);
+      this.fillCrescent(glow, b.x, b.y, rOuter, (24 * a + 4) * tb, a0, a1, b.color, 0.6 * a, 18);
+      this.fillCrescent(g, b.x, b.y, rOuter, (15 * a + 2) * tb, a0, a1, b.color, 0.88 * a, 18);
+      this.fillCrescent(glow, b.x, b.y, rOuter + 2, (b.tier >= 1 ? 7.2 : 5.8) * a, a0 + 0.08, a1 - 0.08, 0xffffff, 0.95 * a, 16);
+      this.fillCrescent(glow, b.x, b.y, rInner, 10 * tb * a, a0 + 0.15, a1 - 0.15, b.tier >= 3 ? LEGENDARY_GOLD : b.color, 0.52 * a, 12);
       if (b.tier >= 3) {
-        this.fillCrescent(glow, b.x, b.y, rOuter * 1.12, 8 * a, a0 + 0.12, a1 - 0.12, LEGENDARY_VIOLET, 0.55 * a, 14);
+        this.fillCrescent(glow, b.x, b.y, rOuter * 1.08, 8 * a, a0 + 0.1, a1 - 0.1, LEGENDARY_VIOLET, 0.55 * a, 14);
       }
     }
 

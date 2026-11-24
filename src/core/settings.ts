@@ -4,7 +4,7 @@ import { createCompatStorage, syncOnStorageEvent } from './storage';
 
 export type DamageNumberMode = 'all' | 'crit' | 'off';
 
-/** 玩家设置：音效音量、背景音乐、震屏、隐藏武器、伤害数字分级、瞄准模式。和进度存档分开存。 */
+/** 玩家设置：音效音量、背景音乐、震屏、隐藏武器、伤害数字分级、瞄准模式、视角缩放。和进度存档分开存。 */
 export interface Settings {
   /** 0 表示关闭 */
   volume: number;
@@ -13,6 +13,8 @@ export interface Settings {
   hideWeapons: boolean;
   damageNumbers: DamageNumberMode;
   manualAim: boolean;
+  /** 战斗视角缩放倍率（1 = 默认/最大视野，只能向上拉近放大） */
+  cameraZoom: number;
 }
 
 export interface SettingsStoreState extends Settings {
@@ -33,6 +35,16 @@ const DAMAGE_NUMBER_MODES: { value: DamageNumberMode; label: string }[] = [
   { value: 'off', label: '关闭' },
 ];
 
+export const CAMERA_ZOOM_STEPS = [
+  { value: 1, label: '100%（最大视野）' },
+  { value: 1.15, label: '115%（较近）' },
+  { value: 1.3, label: '130%（近景）' },
+  { value: 1.45, label: '145%（特写）' },
+];
+
+export const MIN_CAMERA_ZOOM = CAMERA_ZOOM_STEPS[0].value;
+export const MAX_CAMERA_ZOOM = CAMERA_ZOOM_STEPS[CAMERA_ZOOM_STEPS.length - 1].value;
+
 const KEY = 'hexapod-havoc-settings-v1';
 
 const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +54,7 @@ const DEFAULT_SETTINGS: Settings = {
   hideWeapons: false,
   damageNumbers: 'all',
   manualAim: false,
+  cameraZoom: 1,
 };
 
 function sanitizeSettings(raw: Partial<Settings> | undefined): Settings {
@@ -55,6 +68,9 @@ function sanitizeSettings(raw: Partial<Settings> | undefined): Settings {
     s.damageNumbers = raw.damageNumbers;
   }
   if (typeof raw.manualAim === 'boolean') s.manualAim = raw.manualAim;
+  if (typeof raw.cameraZoom === 'number' && Number.isFinite(raw.cameraZoom)) {
+    s.cameraZoom = Math.min(MAX_CAMERA_ZOOM, Math.max(MIN_CAMERA_ZOOM, raw.cameraZoom));
+  }
   return s;
 }
 
@@ -66,6 +82,7 @@ function pickSettings(s: SettingsStoreState): Settings {
     hideWeapons: s.hideWeapons,
     damageNumbers: s.damageNumbers,
     manualAim: s.manualAim,
+    cameraZoom: s.cameraZoom,
   };
 }
 
@@ -125,4 +142,18 @@ export function damageNumbersLabel(m: DamageNumberMode): string {
 export function nextDamageNumbers(m: DamageNumberMode): DamageNumberMode {
   const i = DAMAGE_NUMBER_MODES.findIndex((x) => x.value === m);
   return DAMAGE_NUMBER_MODES[(i + 1) % DAMAGE_NUMBER_MODES.length].value;
+}
+
+export function cameraZoomLabel(z: number): string {
+  let best = CAMERA_ZOOM_STEPS[0];
+  for (const step of CAMERA_ZOOM_STEPS) {
+    if (Math.abs(step.value - z) < Math.abs(best.value - z)) best = step;
+  }
+  return best.label;
+}
+
+/** 下一档视角缩放（循环） */
+export function nextCameraZoom(z: number): number {
+  const i = CAMERA_ZOOM_STEPS.findIndex((s) => s.label === cameraZoomLabel(z));
+  return CAMERA_ZOOM_STEPS[(i + 1) % CAMERA_ZOOM_STEPS.length].value;
 }

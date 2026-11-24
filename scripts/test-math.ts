@@ -23,7 +23,16 @@ import {
   toggleBanishItem,
   useSaveStore,
 } from '../src/core/save';
-import { getSettings, updateSettings, useSettingsStore } from '../src/core/settings';
+import {
+  CAMERA_ZOOM_STEPS,
+  cameraZoomLabel,
+  getSettings,
+  MAX_CAMERA_ZOOM,
+  MIN_CAMERA_ZOOM,
+  nextCameraZoom,
+  updateSettings,
+  useSettingsStore,
+} from '../src/core/settings';
 import { addItem, buyOffer, enchantWeapon, mergeWeapons, refreshOffers, rerollCost, smeltItem } from '../src/core/shop';
 import { BASE_STATS, damageTakenMultiplier, dodgeChance, ZERO_STATS } from '../src/core/stats';
 import { ENEMIES, enemyDamage, enemyHp } from '../src/data/enemies';
@@ -220,6 +229,17 @@ test('Zustand Store 响应式订阅、沙盒隔离与断点读写', () => {
   assert.equal(getSettings().volume, 1);
   assert.equal(settingNotifies, 1);
   updateSettings({ volume: prevVol });
+
+  const prevZoom = getSettings().cameraZoom;
+  assert.equal(prevZoom, 1);
+  updateSettings({ cameraZoom: 0.5 });
+  assert.equal(getSettings().cameraZoom, MIN_CAMERA_ZOOM);
+  updateSettings({ cameraZoom: 3 });
+  assert.equal(getSettings().cameraZoom, MAX_CAMERA_ZOOM);
+  assert.equal(nextCameraZoom(1), CAMERA_ZOOM_STEPS[1].value);
+  assert.equal(nextCameraZoom(MAX_CAMERA_ZOOM), MIN_CAMERA_ZOOM);
+  assert.equal(cameraZoomLabel(1), CAMERA_ZOOM_STEPS[0].label);
+  updateSettings({ cameraZoom: prevZoom });
   unsubSet();
 });
 

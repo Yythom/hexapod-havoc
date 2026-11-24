@@ -857,16 +857,16 @@ export class UIScene extends Phaser.Scene {
     const r = this.run;
     this.openModal(
       '游戏已暂停',
-      528,
+      568,
       (c, top, px) => {
         const leftCx = px + 296;
-        c.add(createButton(this, leftCx, top + 122, '继续战斗', () => this.resume(), { width: 268, height: 54 }));
-        c.add(createButton(this, leftCx - 134, top + 196, '重新开始', () => this.restart(), { width: 238, height: 48, fontSize: 19, primary: false }));
-        c.add(createButton(this, leftCx + 134, top + 196, '放弃本局', () => this.toMenu(), { width: 238, height: 48, fontSize: 19, primary: false }));
-        addSettingsButtons(this, c, leftCx, top + 272);
+        c.add(createButton(this, leftCx, top + 120, '继续战斗', () => this.resume(), { width: 268, height: 54 }));
+        c.add(createButton(this, leftCx - 134, top + 190, '重新开始', () => this.restart(), { width: 238, height: 48, fontSize: 19, primary: false }));
+        c.add(createButton(this, leftCx + 134, top + 190, '放弃本局', () => this.toMenu(), { width: 238, height: 48, fontSize: 19, primary: false }));
+        addSettingsButtons(this, c, leftCx, top + 258);
 
         // 左侧底部：当前局内构筑预览（武器槽 + 激活羁绊）
-        const buildY = top + 368;
+        const buildY = top + 412;
         c.add(divider(this, px + 30, buildY, 532, COLOR.border, 0.6));
         c.add(label(this, px + 32, buildY + 18, `当前配装 (${r.weapons.length}/${r.weaponSlots})`, 14, COLOR.dim, true).setOrigin(0, 0.5));
         const slotSz = 48;
@@ -891,7 +891,7 @@ export class UIScene extends Phaser.Scene {
         }
 
         // 右侧：实时战斗属性面板（随时查看闪避/暴击/移速/护甲）
-        const sp = createStatsPanel(this, px + 586, top + 90, 252, 422, r.stats);
+        const sp = createStatsPanel(this, px + 586, top + 90, 252, 462, r.stats);
         c.add(sp.container);
       },
       () => this.resume(),

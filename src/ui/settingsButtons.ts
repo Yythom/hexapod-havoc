@@ -1,10 +1,19 @@
 import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
 import { exportSaveCode, importSaveCode } from '../core/save';
-import { damageNumbersLabel, getSettings, nextDamageNumbers, nextVolume, updateSettings, volumeLabel } from '../core/settings';
+import {
+  cameraZoomLabel,
+  damageNumbersLabel,
+  getSettings,
+  nextCameraZoom,
+  nextDamageNumbers,
+  nextVolume,
+  updateSettings,
+  volumeLabel,
+} from '../core/settings';
 import { createButton } from './Button';
 
-/** 2×3 整齐设置按钮网格（主菜单可选附带存档导出/导入行）。点一下立即生效并保存。 */
+/** 2×3 整齐设置按钮网格 + 视角缩放整行（主菜单可选附带存档导出/导入行）。点一下立即生效并保存。 */
 export function addSettingsButtons(
   scene: Phaser.Scene,
   parent: Phaser.GameObjects.Container,
@@ -21,8 +30,10 @@ export function addSettingsButtons(
     const bw = 162;
     const bh = 44;
     const stepX = 174;
+    const fullW = stepX * 2 + bw;
     const rowY0 = y;
     const rowY1 = y + 54;
+    const rowY2 = y + 108;
     group.add([
       createButton(
         scene,
@@ -90,15 +101,26 @@ export function addSettingsButtons(
         },
         { width: bw, height: bh, fontSize: 17, primary: false },
       ),
+      createButton(
+        scene,
+        cx,
+        rowY2,
+        `视角缩放：${cameraZoomLabel(s.cameraZoom)}`,
+        () => {
+          updateSettings({ cameraZoom: nextCameraZoom(getSettings().cameraZoom) });
+          build();
+        },
+        { width: fullW, height: bh, fontSize: 17, primary: false },
+      ),
     ]);
 
     if (options?.showSaveTransfer) {
-      const rowY2 = y + 114;
+      const rowY3 = y + 168;
       group.add([
         createButton(
           scene,
           cx - 128,
-          rowY2,
+          rowY3,
           '导出存档码',
           () => {
             const code = exportSaveCode();
@@ -121,7 +143,7 @@ export function addSettingsButtons(
         createButton(
           scene,
           cx + 128,
-          rowY2,
+          rowY3,
           '导入存档码',
           () => {
             const input = window.prompt('请粘贴之前导出的存档码（HH1:...）：');
@@ -142,7 +164,7 @@ export function addSettingsButtons(
       if (transferMsg) {
         group.add(
           scene.add
-            .text(cx, rowY2 + 34, transferMsg, {
+            .text(cx, rowY3 + 34, transferMsg, {
               fontFamily: '"Noto Sans SC", sans-serif',
               fontSize: '13px',
               fontStyle: 'bold',

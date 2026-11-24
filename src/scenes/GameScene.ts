@@ -18,7 +18,7 @@ import {
   saveActiveRun,
 } from '../core/save';
 import { activeSets } from '../core/sets';
-import { getSettings } from '../core/settings';
+import { getSettings, useSettingsStore } from '../core/settings';
 import { weaponPool } from '../core/shop';
 import { checkUnlocks } from '../core/unlocks';
 import { damageTakenMultiplier, dodgeChance, moveSpeed, pickupRange, regenPerSecond } from '../core/stats';
@@ -337,8 +337,11 @@ export class GameScene extends Phaser.Scene {
       onCritSpark: (x, y, count) => this.fireSeekingSparks(x, y, count, 10 + 0.5 * this.run.stats.ranged),
       onHitstop: (sec) => this.triggerHitstop(sec),
       burst: (x, y, count, damage, texture, radius, speed, src) => {
+        const bCol = texture === 'laserbolt' ? 0x4ef4ff : 0xd8ff78;
+        this.fx.star(x, y, 16, bCol);
         for (let k = 0; k < count; k++) {
           const a = (k / count) * Math.PI * 2 + Math.random() * 0.3;
+          this.fx.tracer(x, y, x + Math.cos(a) * 26, y + Math.sin(a) * 26, bCol, 2.2, 0.1);
           this.projectiles.fire({
             texture,
             x,
@@ -363,7 +366,16 @@ export class GameScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     cam.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    cam.setZoom(CAMERA_ZOOM * RENDER_SCALE);
+    const applyCameraZoom = (zoomMult: number) => {
+      cam.setZoom(CAMERA_ZOOM * zoomMult * RENDER_SCALE);
+    };
+    applyCameraZoom(getSettings().cameraZoom);
+    const unsubSettings = useSettingsStore.subscribe((next, prev) => {
+      if (next.cameraZoom !== prev.cameraZoom) {
+        applyCameraZoom(next.cameraZoom);
+      }
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubSettings);
     cam.startFollow(this.player.view, false, 0.12, 0.12);
 
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT') as MoveKeys;

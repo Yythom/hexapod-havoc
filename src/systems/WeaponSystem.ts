@@ -276,25 +276,26 @@ export class WeaponSystem {
           const dist = target ? Math.hypot(target.x - tip.x, target.y - tip.y) : range * 0.85;
           this.startSwing(s, dist, range, interval);
           this.emitMeleeFx(s, tip.x, tip.y);
-          // 刀刃 6 件套觉醒：挥击向前发射穿透剑气波
+          // 刀刃 6 件套觉醒：挥击向前释放清晰的新月穿透剑气波（1:1 渲染真实斩击宽度）
           if (mods.bladeWave > 0 && s.def.classes.includes('Blade')) {
             this.projectiles.fire({
               texture: 'leafblade',
               x: tip.x,
               y: tip.y,
               angle: s.aim,
-              speed: 620,
-              maxDist: Math.min(MAX_SCREEN_RANGE, 250),
+              speed: 580,
+              maxDist: Math.min(MAX_SCREEN_RANGE, 260),
               damage: Math.max(2, Math.round(s.damage * 0.65)),
               crit: s.crit,
-              radius: 10,
+              radius: 22,
               knockback: 80,
               pierce: 4,
-              spin: 12,
+              spin: 0,
               explode: 0,
               poison: null,
               cloud: null,
               src: s.src,
+              waveColor: s.crit ? 0xffe468 : 0x7eff78,
             });
           }
           this.onAttack?.();
@@ -689,42 +690,61 @@ export class WeaponSystem {
     s.hits.length = 0;
   }
 
+  /** 近战各形态的真实命中半径：直刺/连刺/夹击严格收窄，避免“细针特效却扫死旁边一大片” */
+  private meleeHitRadius(melee: NonNullable<WeaponDef['melee']>, tier: number): number {
+    switch (melee.style) {
+      case 'thrust':
+      case 'flurry':
+      case 'pierce':
+        return melee.hitRadius * 0.56 * (1 + 0.1 * tier);
+      case 'snap':
+        return melee.hitRadius * 0.65 * (1 + 0.1 * tier);
+      case 'charge':
+        return melee.hitRadius * 0.72 * (1 + 0.1 * tier);
+      default:
+        return melee.hitRadius * 0.9 * (1 + 0.12 * tier);
+    }
+  }
+
   private emitMeleeFx(s: Slot, tx: number, ty: number): void {
     const fx = this.fx;
     if (!fx) return;
     const melee = s.def.melee!;
     const tier = s.tier;
+    const hitR = this.meleeHitRadius(melee, tier);
     const critCol = 0xffdf68;
     const dx = Math.cos(s.aim);
     const dy = Math.sin(s.aim);
     switch (melee.style) {
       case 'sweep': {
         const col = s.crit ? critCol : 0xa0ff58;
-        fx.slash(tx, ty, s.reach * 0.85, s.aim, melee.arc ?? 1, col, tier);
+        fx.slash(tx, ty, s.reach * 0.85 + hitR * 0.35, s.aim, melee.arc ?? 1, col, tier);
         break;
       }
       case 'snap': {
         const col = s.crit ? critCol : 0xffc858;
-        fx.chomp(tx, ty, s.aim, s.reach * 0.88, col, tier);
+        // 1:1 覆盖真实打击距离 s.reach
+        fx.chomp(tx, ty, s.aim, s.reach + hitR * 0.4, col, tier);
         break;
       }
       case 'bash': {
-        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.95, s.crit ? critCol : 0x72d8ff, tier);
+        // 1:1 覆盖真实重砸弧面 s.reach * 0.72 + hitR * 0.65
+        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.72 + hitR * 0.65, s.crit ? critCol : 0x72d8ff, tier);
         break;
       }
       case 'charge': {
         const col = s.crit ? critCol : 0xffe49a;
         const ex = tx + dx * s.reach;
         const ey = ty + dy * s.reach;
-        fx.sonicThrust(tx, ty, ex, ey, col, melee.hitRadius * 0.72, 2, tier);
+        fx.sonicThrust(tx, ty, ex, ey, col, hitR * 1.1, 2, tier);
         break;
       }
       case 'flurry': {
         const col = s.crit ? critCol : 0xb8ff58;
-        for (const off of [-0.18, -0.05, 0.06, 0.18]) {
+        for (const off of [-0.14, -0.04, 0.05, 0.14]) {
           const a = s.aim + off;
-          const r = s.reach * (Math.abs(off) < 0.08 ? 1.02 : 0.84);
-          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 6.5, tier);
+          const r = s.reach * (Math.abs(off) < 0.08 ? 1.0 : 0.88);
+          fx.thrust(tx, ty, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, hitR * 0.85, tier);
         }
         fx.streaks(tx + dx * s.reach * 0.7, ty + dy * s.reach * 0.7, s.aim, col, 4 + tier, 210, 0.75);
         break;
@@ -733,13 +753,14 @@ export class WeaponSystem {
         const col = s.crit ? critCol : 0xeb68ff;
         const ex = tx + dx * s.reach;
         const ey = ty + dy * s.reach;
-        fx.thrust(tx, ty, ex, ey, col, melee.hitRadius * 0.65, tier);
+        fx.thrust(tx, ty, ex, ey, col, hitR * 1.15, tier);
         fx.star(ex, ey, 18 + tier * 2, col, s.aim + Math.PI / 4);
         fx.streaks(ex, ey, s.aim, col, 4 + tier, 180, 0.8);
         break;
       }
       default: {
-        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, melee.hitRadius * 0.45, tier);
+        // 直刺宽度 1:1 匹配真实判定半径 hitR
+        fx.thrust(tx, ty, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xffe4b8, hitR * 1.15, tier);
       }
     }
   }
@@ -782,7 +803,7 @@ export class WeaponSystem {
     const kb = tierOf(s.def, s.tier).knockback * (1 + mods.meleeKnockbackPct + s.slotBonus.knockbackPct);
     s.swing = Math.max(0, s.swing - dt);
     const t = 1 - s.swing / s.swingTotal;
-    const hitR = melee.hitRadius * (1 + 0.14 * s.tier);
+    const hitR = this.meleeHitRadius(melee, s.tier);
     // 出招前极短（约 0.03s）回拉蓄力再猛刺/猛挥，增强打击重量感（连刺 flurry 保持极速不蓄力）
     const windup = melee.style === 'flurry' ? 0 : Math.min(0.13, 0.03 / Math.max(0.08, s.swingTotal));
 
@@ -802,12 +823,12 @@ export class WeaponSystem {
         const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
         for (let k = 1; k <= steps; k++) {
           const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
-          for (const f of [0.45, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
+          for (const f of [0.52, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
         }
         s.lastAng = ang;
       }
     } else if (melee.style === 'bash') {
-      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人
+      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人（半径与 fx.bash 1:1 对齐）
       view.setWeaponAim(slot, s.aim);
       if (t < windup) {
         const wk = t / windup;
@@ -815,7 +836,7 @@ export class WeaponSystem {
       } else {
         const st = (t - windup) / (1 - windup);
         const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
-        const ext = s.reach * 0.68 * Phaser.Math.Easing.Quadratic.Out(out);
+        const ext = s.reach * 0.72 * Phaser.Math.Easing.Quadratic.Out(out);
         view.setWeaponExtend(slot, ext / view.scaleX);
         if (ext > s.lastExt) {
           const arc = melee.arc ?? 0.85;

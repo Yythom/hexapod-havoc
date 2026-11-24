@@ -591,21 +591,21 @@ export class MenuScene extends Phaser.Scene {
     const c = this.add.container(0, 0).setDepth(100);
     const dim = this.add.rectangle(0, 0, W, H, 0x050507, 0.74).setOrigin(0).setInteractive();
     const pw = 580;
-    const ph = 420;
+    const ph = 474;
     const px = W / 2 - pw / 2;
     const py = H / 2 - ph / 2;
     const bg = panel(this, px, py, pw, ph, COLOR.border, COLOR.panel, 2, COLOR.gold);
     const title = displayLabel(this, W / 2, py + 44, '游戏设置', 32, COLOR.text).setOrigin(0.5);
     const div = divider(this, px + 32, py + 78, pw - 64);
     c.add([dim, bg, title, div]);
-    addSettingsButtons(this, c, W / 2, py + 126, {
+    addSettingsButtons(this, c, W / 2, py + 124, {
       showSaveTransfer: true,
       onSaveImported: () => {
         c.destroy();
         this.scene.restart();
       },
     });
-    c.add(createButton(this, W / 2, py + 362, '完成', () => c.destroy(), { width: 220, height: 52 }));
+    c.add(createButton(this, W / 2, py + 416, '完成', () => c.destroy(), { width: 220, height: 52 }));
     c.setAlpha(0);
     this.tweens.add({ targets: c, alpha: 1, duration: 120 });
   }
