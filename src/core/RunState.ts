@@ -1,6 +1,7 @@
 import { baseSlots, CHARACTERS, type CharacterDef } from '../data/characters';
 import { DIFFICULTIES, type DifficultyDef } from '../data/difficulty';
 import { ITEMS, ZERO_MODS, type Mods } from '../data/items';
+import { WEAPONS } from '../data/weapons';
 import { xpToNext } from './progression';
 import { activeSets } from './sets';
 import type { Offer } from './shop';
@@ -14,6 +15,8 @@ export interface OwnedWeapon {
   tier: number;
   /** 成长型武器：本局用它击杀的数量 */
   kills?: number;
+  /** Railgun：本波累积的额外伤害 */
+  ramp?: number;
 }
 
 /** 开局选择：角色、难度、初始武器 */
@@ -135,6 +138,13 @@ export class RunState {
       if (!def) continue;
       addStats(def.stats, n);
       addMods(def.mods, n);
+    }
+    for (const w of this.weapons) {
+      const def = WEAPONS[w.id];
+      if (!def) continue;
+      if (def.bonusStats) addStats(def.bonusStats);
+      if (def.special?.growthMaxHp) s.maxHp += Math.floor((w.kills ?? 0) * def.special.growthMaxHp);
+      if (def.special?.armorPerWeapon) s.armor += def.special.armorPerWeapon * this.weapons.length;
     }
     for (const set of activeSets(this.weapons)) {
       addStats(set.level.stats);

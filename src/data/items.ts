@@ -52,6 +52,8 @@ export interface Mods {
   turretSpeedPct: number;
   /** 地雷爆炸半径加成 */
   mineRadiusPct: number;
+  /** 所有爆炸（子弹、近战、地雷、火箭）半径加成 */
+  explodeRadiusPct: number;
   /** 治疗效果加成 */
   healingPct: number;
   /** 回旋、弹跳类武器的弹射次数加成 */
@@ -120,6 +122,7 @@ export const ZERO_MODS: Readonly<Mods> = {
   deployCap: 0,
   turretSpeedPct: 0,
   mineRadiusPct: 0,
+  explodeRadiusPct: 0,
   healingPct: 0,
   bounces: 0,
   killNectar: 0,
@@ -170,6 +173,7 @@ export const MOD_LABEL: Record<keyof Mods, (v: number) => string> = {
   deployCap: (v) => `每种机关数量上限 +${v}`,
   turretSpeedPct: (v) => `炮台攻速 ${pct(v)}`,
   mineRadiusPct: (v) => `地雷爆炸半径 ${pct(v)}`,
+  explodeRadiusPct: (v) => `爆炸范围 ${pct(v)}`,
   healingPct: (v) => `治疗效果 ${pct(v)}`,
   bounces: (v) => `回旋、弹跳类武器弹射 +${v} 次`,
   killNectar: (v) => `击杀时 ${Math.round(v * 100)}% 概率多掉 1 颗花蜜`,

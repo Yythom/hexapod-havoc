@@ -48,6 +48,8 @@ const UPGRADES: { stat: keyof Stats; values: [number, number, number, number] }[
   { stat: 'melee', values: [2, 3, 4, 5] },
   { stat: 'ranged', values: [1, 2, 3, 4] },
   { stat: 'toxin', values: [1, 2, 3, 4] },
+  { stat: 'elemental', values: [1, 2, 3, 4] },
+  { stat: 'curse', values: [1, 1, 2, 3] },
   { stat: 'attackSpeedPct', values: [0.05, 0.1, 0.15, 0.2] },
   { stat: 'critChance', values: [0.03, 0.05, 0.07, 0.09] },
   { stat: 'range', values: [15, 30, 45, 60] },

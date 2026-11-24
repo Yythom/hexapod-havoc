@@ -1,10 +1,10 @@
 import type { Mods } from '../data/items';
-import { WEAPONS, type WeaponTag } from '../data/weapons';
+import { CLASS_ORDER, WEAPONS, type WeaponClass } from '../data/weapons';
 import type { OwnedWeapon } from './RunState';
 import type { Stats } from './stats';
 
-/** 武器标签套装：同一标签凑够 2 / 4 / 6 把触发（DESIGN.md 5.1） */
-export const SET_THRESHOLDS = [2, 4, 6] as const;
+/** Brotato 的武器 Class 套装：2/3/4/5/6 把触发五档 */
+export const SET_THRESHOLDS = [2, 3, 4, 5, 6] as const;
 
 interface SetLevel {
   stats: Partial<Stats>;
@@ -12,74 +12,152 @@ interface SetLevel {
   text: string;
 }
 
-export const SETS: Record<WeaponTag, [SetLevel, SetLevel, SetLevel]> = {
-  甲角: [
-    { stats: { armor: 2 }, text: '甲壳 +2' },
-    { stats: { armor: 4 }, text: '甲壳 +4' },
-    { stats: { armor: 6 }, mods: { meleeKnockbackPct: 0.5, ramDamage: 1 }, text: '甲壳 +6，近战击退 +50%，移动可撞伤敌人' },
+type FiveLevels = [SetLevel, SetLevel, SetLevel, SetLevel, SetLevel];
+
+/** 17 个 Class 的五档套装加成（按 Brotato 数值翻译；同名多把也计数） */
+export const SETS: Record<WeaponClass, FiveLevels> = {
+  Blade: [
+    { stats: { melee: 1, lifesteal: 0.01 }, text: '近战 +1，吸取 +1%' },
+    { stats: { melee: 2, lifesteal: 0.02 }, text: '近战 +2，吸取 +2%' },
+    { stats: { melee: 3, lifesteal: 0.03 }, text: '近战 +3，吸取 +3%' },
+    { stats: { melee: 4, lifesteal: 0.04 }, text: '近战 +4，吸取 +4%' },
+    { stats: { melee: 5, lifesteal: 0.05 }, text: '近战 +5，吸取 +5%' },
   ],
-  尖刺: [
-    { stats: { critChance: 0.05 }, text: '暴击 +5%' },
-    { stats: { critChance: 0.1 }, text: '暴击 +10%' },
-    { stats: { critChance: 0.15 }, mods: { critNova: 1 }, text: '暴击 +15%，暴击时爆发尖刺震波' },
+  Blunt: [
+    { stats: { armor: 1, speedPct: -0.02 }, text: '甲壳 +1，移速 −2%' },
+    { stats: { armor: 1, maxHp: 3, speedPct: -0.04 }, text: '甲壳 +1，最大生命 +3，移速 −4%' },
+    { stats: { armor: 2, maxHp: 3, speedPct: -0.06 }, text: '甲壳 +2，最大生命 +3，移速 −6%' },
+    { stats: { armor: 2, maxHp: 6, speedPct: -0.08 }, text: '甲壳 +2，最大生命 +6，移速 −8%' },
+    { stats: { armor: 3, maxHp: 6, speedPct: -0.1 }, text: '甲壳 +3，最大生命 +6，移速 −10%' },
   ],
-  投掷: [
-    { stats: { range: 15 }, text: '射程 +15' },
-    { stats: { range: 35 }, text: '射程 +35' },
-    { stats: { range: 55 }, mods: { bounces: 1 }, text: '射程 +55，投掷/回旋类弹射 +1 次' },
+  Elemental: [
+    { stats: { elemental: 1 }, text: '元素 +1' },
+    { stats: { elemental: 2 }, text: '元素 +2' },
+    { stats: { elemental: 3 }, text: '元素 +3' },
+    { stats: { elemental: 4 }, text: '元素 +4' },
+    { stats: { elemental: 5 }, text: '元素 +5' },
   ],
-  枪械: [
-    { stats: { range: 10, ranged: 1 }, text: '射程 +10，远程 +1' },
-    { stats: { range: 25, ranged: 2 }, text: '射程 +25，远程 +2' },
-    { stats: { range: 40, ranged: 4, attackSpeedPct: 0.1 }, mods: { gunRicochet: 1 }, text: '射程 +40，远程 +4，攻速 +10%，子弹穿透与弹跳 +1' },
+  Ethereal: [
+    { stats: { dodge: 0.06, armor: -1 }, text: '闪避 +6%，甲壳 −1' },
+    { stats: { dodge: 0.12, armor: -2 }, text: '闪避 +12%，甲壳 −2' },
+    { stats: { dodge: 0.18, armor: -3 }, text: '闪避 +18%，甲壳 −3' },
+    { stats: { dodge: 0.24, armor: -4 }, text: '闪避 +24%，甲壳 −4' },
+    { stats: { dodge: 0.3, armor: -5 }, text: '闪避 +30%，甲壳 −5' },
   ],
-  腺体: [
-    { stats: { toxin: 2 }, text: '毒素 +2' },
-    { stats: { toxin: 4 }, text: '毒素 +4' },
-    { stats: { toxin: 6 }, mods: { poisonDuration: 1, poisonNova: 1 }, text: '毒素 +6，中毒持续 +1 秒，带毒怪死后留毒云' },
+  Explosive: [
+    { mods: { explodeRadiusPct: 0.05 }, stats: {}, text: '爆炸范围 +5%' },
+    { mods: { explodeRadiusPct: 0.1 }, stats: {}, text: '爆炸范围 +10%' },
+    { mods: { explodeRadiusPct: 0.15 }, stats: {}, text: '爆炸范围 +15%' },
+    { mods: { explodeRadiusPct: 0.2 }, stats: {}, text: '爆炸范围 +20%' },
+    { mods: { explodeRadiusPct: 0.25 }, stats: {}, text: '爆炸范围 +25%' },
   ],
-  共生: [
-    { stats: {}, mods: { summonDamagePct: 0.15 }, text: '召唤物伤害 +15%' },
-    { stats: {}, mods: { summonDamagePct: 0.3 }, text: '召唤物伤害 +30%' },
-    { stats: {}, mods: { summonDamagePct: 0.5, summonCount: 2 }, text: '召唤物伤害 +50%，召唤物数量 +2' },
+  Gun: [
+    { stats: { range: 10 }, text: '射程 +10' },
+    { stats: { range: 20 }, text: '射程 +20' },
+    { stats: { range: 30 }, text: '射程 +30' },
+    { stats: { range: 40 }, text: '射程 +40' },
+    { stats: { range: 50 }, text: '射程 +50' },
   ],
-  火焰: [
-    { stats: {}, mods: { burnDamagePct: 0.2 }, text: '灼烧伤害 +20%' },
-    { stats: {}, mods: { burnDamagePct: 0.4 }, text: '灼烧伤害 +40%' },
-    { stats: {}, mods: { burnDamagePct: 0.6, burnSpreadPct: 0.5, burnExplode: 1 }, text: '灼烧伤害 +60%，传火范围 +50%，灼烧怪死后火焰爆炸' },
+  Heavy: [
+    { stats: { damagePct: 0.05 }, text: '伤害 +5%' },
+    { stats: { damagePct: 0.1 }, text: '伤害 +10%' },
+    { stats: { damagePct: 0.15 }, text: '伤害 +15%' },
+    { stats: { damagePct: 0.2 }, text: '伤害 +20%' },
+    { stats: { damagePct: 0.25 }, text: '伤害 +25%' },
   ],
-  电: [
-    { stats: {}, mods: { chainJumps: 1 }, text: '链式跳跃 +1 次' },
-    { stats: {}, mods: { chainJumps: 2 }, text: '链式跳跃 +2 次' },
-    { stats: {}, mods: { chainJumps: 3, chainNoFalloff: 1, chainBolt: 0.2 }, text: '链式跳跃 +3 次，每跳伤害不衰减，20% 概率劈下额外落雷' },
+  Legendary: [
+    { stats: { maxHp: -20 }, text: '最大生命 −20' },
+    { stats: { maxHp: -40 }, text: '最大生命 −40' },
+    { stats: { maxHp: -60 }, text: '最大生命 −60' },
+    { stats: { maxHp: -80 }, text: '最大生命 −80' },
+    { stats: { maxHp: -100 }, text: '最大生命 −100' },
   ],
-  机关: [
-    { stats: { engineering: 2 }, text: '工程 +2' },
-    { stats: { engineering: 4 }, text: '工程 +4' },
-    { stats: { engineering: 6 }, mods: { deployCap: 1, turretSpeedPct: 0.35 }, text: '工程 +6，机关上限 +1，炮台攻速 +35%' },
-  ],
-  蜂蜜: [
+  Medical: [
+    { stats: { regen: 1 }, text: '回复 +1' },
     { stats: { regen: 2 }, text: '回复 +2' },
+    { stats: { regen: 3 }, text: '回复 +3' },
     { stats: { regen: 4 }, text: '回复 +4' },
-    { stats: { regen: 6 }, mods: { healingPct: 0.3, overhealShock: 1 }, text: '回复 +6，治疗效果 +30%，满血回血触发冲击波' },
+    { stats: { regen: 5 }, text: '回复 +5' },
+  ],
+  Medieval: [
+    { stats: { armor: 1 }, text: '甲壳 +1' },
+    { stats: { armor: 1, dodge: 0.03 }, text: '甲壳 +1，闪避 +3%' },
+    { stats: { armor: 2, dodge: 0.03 }, text: '甲壳 +2，闪避 +3%' },
+    { stats: { armor: 2, dodge: 0.06 }, text: '甲壳 +2，闪避 +6%' },
+    { stats: { armor: 3, dodge: 0.06 }, text: '甲壳 +3，闪避 +6%' },
+  ],
+  Musical: [
+    { stats: { luck: 5 }, text: '幸运 +5' },
+    { stats: { luck: 10 }, text: '幸运 +10' },
+    { stats: { luck: 15 }, text: '幸运 +15' },
+    { stats: { luck: 20 }, text: '幸运 +20' },
+    { stats: { luck: 25 }, text: '幸运 +25' },
+  ],
+  Naval: [
+    { stats: { curse: 1 }, text: '诅咒 +1' },
+    { stats: { curse: 2 }, text: '诅咒 +2' },
+    { stats: { curse: 3 }, text: '诅咒 +3' },
+    { stats: { curse: 4 }, text: '诅咒 +4' },
+    { stats: { curse: 5 }, text: '诅咒 +5' },
+  ],
+  Precise: [
+    { stats: { critChance: 0.03 }, text: '暴击 +3%' },
+    { stats: { critChance: 0.06 }, text: '暴击 +6%' },
+    { stats: { critChance: 0.09 }, text: '暴击 +9%' },
+    { stats: { critChance: 0.12 }, text: '暴击 +12%' },
+    { stats: { critChance: 0.15 }, text: '暴击 +15%' },
+  ],
+  Primitive: [
+    { stats: { maxHp: 3 }, text: '最大生命 +3' },
+    { stats: { maxHp: 6 }, text: '最大生命 +6' },
+    { stats: { maxHp: 9 }, text: '最大生命 +9' },
+    { stats: { maxHp: 12 }, text: '最大生命 +12' },
+    { stats: { maxHp: 15 }, text: '最大生命 +15' },
+  ],
+  Support: [
+    { stats: { harvest: 5 }, text: '采蜜 +5' },
+    { stats: { harvest: 10 }, text: '采蜜 +10' },
+    { stats: { harvest: 15 }, text: '采蜜 +15' },
+    { stats: { harvest: 20 }, text: '采蜜 +20' },
+    { stats: { harvest: 25 }, text: '采蜜 +25' },
+  ],
+  Tool: [
+    { stats: { engineering: 1 }, text: '工程 +1' },
+    { stats: { engineering: 2 }, text: '工程 +2' },
+    { stats: { engineering: 3 }, text: '工程 +3' },
+    { stats: { engineering: 4 }, text: '工程 +4' },
+    { stats: { engineering: 5 }, text: '工程 +5' },
+  ],
+  Unarmed: [
+    { stats: { dodge: 0.03 }, text: '闪避 +3%' },
+    { stats: { dodge: 0.06 }, text: '闪避 +6%' },
+    { stats: { dodge: 0.09 }, text: '闪避 +9%' },
+    { stats: { dodge: 0.12 }, text: '闪避 +12%' },
+    { stats: { dodge: 0.15 }, text: '闪避 +15%' },
   ],
 };
 
-export function tagCounts(weapons: OwnedWeapon[]): Map<WeaponTag, number> {
-  const m = new Map<WeaponTag, number>();
-  for (const w of weapons) for (const t of WEAPONS[w.id].tags) m.set(t, (m.get(t) ?? 0) + 1);
+export function classCounts(weapons: OwnedWeapon[]): Map<WeaponClass, number> {
+  const m = new Map<WeaponClass, number>();
+  for (const w of weapons) {
+    const def = WEAPONS[w.id];
+    if (!def) continue;
+    for (const c of def.classes) m.set(c, (m.get(c) ?? 0) + 1);
+  }
   return m;
 }
 
-/** 当前生效的套装：每个标签取达到的最高档 */
-export function activeSets(weapons: OwnedWeapon[]): { tag: WeaponTag; count: number; level: SetLevel }[] {
-  const out: { tag: WeaponTag; count: number; level: SetLevel }[] = [];
-  for (const [tag, count] of tagCounts(weapons)) {
+/** 当前生效的 Class 套装：每个 Class 取达到的最高档 */
+export function activeSets(weapons: OwnedWeapon[]): { cls: WeaponClass; count: number; level: SetLevel }[] {
+  const out: { cls: WeaponClass; count: number; level: SetLevel }[] = [];
+  const counts = classCounts(weapons);
+  for (const cls of CLASS_ORDER) {
+    const count = counts.get(cls) ?? 0;
     let lv = -1;
     SET_THRESHOLDS.forEach((n, i) => {
       if (count >= n) lv = i;
     });
-    if (lv >= 0) out.push({ tag, count, level: SETS[tag][lv] });
+    if (lv >= 0) out.push({ cls, count, level: SETS[cls][lv] });
   }
   return out;
 }

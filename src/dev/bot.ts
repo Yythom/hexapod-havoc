@@ -49,6 +49,7 @@ const UPGRADE_PRIORITY: (keyof Stats)[] = [
   'ranged',
   'melee',
   'toxin',
+  'elemental',
   'critChance',
   'regen',
   'dodge',
@@ -75,8 +76,8 @@ function offerScore(r: RunState, kind: string, id: string, tier: number): number
   const def = WEAPONS[id];
   if (r.mods.nonDeviceDamagePct < 0 && !def.device) return 0.5;
   if (r.weapons.some((w) => w.id === id && w.tier === tier)) return 3;
-  const tags = new Set(r.weapons.flatMap((w) => WEAPONS[w.id].tags));
-  return def.tags.some((t) => tags.has(t)) ? 2 : 1;
+  const classes = new Set(r.weapons.flatMap((w) => WEAPONS[w.id].classes));
+  return def.classes.some((t) => classes.has(t)) ? 2 : 1;
 }
 
 function hurtsHp(id: string): boolean {
@@ -116,7 +117,7 @@ export function installBot(game: Phaser.Game): void {
     for (const w of run().weapons) {
       const d = WEAPONS[w.id];
       if (d.device || d.summon?.type === 'aphid' || d.summon?.type === 'web') continue;
-      reaches.push(d.summon?.type === 'moth' ? 80 : d.range * 0.85);
+      reaches.push(d.summon?.type === 'moth' ? 80 : d.kind === 'melee' ? d.range * 0.45 : d.range * 0.85);
     }
     reaches.sort((a, b) => a - b);
     const median = reaches.length ? reaches[Math.floor((reaches.length - 1) / 2)] : 200;
@@ -150,8 +151,9 @@ export function installBot(game: Phaser.Game): void {
         }
       }
       if (best) {
-        mx += (best.x - p.x) / bd;
-        my += (best.y - p.y) / bd;
+        const dd = bd || 1;
+        mx += (best.x - p.x) / dd;
+        my += (best.y - p.y) / dd;
       }
     }
     const cx = 1000 - p.x;
@@ -176,7 +178,7 @@ export function installBot(game: Phaser.Game): void {
     }
     while (sc.page === 'chest' && guard++ < 60) sc.takeChest();
     let rerolls = 0;
-    for (let k = 0; k < (shopOn ? 14 : 0); k++) {
+    for (let k = 0; k < (shopOn ? 9 : 0); k++) {
       const cands = r.offers
         .map((o, i) => ({ o, i }))
         .filter(({ o }) => o && r.nectar >= shop.offerPrice(o, r) && (o.kind === 'item' || shop.weaponAddMode(r, o.id, o.tier) !== 'full'))
@@ -276,5 +278,5 @@ export function installBot(game: Phaser.Game): void {
       return { wave: r.wave, phase: r.phase, hp: r.hp, level: r.level, weapons: r.weapons, items: r.items, stats: r.stats };
     },
   };
-  Object.assign(window, { __bot: api });
+  Object.assign(window, { __bot: api, __game: game, __weapons: WEAPONS });
 }

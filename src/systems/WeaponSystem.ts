@@ -6,7 +6,7 @@ import { effectiveRange, MAX_SCREEN_RANGE, rollDamage, weaponDamage } from '../c
 import type { OwnedWeapon } from '../core/RunState';
 import { attackInterval, type Stats } from '../core/stats';
 import type { Mods } from '../data/items';
-import { TIERS, WEAPONS, type WeaponDef } from '../data/weapons';
+import { tierOf, WEAPONS, type WeaponDef } from '../data/weapons';
 import { MAX_SLOTS } from '../entities/BeetleView';
 import type { Player } from '../entities/Player';
 import type { Effects } from './Effects';
@@ -42,6 +42,10 @@ export interface WeaponContext {
   damageMult: number;
   /** 当前生命比例（蜂蜜罐低血加攻速） */
   hpRatio: number;
+  /** 当前空着的武器槽数量（Captain's Sword 这类武器吃空槽） */
+  emptySlots: number;
+  /** 玩家本帧是否在移动（Jousting Lance 站桩惩罚） */
+  moving: boolean;
   /** 蚁后：工蚁数量和品质 */
   workers: number;
   workerTier: number;
@@ -56,6 +60,8 @@ interface Slot {
   cd: number;
   /** 炮台：距离下一次放置的时间 */
   placeCd: number;
+  /** Railgun：距离下一次蓄力加伤的时间 */
+  rampTimer: number;
   aim: number;
   // 近战动作状态
   swing: number;
@@ -101,7 +107,7 @@ export class WeaponSystem {
   private ctx!: WeaponContext;
   private readonly tip = new Phaser.Math.Vector2();
   private readonly buf: Enemy[] = [];
-  private readonly workerSrc: HitSource = { def: WEAPONS.workers, owned: null };
+  private readonly workerSrc: HitSource = { def: WEAPONS.workers, owned: null, tier: 0 };
 
   constructor(
     private readonly player: Player,
@@ -123,9 +129,10 @@ export class WeaponSystem {
         def,
         tier: w.tier,
         owned: w,
-        src: { def, owned: w },
+        src: { def, owned: w, tier: w.tier },
         cd: 0.3 + i * 0.07,
         placeCd: 0.2 + i * 0.1,
+        rampTimer: 5,
         aim: view.rotation + view.tipLocalAngle(i),
         swing: 0,
         swingTotal: SWING_TIME,
@@ -143,6 +150,21 @@ export class WeaponSystem {
     }
   }
 
+  /** Blunderbuss：拾取花蜜时重置冷却 */
+  resetPickupCooldowns(): void {
+    for (const s of this.slots) if (s.def.special?.cooldownResetOnPickup) s.cd = 0;
+  }
+
+  /** 玩家受伤时清空 Railgun 的蓄力 */
+  resetRamps(): void {
+    for (const s of this.slots) if (s.owned) s.owned.ramp = 0;
+  }
+
+  /** War Hammer：攻击时重置炮台冷却 */
+  private resetTurrets(): void {
+    for (const d of this.devices) if (d.type === 'turret') d.cd = 0;
+  }
+
   /** 波次结束：地上的机关全部消失 */
   clearDevices(): void {
     for (const d of this.devices) d.sprite.destroy();
@@ -158,6 +180,14 @@ export class WeaponSystem {
 
     this.slots.forEach((s, i) => {
       s.cd = Math.max(0, s.cd - dt);
+      const ramp = s.def.special?.rampingDamage;
+      if (ramp && s.owned) {
+        s.rampTimer -= dt;
+        if (s.rampTimer <= 0) {
+          s.rampTimer += 5;
+          s.owned.ramp = (s.owned.ramp ?? 0) + ramp;
+        }
+      }
       const tip = view.tipWorld(i, this.tip);
       if (s.swing > 0) {
         this.updateSwing(s, i, tip.x, tip.y, dt, mods);
@@ -168,8 +198,9 @@ export class WeaponSystem {
       if (summon?.type === 'aphid' || summon?.type === 'moth') {
         const count = (summon.counts?.[s.tier] ?? 2) + mods.summonCount;
         const damage = weaponDamage(s.def, s.tier, stats, mods, s.owned, ctx.damageMult) * (1 + mods.summonDamagePct);
-        const interval = attackInterval(s.def.cooldown * TIERS[s.tier].cooldown, stats);
-        const base = { slot: i, count, damage, crit: stats.critChance, critMultiplier: s.def.critMultiplier, knockback: s.def.knockback, interval };
+        const t = tierOf(s.def, s.tier);
+        const interval = attackInterval(t.cooldown, stats);
+        const base = { slot: i, count, damage, crit: stats.critChance + t.critChance, critMultiplier: t.critMultiplier, knockback: t.knockback, interval };
         if (summon.type === 'aphid') aphidGroups.push({ ...base, texture: 'aphid' });
         else mothGroups.push({ ...base, src: s.src });
         this.idleAim(s, i, dt);
@@ -182,7 +213,7 @@ export class WeaponSystem {
         return;
       }
 
-      const range = this.rangeOf(s.def, stats);
+      const range = this.rangeOf(s.def, stats, s.tier);
       const target = this.enemies.nearest(tip.x, tip.y, range);
       if (target) s.aim = Math.atan2(target.y - tip.y, target.x - tip.x);
       else this.idleAim(s, i, dt);
@@ -210,6 +241,7 @@ export class WeaponSystem {
           this.fire(s, tip.x, tip.y, range, target);
           this.emitShotFx(s, tip.x, tip.y);
           this.onAttack?.();
+          if (s.def.special?.turretResetOnAttack) this.resetTurrets();
           sfx.play(shotSound(s.def));
           kick = 0.1;
         }
@@ -227,9 +259,9 @@ export class WeaponSystem {
         count: ctx.workers + mods.summonCount,
         damage: weaponDamage(def, ctx.workerTier, stats, mods, null, ctx.damageMult) * (1 + mods.summonDamagePct),
         crit: stats.critChance,
-        critMultiplier: def.critMultiplier,
-        knockback: def.knockback,
-        interval: attackInterval(def.cooldown * TIERS[ctx.workerTier].cooldown, stats),
+        critMultiplier: tierOf(def, ctx.workerTier).critMultiplier,
+        knockback: tierOf(def, ctx.workerTier).knockback,
+        interval: attackInterval(tierOf(def, ctx.workerTier).cooldown, stats),
       });
     }
 
@@ -243,20 +275,25 @@ export class WeaponSystem {
     view.setWeaponAim(i, s.aim);
   }
 
-  private rangeOf(def: WeaponDef, stats: Stats): number {
-    return effectiveRange(def, stats);
+  private rangeOf(def: WeaponDef, stats: Stats, tier: number): number {
+    return effectiveRange(def, stats, tier);
   }
 
   /** 攻击间隔：吃攻速；蜂蜜罐低血时再快 30% */
   private intervalOf(s: Slot): number {
-    let interval = attackInterval(s.def.cooldown * TIERS[s.tier].cooldown, this.ctx.stats);
+    let interval = attackInterval(tierOf(s.def, s.tier).cooldown, this.ctx.stats);
     if (s.def.lowHpHaste && this.ctx.hpRatio < 0.5) interval /= 1 + s.def.lowHpHaste;
+    const growth = s.def.special?.growthAttackSpeed;
+    if (growth && s.owned) interval /= 1 + growth * (s.owned.kills ?? 0);
     return interval;
   }
 
   private roll(def: WeaponDef, tier: number, owned: OwnedWeapon | null) {
     const c = this.ctx;
-    return rollDamage(def, tier, c.stats, c.mods, owned, c.damageMult);
+    const copies = this.slots.filter((x) => x.def.id === def.id).length;
+    const sp = def.special;
+    const mult = c.damageMult * (sp?.stationaryPenalty && !c.moving ? 1 + sp.stationaryPenalty.damagePct : 1);
+    return rollDamage(def, tier, c.stats, c.mods, owned, mult, undefined, c.emptySlots, copies);
   }
 
   private fire(s: Slot, x: number, y: number, range: number, target: Enemy): void {
@@ -271,33 +308,10 @@ export class WeaponSystem {
     let explode = proj.explode ?? 0;
     const straight = !proj.lob && !proj.returning && !proj.roll;
 
-    // 武器升阶质变：精良/稀有/传说分别增加弹数、穿透、爆炸范围或弹跳
-    if (baseCount > 1) {
-      count += (tier >= 1 ? 1 : 0) + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 2 : 0);
-      arc = arc * (1 + 0.12 * tier);
-    } else if (explode > 0) {
-      explode = Math.round(explode * (1 + 0.18 * tier));
-      if (tier >= 3) {
-        count = 2;
-        arc = 0.18;
-      }
-    } else if (straight && !proj.lob) {
-      if (tier >= 1) pierce += 1;
-      if (tier >= 2) {
-        count = 2;
-        arc = 0.14;
-      }
-      if (tier >= 3) {
-        count = 3;
-        arc = 0.22;
-        pierce += 1;
-      }
-    }
-
     const ricochet = straight && mods.gunRicochet > 0 ? mods.gunRicochet : 0;
     pierce += ricochet;
     const bounce = proj.bounce
-      ? { ...proj.bounce, times: proj.bounce.times + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 1 : 0) + mods.bounces + ricochet }
+      ? { ...proj.bounce, times: proj.bounce.times + mods.bounces + ricochet }
       : ricochet > 0
         ? { times: ricochet, range: 140, falloff: 0.25 }
         : null;
@@ -319,14 +333,14 @@ export class WeaponSystem {
         damage,
         crit,
         radius: proj.radius,
-        knockback: s.def.knockback,
+        knockback: tierOf(s.def, tier).knockback,
         pierce,
         spin: proj.spin,
-        explode,
+        explode: Math.round(explode * (1 + mods.explodeRadiusPct)),
         poison: proj.poison ? { stacks: proj.poison, perStack, duration: poisonDuration } : null,
-        cloud: lob ? { radius: lob.cloudRadius * (1 + 0.12 * tier), time: lob.cloudTime, damage: damage * 0.5, perStack, duration: poisonDuration } : null,
+        cloud: lob ? { radius: lob.cloudRadius, time: lob.cloudTime, damage: damage * 0.5, perStack, duration: poisonDuration } : null,
         src: s.src,
-        trips: proj.returning ? 1 + (tier >= 2 ? 1 : 0) + mods.bounces : 0,
+        trips: proj.returning ? 1 + mods.bounces : 0,
         bounce,
         grow: proj.roll?.grow ?? 0,
         fade: !!proj.fade,
@@ -337,14 +351,14 @@ export class WeaponSystem {
 
   /** 光束：直接结算到最近的怪（稀有/传说额外分叉照射旁边目标） */
   private fireBeam(s: Slot, x: number, y: number, target: Enemy): void {
-    const extra = s.tier >= 3 ? 2 : s.tier >= 2 ? 1 : 0;
+    const extra = 0;
     const hit: Enemy[] = [];
     let cur: Enemy | null = target;
     for (let k = 0; k <= extra && cur; k++) {
       const { damage, crit } = this.roll(s.def, s.tier, s.owned);
       this.fx?.beam(x, y, cur.x, cur.y, crit ? 0xffe880 : 0xffb040, s.cd + 0.05);
       const d = Math.hypot(cur.x - x, cur.y - y) || 1;
-      this.resolver.hit(cur, k === 0 ? damage : Math.max(1, Math.round(damage * 0.7)), crit, (cur.x - x) / d, (cur.y - y) / d, s.def.knockback, s.src);
+      this.resolver.hit(cur, k === 0 ? damage : Math.max(1, Math.round(damage * 0.7)), crit, (cur.x - x) / d, (cur.y - y) / d, tierOf(s.def, s.tier).knockback, s.src);
       hit.push(cur);
       cur = extra > 0 ? this.nearestExcept(cur.x, cur.y, 160, hit) : null;
     }
@@ -355,7 +369,7 @@ export class WeaponSystem {
   private fireChain(s: Slot, x: number, y: number, target: Enemy): void {
     const spec = s.def.chain!;
     const mods = this.ctx.mods;
-    const jumps = spec.jumps + s.tier + mods.chainJumps;
+    const jumps = spec.jumps + mods.chainJumps;
     const falloff = mods.chainNoFalloff > 0 ? 0 : spec.falloff;
     const first = this.roll(s.def, s.tier, s.owned);
     let dmg = first.damage;
@@ -371,7 +385,7 @@ export class WeaponSystem {
       hit.push(cur);
       const d = Math.hypot(cx - fromX, cy - fromY) || 1;
       const amount = Math.max(1, Math.round(dmg));
-      this.resolver.hit(cur, amount, first.crit, (cx - fromX) / d, (cy - fromY) / d, s.def.knockback, s.src);
+      this.resolver.hit(cur, amount, first.crit, (cx - fromX) / d, (cy - fromY) / d, tierOf(s.def, s.tier).knockback, s.src);
       this.fx?.star(cx, cy, 15, 0x8ce2ff);
       this.fx?.streaks(cx, cy, Math.atan2(cy - fromY, cx - fromX), 0x8ce2ff, 3, 180, 0.7);
       // 避雷针：每跳一次有概率再劈一道落雷
@@ -417,13 +431,13 @@ export class WeaponSystem {
     const spec = s.def.device!;
     if (spec.type === 'mine') {
       if (s.cd > 0) return;
-      s.cd = s.def.cooldown * TIERS[s.tier].cooldown;
+      s.cd = tierOf(s.def, s.tier).cooldown;
     } else {
       s.placeCd -= dt;
       if (s.placeCd > 0) return;
       s.placeCd = spec.placeEvery ?? 5;
     }
-    const max = spec.max + Math.floor(s.tier / 2) + this.ctx.mods.deployCap;
+    const max = spec.max + this.ctx.mods.deployCap;
     const mine = this.devices.filter((d) => d.slot === i);
     if (mine.length >= max) this.removeDevice(this.devices.indexOf(mine[0]));
     const p = this.player;
@@ -450,7 +464,7 @@ export class WeaponSystem {
         d.sprite.setScale(base).setAlpha(armed ? 0.85 + 0.15 * Math.sin(d.age * 6) : 0.55);
         if (!armed) continue;
         if (this.mineTriggered(d)) {
-          this.explodeMine(d, (d.def.device!.radius ?? 70) * (1 + mods.mineRadiusPct));
+          this.explodeMine(d, (d.def.device!.radius ?? 70) * (1 + mods.mineRadiusPct + mods.explodeRadiusPct));
           this.removeDevice(i);
         }
         continue;
@@ -460,7 +474,7 @@ export class WeaponSystem {
       if (d.cd > 0) continue;
       const target = this.enemies.nearest(d.x, d.y, d.def.range);
       if (!target) continue;
-      d.cd = (d.def.cooldown * TIERS[d.tier].cooldown) / Math.max(0.2, 1 + mods.turretSpeedPct);
+      d.cd = tierOf(d.def, d.tier).cooldown / Math.max(0.2, 1 + mods.turretSpeedPct);
       const a = Math.atan2(target.y - d.y, target.x - d.x);
       d.sprite.setRotation(a);
       const { damage, crit } = this.roll(d.def, d.tier, null);
@@ -479,8 +493,8 @@ export class WeaponSystem {
         damage,
         crit,
         radius: isLaser || isFrost ? 6 : 5,
-        knockback: d.def.knockback,
-        pierce: isLaser ? 2 : d.tier >= 2 ? 1 : 0,
+        knockback: tierOf(d.def, d.tier).knockback,
+        pierce: isLaser ? 2 : 0,
         spin: 0,
         explode: 0,
         poison: null,
@@ -489,6 +503,7 @@ export class WeaponSystem {
           ? {
               def: { ...d.def, onHit: { ...d.def.onHit, freeze: 1 } },
               owned: null,
+              tier: d.tier,
             }
           : d.src,
       });
@@ -519,7 +534,7 @@ export class WeaponSystem {
       const rr = r + e.radius;
       if (dx * dx + dy * dy > rr * rr) continue;
       const dist = Math.hypot(dx, dy) || 1;
-      this.resolver.hit(e, damage, crit, dx / dist, dy / dist, d.def.knockback, d.src);
+      this.resolver.hit(e, damage, crit, dx / dist, dy / dist, tierOf(d.def, d.tier).knockback, d.src);
     }
   }
 
@@ -543,28 +558,6 @@ export class WeaponSystem {
     s.lastExt = 0;
     s.lastAng = s.aim - (s.def.melee!.arc ?? 0);
     s.hits.length = 0;
-    // 稀有/传说近战进化：挥击时向前发出一道穿透剑气波
-    if (s.tier >= 2) {
-      const tip = this.player.view.tipWorld(this.slots.indexOf(s), this.tip);
-      this.projectiles.fire({
-        texture: 'slashwave',
-        x: tip.x,
-        y: tip.y,
-        angle: s.aim,
-        speed: 560,
-        maxDist: Math.min(MAX_SCREEN_RANGE, s.reach + 95),
-        damage: Math.max(1, Math.round(s.damage * (s.tier >= 3 ? 0.75 : 0.5))),
-        crit: s.crit,
-        radius: 13,
-        knockback: s.def.knockback * 0.5,
-        pierce: s.tier >= 3 ? 4 : 2,
-        spin: 0,
-        explode: 0,
-        poison: null,
-        cloud: null,
-        src: s.src,
-      });
-    }
   }
 
   private emitMeleeFx(s: Slot, tx: number, ty: number): void {
@@ -576,15 +569,13 @@ export class WeaponSystem {
     const dy = Math.sin(s.aim);
     switch (melee.style) {
       case 'sweep': {
-        const col = s.crit ? critCol : s.def.id === 'scarab' ? 0xffd848 : 0xa0ff58;
+        const col = s.crit ? critCol : 0xa0ff58;
         fx.slash(tx, ty, s.reach * 0.85, s.aim, melee.arc ?? 1, col);
-        if (s.def.id === 'scarab') fx.burst(tx + dx * s.reach * 0.6, ty + dy * s.reach * 0.6, 0xffdf58, 6, 150, 0.75);
         break;
       }
       case 'snap': {
-        const col = s.crit ? critCol : s.def.id === 'scarred' ? 0xff5c38 : 0xffc858;
+        const col = s.crit ? critCol : 0xffc858;
         fx.chomp(tx, ty, s.aim, s.reach * 0.88, col);
-        if (s.def.id === 'scarred') fx.ring(tx + dx * s.reach * 0.5, ty + dy * s.reach * 0.5, 34, 0xff6e40);
         break;
       }
       case 'bash': {
@@ -627,25 +618,25 @@ export class WeaponSystem {
     const fx = this.fx;
     if (!fx) return;
     const col = sparkColor(s.def);
-    if (s.def.id === 'lasergun') {
+    if (s.def.id === 'laser-gun') {
       fx.muzzle(tx, ty, s.aim, 0x38f2ff, 26, 5);
       fx.ring(tx, ty, 14, 0x38f2ff);
-    } else if (s.def.tags.includes('枪械')) {
-      const heavy = (s.def.projectile?.count ?? 1) >= 4 || s.def.damage >= 16;
+    } else if (s.def.classes.includes('Gun')) {
+      const heavy = (s.def.projectile?.count ?? 1) >= 4 || tierOf(s.def, s.tier).damage >= 16;
       fx.muzzle(tx, ty, s.aim, col, heavy ? 24 : 15, heavy ? 6 : 3);
-    } else if (s.def.tags.includes('火焰')) {
+    } else if (s.def.classes.includes('Elemental') || s.def.onHit?.burn) {
       fx.muzzle(tx, ty, s.aim, 0xff7824, 20, 4);
     } else if (s.def.onHit?.freeze) {
       fx.muzzle(tx, ty, s.aim, 0x7ce8ff, 16, 4);
     } else {
-      fx.spark(tx, ty, col, s.def.damage >= 18 ? 5 : 3);
+      fx.spark(tx, ty, col, tierOf(s.def, s.tier).damage >= 18 ? 5 : 3);
     }
   }
 
   private updateSwing(s: Slot, slot: number, tipX: number, tipY: number, dt: number, mods: Mods): void {
     const view = this.player.view;
     const melee = s.def.melee!;
-    const kb = s.def.knockback * (1 + mods.meleeKnockbackPct);
+    const kb = tierOf(s.def, s.tier).knockback * (1 + mods.meleeKnockbackPct);
     s.swing = Math.max(0, s.swing - dt);
     const t = 1 - s.swing / s.swingTotal;
     const hitR = melee.hitRadius * (1 + 0.14 * s.tier);
@@ -713,19 +704,19 @@ export class WeaponSystem {
 }
 
 function sparkColor(def: WeaponDef): number {
-  if (def.id === 'lasergun') return 0x6cf2ff;
-  if (def.tags.includes('枪械')) return 0xffcf54;
+  if (def.id === 'laser-gun') return 0x6cf2ff;
+  if (def.classes.includes('Gun')) return 0xffcf54;
   if (def.kind === 'toxin') return 0xb8ff58;
-  if (def.tags.includes('火焰')) return 0xff8a30;
+  if (def.classes.includes('Elemental') || def.onHit?.burn) return 0xff8a30;
   if (def.onHit?.freeze) return 0xbfefff;
-  if (def.tags.includes('蜂蜜')) return 0xffc040;
+  if (def.classes.includes('Medical')) return 0xffc040;
   return 0xffe6a0;
 }
 
 function shotSound(def: WeaponDef) {
-  if (def.id === 'lasergun') return 'zap' as const;
+  if (def.id === 'laser-gun') return 'zap' as const;
   if (def.kind === 'toxin') return 'spray' as const;
-  if (def.tags.includes('火焰')) return 'flame' as const;
+  if (def.classes.includes('Elemental') || def.onHit?.burn) return 'flame' as const;
   if ((def.projectile?.count ?? 1) >= 4) return 'shootHeavy' as const;
-  return def.damage >= 14 ? ('shootHeavy' as const) : ('shoot' as const);
+  return tierOf(def, 0).damage >= 14 ? ('shootHeavy' as const) : ('shoot' as const);
 }

@@ -9,14 +9,14 @@ import { DIFFICULTIES } from '../data/difficulty';
 import { ZERO_MODS, type Mods } from '../data/items';
 import { weaponTex } from '../art/icons';
 import { SPRITE_RES } from '../art/draw';
-import { KIND_LABEL, TIERS, WEAPONS } from '../data/weapons';
+import { CLASS_LABEL, KIND_LABEL, TIERS, WEAPONS } from '../data/weapons';
 import { BeetleView } from '../entities/BeetleView';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { createButton } from '../ui/Button';
 import { setupUICamera } from '../ui/camera';
 import {
   COLOR,
-  TAG_STYLE,
+  CLASS_STYLE,
   cardTitle,
   displayLabel,
   divider,
@@ -284,9 +284,9 @@ export class CharacterSelectScene extends Phaser.Scene {
     root.add(label(this, lx + 76, wy + 65, `${KIND_LABEL[wDef.kind]}武器`, 13, COLOR.dim).setOrigin(0, 0));
 
     let tagX = lx + 76;
-    for (const tag of wDef.tags) {
-      const ts = TAG_STYLE[tag];
-      const p = pill(this, tagX + 24, wy + 96, tag, ts.bg, ts.border, ts.text, 11, 8, 20);
+    for (const cls of wDef.classes) {
+      const ts = CLASS_STYLE[cls];
+      const p = pill(this, tagX + 24, wy + 96, CLASS_LABEL[cls], ts.bg, ts.border, ts.text, 11, 8, 20);
       p.x = tagX + p.width / 2;
       root.add(p);
       tagX += p.width + 6;

@@ -28,6 +28,10 @@ export class Player {
 
   /** ix/iy：移动方向，长度 0~1 */
   update(dt: number, ix: number, iy: number, baseSpeed: number, shield = false): void {
+    if (!Number.isFinite(ix) || !Number.isFinite(iy)) {
+      ix = 0;
+      iy = 0;
+    }
     if (this.slowTime > 0) this.slowTime -= dt;
     if (this.hasteTime > 0) this.hasteTime -= dt;
     const speed = baseSpeed * (this.slowTime > 0 ? 0.7 : 1) * (this.hasteTime > 0 ? 1.3 : 1);

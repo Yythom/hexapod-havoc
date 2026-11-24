@@ -61,6 +61,8 @@ export interface EnemyHost {
   readonly difficulty: DifficultyDef;
   /** 玩家当前的规则加成（易伤、灼烧、冰冻相关） */
   readonly mods: Mods;
+  /** Brotato 的诅咒：提高敌人生命/伤害 */
+  readonly curse: number;
   /** 对玩家造成伤害（走闪避、甲壳、无敌时间） */
   hurtPlayer(damage: number): void;
   shoot(x: number, y: number, angle: number, speed: number, damage: number): void;
@@ -163,9 +165,10 @@ export class EnemyManager {
     const e = this.pool.pop() ?? new Enemy(this.scene, def.texture);
     const mult = this.host.difficulty.mult;
     e.def = def;
-    e.maxHp = e.hp = enemyHp(def, wave) * mult;
-    e.damage = enemyDamage(def, wave) * mult;
-    e.skillDamage = enemySkillDamage(def, wave) * mult;
+    const curseMult = 1 + Math.max(0, this.host.curse) * 0.01;
+    e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult;
+    e.damage = enemyDamage(def, wave) * mult * curseMult;
+    e.skillDamage = enemySkillDamage(def, wave) * mult * curseMult;
     e.speed = def.speed * (def.boss || def.elite ? 1 : Phaser.Math.FloatBetween(0.92, 1.08));
     e.storm = false;
     e.timer3 = 0;

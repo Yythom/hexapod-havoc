@@ -9,6 +9,7 @@ import { loadSave, recordRun } from '../core/save';
 import { checkUnlocks } from '../core/unlocks';
 import { damageTakenMultiplier, dodgeChance, moveSpeed, pickupRange, regenPerSecond } from '../core/stats';
 import { WAVES } from '../data/waves';
+import { WEAPONS } from '../data/weapons';
 import { Player } from '../entities/Player';
 import { shake } from '../ui/camera';
 import { Effects } from '../systems/Effects';
@@ -50,7 +51,7 @@ const CHEST_CHANCE_MAX = 0.012;
 const FRUIT_CHANCE = 0.02;
 const HEAL_AMOUNT = 3;
 /** 采蜜每过一波自动成长的比例 */
-const HARVEST_GROWTH = 0.05;
+const HARVEST_GROWTH = 0.03;
 /** 跳蛛丝弹的减速 */
 const SILK_SLOW_TIME = 1.5;
 /** 蜣螂：要碰到才能捡起花蜜 */
@@ -97,6 +98,8 @@ export class GameScene extends Phaser.Scene {
   private attackCount = 0;
   /** 虎甲：静止了多久 */
   private idleTime = 0;
+  /** Scythe 这类武器每秒自伤的小数累积 */
+  private selfDamageAcc = 0;
   /** 蜂巢药剂本波已经回复了多久 */
   private potionTime = 0;
   private ramCd = 0;
@@ -174,6 +177,9 @@ export class GameScene extends Phaser.Scene {
       get mods() {
         return scene.run.mods;
       },
+      get curse() {
+        return scene.run.stats.curse;
+      },
       hurtPlayer: (d) => this.damagePlayer(d),
       shoot: (x, y, a, sp, d) => this.shots.fire(x, y, a, sp, d),
     };
@@ -191,12 +197,38 @@ export class GameScene extends Phaser.Scene {
       get mods() {
         return scene.run.mods;
       },
+      get hpRatio() {
+        return scene.run.hp / Math.max(1, scene.run.maxHp);
+      },
       heal: (n) => this.heal(n),
       dropBonusNectar: (x, y, n) => this.pickups.dropNectar(x, y, n),
       onWeaponKill: (def) => {
         if (def.kind === 'melee') this.run.meleeKills++;
       },
       onCritSpark: (x, y, count) => this.fireSeekingSparks(x, y, count, 10 + 0.5 * this.run.stats.ranged),
+      burst: (x, y, count, damage, texture, radius, speed, src) => {
+        for (let k = 0; k < count; k++) {
+          const a = (k / count) * Math.PI * 2 + Math.random() * 0.3;
+          this.projectiles.fire({
+            texture,
+            x,
+            y,
+            angle: a,
+            speed,
+            maxDist: 260,
+            damage,
+            crit: false,
+            radius,
+            knockback: 40,
+            pierce: 0,
+            spin: 0,
+            explode: 0,
+            poison: null,
+            cloud: null,
+            src,
+          });
+        }
+      },
     };
 
     const cam = this.cameras.main;
@@ -252,10 +284,23 @@ export class GameScene extends Phaser.Scene {
         mods: run.mods,
         damageMult: this.damageMult(),
         hpRatio: run.hp / run.maxHp,
+        emptySlots: Math.max(0, run.weaponSlots - run.weapons.length),
+        moving: this.moving,
         workers: run.workerCount,
         workerTier: run.workerTier,
         workerHp: 10 + 3 * (run.wave - 1),
       });
+      const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0);
+      if (selfDps > 0 && run.phase === 'combat') {
+        this.selfDamageAcc += selfDps * dt;
+        const n = Math.floor(this.selfDamageAcc);
+        if (n > 0) {
+          this.selfDamageAcc -= n;
+          run.hp -= n;
+          this.fx.number(this.player.x, this.player.y - 26, n, 'player');
+          if (run.hp <= 0) this.die();
+        }
+      }
       run.maxSummons = Math.max(run.maxSummons, this.summons.aliveCount);
       this.shots.update(dt, this.player.x, this.player.y, this.player.radius, (d) => {
         if (this.damagePlayer(d)) this.player.slowTime = SILK_SLOW_TIME;
@@ -355,6 +400,7 @@ export class GameScene extends Phaser.Scene {
     this.player.invuln = 0;
     this.player.slowTime = 0;
     this.player.hasteTime = 0;
+    for (const w of run.weapons) w.ramp = 0;
     this.weapons.sync(run.weapons, run.weaponSlots);
     this.spawner.startWave(def, n, run.difficulty, run.mods.spawnRatePct);
     bus.emit(EVT.WAVE_START, n);
@@ -413,6 +459,7 @@ export class GameScene extends Phaser.Scene {
     const p = this.player;
     if (run.phase !== 'combat' || p.invuln > 0) return false;
     p.invuln = INVULN_TIME;
+    this.weapons?.resetRamps();
     if (Math.random() < dodgeChance(run.stats)) {
       this.fx.number(p.x, p.y - 28, '闪避', 'dodge');
       sfx.play('dodge');
@@ -536,7 +583,7 @@ export class GameScene extends Phaser.Scene {
       this.pickups.dropHeal(e.x, e.y, 'fruit');
       const [min, max] = def.nectar;
       this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
-      const chestChance = Math.min(0.85, 0.35 * (1 + Math.max(0, run.stats.luck) / 150) * (1 + run.mods.chestBonus));
+      const chestChance = Math.min(0.85, 0.35 * (1 + Math.max(0, run.stats.luck) / 150) * (1 + run.mods.chestBonus) * (1 + Math.max(0, run.stats.curse) * 0.02));
       if (Math.random() < chestChance) this.pickups.dropChest(e.x, e.y);
       return;
     }
@@ -555,11 +602,12 @@ export class GameScene extends Phaser.Scene {
     this.fx.splat(e.x, e.y, SPLAT_COLOR[def.id] ?? 0x4a2028, e.radius);
     const [min, max] = def.nectar;
     this.pickups.dropNectar(e.x, e.y, Phaser.Math.Between(min, max));
+    if (run.stats.curse > 0) this.pickups.dropNectar(e.x, e.y, Math.floor(run.stats.curse / 5));
     if (def.elite) {
       this.pickups.dropChest(e.x, e.y);
     } else if (!def.boss) {
       const luck = Phaser.Math.Clamp(run.stats.luck, 0, 200);
-      const chance = Math.min(CHEST_CHANCE_MAX, CHEST_CHANCE * (1 + luck / 100) * (1 + run.mods.chestBonus));
+      const chance = Math.min(CHEST_CHANCE_MAX * (1 + Math.max(0, run.stats.curse) * 0.02), CHEST_CHANCE * (1 + luck / 100) * (1 + run.mods.chestBonus) * (1 + Math.max(0, run.stats.curse) * 0.02));
       if (Math.random() < chance) this.pickups.dropChest(e.x, e.y);
       else if (Math.random() < FRUIT_CHANCE) this.pickups.dropHeal(e.x, e.y, 'fruit');
     }
@@ -657,6 +705,7 @@ export class GameScene extends Phaser.Scene {
 
   /** 花蜜同时是经验和货币 */
   private addNectar(n: number): void {
+    this.weapons?.resetPickupCooldowns();
     const run = this.run;
     run.nectar += n;
     run.waveNectar += n;

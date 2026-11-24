@@ -1,6 +1,69 @@
+import type { Stats } from '../core/stats';
+import { BROTATO_WEAPONS } from './weaponsBrotato';
+
 export type WeaponKind = 'melee' | 'ranged' | 'toxin' | 'summon' | 'device';
-export type WeaponTag = '甲角' | '尖刺' | '投掷' | '枪械' | '腺体' | '共生' | '火焰' | '电' | '机关' | '蜂蜜';
-export type ScalingStat = 'melee' | 'ranged' | 'toxin' | 'armor' | 'engineering';
+
+/** Brotato 的 17 个武器 Class（套装按 2/3/4/5/6 把分五档） */
+export type WeaponClass =
+  | 'Blade'
+  | 'Blunt'
+  | 'Elemental'
+  | 'Ethereal'
+  | 'Explosive'
+  | 'Gun'
+  | 'Heavy'
+  | 'Legendary'
+  | 'Medical'
+  | 'Medieval'
+  | 'Musical'
+  | 'Naval'
+  | 'Precise'
+  | 'Primitive'
+  | 'Support'
+  | 'Tool'
+  | 'Unarmed';
+
+export const CLASS_LABEL: Record<WeaponClass, string> = {
+  Blade: '刀刃',
+  Blunt: '钝器',
+  Elemental: '元素',
+  Ethereal: '虚灵',
+  Explosive: '爆炸',
+  Gun: '枪械',
+  Heavy: '重型',
+  Legendary: '传说',
+  Medical: '医疗',
+  Medieval: '中世纪',
+  Musical: '音乐',
+  Naval: '海军',
+  Precise: '精准',
+  Primitive: '原始',
+  Support: '支援',
+  Tool: '工具',
+  Unarmed: '徒手',
+};
+
+export const CLASS_ORDER: WeaponClass[] = [
+  'Blade',
+  'Blunt',
+  'Elemental',
+  'Ethereal',
+  'Explosive',
+  'Gun',
+  'Heavy',
+  'Legendary',
+  'Medical',
+  'Medieval',
+  'Musical',
+  'Naval',
+  'Precise',
+  'Primitive',
+  'Support',
+  'Tool',
+  'Unarmed',
+];
+
+export type ScalingStat = 'melee' | 'ranged' | 'toxin' | 'elemental' | 'armor' | 'engineering';
 
 export const KIND_LABEL: Record<WeaponKind, string> = {
   melee: '近战',
@@ -38,6 +101,8 @@ export interface ProjectileSpec {
   roll?: { grow: number };
   /** 喷火：飞行中逐渐变大、变淡 */
   fade?: boolean;
+  /** 追踪：每秒最多转向多少弧度（0 表示不追踪） */
+  homing?: number;
 }
 
 export type MeleeStyle = 'thrust' | 'sweep' | 'snap' | 'bash' | 'charge' | 'flurry' | 'pierce';
@@ -61,7 +126,7 @@ export interface SummonSpec {
   slow?: number;
 }
 
-/** 机关：放在地上、持续到本波结束（DESIGN.md 15.2） */
+/** 机关：放在地上、持续到本波结束 */
 export interface DeviceSpec {
   type: 'mine' | 'turret';
   /** 每把武器最多同时存在几个，超出时替换最早放下的 */
@@ -80,29 +145,109 @@ export interface HitEffects {
   freeze?: number;
   /** 让目标易伤 */
   vulnerable?: boolean;
+  /** 减速比例（0~1） */
+  slow?: number;
   /** 命中时给自己回 1 血的概率 */
   heal?: number;
   /** 击杀时额外掉 1 颗花蜜的概率 */
   nectarOnKill?: number;
+  /** 命中时向周围额外发射的弹片 */
+  burst?: { count: number; damage: number; texture: string; radius: number; speed: number };
+  /** 命中时按目标当前生命值造成额外伤害的比例（0.1 = 10%） */
+  currentHpPct?: number;
+  /** 命中时叠几层毒 */
+  poison?: number;
+}
+
+/** 单把武器某一品质（I~IV）的完整数值 */
+export interface WeaponTier {
+  damage: number;
+  cooldown: number;
+  critChance: number;
+  critMultiplier: number;
+  range: number;
+  knockback: number;
+  /** 武器自带的吸取几率（每次命中回 1 血） */
+  lifesteal: number;
+  /** 商店基础价（未乘波次涨价） */
+  price: number;
+  scaling: Partial<Record<ScalingStat, number>>;
+}
+
+/** Brotato 武器的特殊规则；未实现的字段在结算层按 0/无处理 */
+export interface WeaponSpecial {
+  /** 每有一个空武器槽，伤害增加多少（绝对值） */
+  freeSlotDamage?: number;
+  /** 对生命高于 80% 的敌人伤害 +pct */
+  damageVsHighHp?: number;
+  /** 对生命低于 30% 的敌人伤害 +pct */
+  damageVsLowHp?: number;
+  /** 命中时直接处决非精英/Boss 的概率 */
+  executeChance?: number;
+  /** 命中时破坏武器并掉落花蜜的概率（Brick） */
+  breakChance?: number;
+  /** 暴击击杀额外掉 1 颗花蜜的概率 */
+  materialOnCritKill?: number;
+  /** 近战命中时按概率爆炸 */
+  explodeChance?: number;
+  /** 近战爆炸半径 */
+  explodeRadius?: number;
+  /** 攻击被灼烧目标必定暴击（Spoon） */
+  critVsBurning?: boolean;
+  /** 每秒自伤（Scythe） */
+  selfDamagePerSec?: number;
+  /** 本波每击杀一只，攻速 +pct（Ghost Flint） */
+  growthAttackSpeed?: number;
+  /** 本波每击杀一只，最大生命 +1（Ghost Scepter） */
+  growthMaxHp?: number;
+  /** 站立不动时的伤害/移速修正（Jousting Lance） */
+  stationaryPenalty?: { damagePct: number; speedPct: number };
+  /** 每移动多少像素，射程 +1（Hiking Pole） */
+  rangePerStep?: number;
+  /** 每多一把同名武器，基础伤害 +n（Stick） */
+  damagePerCopy?: number;
+  /** 击杀回复生命 */
+  healOnKill?: number;
+  /** 每损失 10% 生命，吸取 +pct（Sharp Tooth） */
+  lifestealPerMissingHp?: number;
+  /** 拾取花蜜时重置冷却（Blunderbuss） */
+  cooldownResetOnPickup?: boolean;
+  /** 攻击时重置所有炮台冷却（War Hammer） */
+  turretResetOnAttack?: boolean;
+  /** 每 5 秒基础伤害 +n，受伤后重置（Railgun） */
+  rampingDamage?: number;
+  /** 暴击时弹跳次数（Shuriken） */
+  bounceOnCrit?: number;
+  /** 暴击时穿透次数（Crossbow） */
+  pierceOnCrit?: number;
+  /** 每装备一把武器，甲壳变化（Excalibur） */
+  armorPerWeapon?: number;
 }
 
 export interface WeaponDef {
   id: string;
   name: string;
   kind: WeaponKind;
-  tags: WeaponTag[];
-  /** 普通品质的基础伤害 */
+  classes: WeaponClass[];
+  /** 普通品质的基础伤害（兼容旧字段，等于 tiers[0].damage） */
   damage: number;
-  /** 普通品质的攻击间隔（秒） */
+  /** 普通品质的攻击间隔（秒，等于 tiers[0].cooldown） */
   cooldown: number;
   range: number;
-  /** 属性系数：伤害 += 属性值 × 系数 */
+  /** 属性系数：伤害 += 属性值 × 系数（等于 tiers[0].scaling） */
   scaling: Partial<Record<ScalingStat, number>>;
   critMultiplier: number;
-  /** 命中时给敌人的击退初速度（像素/秒） */
+  /** 命中时给敌人的击退初速度（像素/秒，等于 tiers[0].knockback） */
   knockback: number;
+  /** 四个品质的完整数值；索引 0~3 = 普通/精良/稀有/传说 */
+  tiers: [WeaponTier, WeaponTier, WeaponTier, WeaponTier];
+  /** 最低可从商店出现的品质（Brotato 里只在高品质出现的武器） */
+  minTier?: number;
   /** 挂在腿上显示的贴图；界面里用 `${icon}@ui` 的大图 */
   icon: string;
+  /** 没有现成图标时用的程序化图标形状/颜色 */
+  iconShape?: string;
+  iconColor?: string;
   projectile?: ProjectileSpec;
   melee?: MeleeSpec;
   summon?: SummonSpec;
@@ -112,6 +257,9 @@ export interface WeaponDef {
   /** 链式闪电：命中后在怪之间跳跃 */
   chain?: { jumps: number; range: number; falloff: number };
   onHit?: HitEffects;
+  special?: WeaponSpecial;
+  /** 武器自带的被动属性（装备时生效） */
+  bonusStats?: Partial<Stats>;
   /** 生命低于 50% 时攻速加成 */
   lowHpHaste?: number;
   /** 成长：本局每击杀 kills 只，伤害永久 +1 */
@@ -120,7 +268,7 @@ export interface WeaponDef {
   shop?: boolean;
 }
 
-/** 品质：倍率、基础价、颜色（DESIGN.md 2.6）。道具品质也共用这里的名字和颜色。 */
+/** 品质：倍率、基础价、颜色（道具品质也共用这里的名字和颜色）。 */
 export const TIERS = [
   { name: '普通', damage: 1.0, cooldown: 1.0, price: 22, color: 0xc9c1ae, css: '#d8d0bc' },
   { name: '精良', damage: 1.5, cooldown: 0.95, price: 48, color: 0x4f9be8, css: '#6fb2ff' },
@@ -128,557 +276,38 @@ export const TIERS = [
   { name: '传说', damage: 3.2, cooldown: 0.85, price: 180, color: 0xf0a030, css: '#ffb648' },
 ] as const;
 
-/** 全部武器定义（含土豆兄弟枪械系列），见 DESIGN.md 第 5 节、15.4 节 */
-const LIST: WeaponDef[] = [
-  {
-    id: 'mandible',
-    name: '大颚',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 10,
-    cooldown: 1.0,
-    range: 140,
-    scaling: { melee: 1 },
-    critMultiplier: 2,
-    knockback: 260,
-    icon: 'w-mandible',
-    melee: { hitRadius: 20, style: 'snap' },
-  },
-  {
-    id: 'horn',
-    name: '犄角',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 22,
-    cooldown: 1.6,
-    range: 160,
-    scaling: { melee: 1.5 },
-    critMultiplier: 2,
-    knockback: 520,
-    icon: 'w-horn',
-    melee: { hitRadius: 22, style: 'charge' },
-  },
-  {
-    id: 'legspike',
-    name: '刺足',
-    kind: 'melee',
-    tags: ['尖刺'],
-    damage: 5,
-    cooldown: 0.45,
-    range: 120,
-    scaling: { melee: 0.6 },
-    critMultiplier: 2.5,
-    knockback: 80,
-    icon: 'w-legspike',
-    melee: { hitRadius: 14, style: 'flurry' },
-  },
-  {
-    id: 'scythe',
-    name: '镰臂',
-    kind: 'melee',
-    tags: ['尖刺'],
-    damage: 12,
-    cooldown: 1.2,
-    range: 170,
-    scaling: { melee: 1 },
-    critMultiplier: 2,
-    knockback: 200,
-    icon: 'w-scythe',
-    melee: { hitRadius: 20, style: 'sweep', arc: 1.05 },
-  },
-  {
-    id: 'shellshield',
-    name: '甲壳盾',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 7,
-    cooldown: 0.9,
-    range: 125,
-    scaling: { melee: 0.5, armor: 1 },
-    critMultiplier: 2,
-    knockback: 340,
-    icon: 'w-shellshield',
-    melee: { hitRadius: 26, style: 'bash', arc: 0.85 },
-  },
-  {
-    id: 'slingshot',
-    name: '种子弹弓',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 9,
-    cooldown: 0.9,
-    range: 250,
-    scaling: { ranged: 1 },
-    critMultiplier: 2,
-    knockback: 200,
-    icon: 'w-slingshot',
-    projectile: { texture: 'seed', speed: 720, radius: 6, pierce: 0, spin: 14, spread: 0 },
-  },
-  {
-    id: 'pine',
-    name: '松针连射',
-    kind: 'ranged',
-    tags: ['尖刺'],
-    damage: 3,
-    cooldown: 0.18,
-    range: 235,
-    scaling: { ranged: 0.5 },
-    critMultiplier: 2,
-    knockback: 40,
-    icon: 'w-pine',
-    projectile: { texture: 'needle', speed: 900, radius: 4, pierce: 0, spin: 0, spread: 0.1 },
-  },
-  {
-    id: 'acorn',
-    name: '橡果炮',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 18,
-    cooldown: 1.8,
-    range: 270,
-    scaling: { ranged: 1.2 },
-    critMultiplier: 2,
-    knockback: 160,
-    icon: 'w-acorn',
-    projectile: { texture: 'acorn', speed: 520, radius: 8, pierce: 0, spin: 8, spread: 0, explode: 60 },
-  },
-  {
-    id: 'dandelion',
-    name: '蒲公英散射',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 4,
-    cooldown: 1.3,
-    range: 225,
-    scaling: { ranged: 0.6 },
-    critMultiplier: 2,
-    knockback: 70,
-    icon: 'w-dandelion',
-    projectile: { texture: 'fluffseed', speed: 620, radius: 5, pierce: 0, spin: 4, spread: 0.04, count: 5, arc: 0.6 },
-  },
-  {
-    id: 'dewsniper',
-    name: '露珠狙击',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 25,
-    cooldown: 2.0,
-    range: 295,
-    scaling: { ranged: 1.5 },
-    critMultiplier: 2,
-    knockback: 140,
-    icon: 'w-dewsniper',
-    projectile: { texture: 'dewdrop', speed: 1100, radius: 6, pierce: 2, spin: 0, spread: 0 },
-  },
-  {
-    id: 'acid',
-    name: '酸液喷囊',
-    kind: 'toxin',
-    tags: ['腺体'],
-    damage: 2,
-    cooldown: 0.25,
-    range: 155,
-    scaling: { toxin: 0.8 },
-    critMultiplier: 2,
-    knockback: 0,
-    icon: 'w-acid',
-    projectile: { texture: 'acid', speed: 420, radius: 9, pierce: 3, spin: 6, spread: 0.3, poison: 1 },
-  },
-  {
-    id: 'spore',
-    name: '毒孢子',
-    kind: 'toxin',
-    tags: ['腺体'],
-    damage: 0,
-    cooldown: 2.2,
-    range: 265,
-    scaling: { toxin: 1.2 },
-    critMultiplier: 2,
-    knockback: 0,
-    icon: 'w-spore',
-    projectile: { texture: 'sporeball', speed: 380, radius: 8, pierce: 0, spin: 5, spread: 0, lob: { cloudRadius: 64, cloudTime: 3 } },
-  },
-  {
-    id: 'stinger',
-    name: '蜂刺吹针',
-    kind: 'ranged',
-    tags: ['尖刺', '腺体'],
-    damage: 6,
-    cooldown: 0.8,
-    range: 265,
-    scaling: { ranged: 0.5, toxin: 0.8 },
-    critMultiplier: 2,
-    knockback: 40,
-    icon: 'w-stinger',
-    projectile: { texture: 'stinger', speed: 820, radius: 4, pierce: 0, spin: 0, spread: 0.02, poison: 1 },
-  },
-  {
-    id: 'aphids',
-    name: '蚜虫牧群',
-    kind: 'summon',
-    tags: ['共生'],
-    damage: 4,
-    cooldown: 0.8,
-    range: 300,
-    scaling: {},
-    critMultiplier: 2,
-    knockback: 60,
-    icon: 'w-aphids',
-    summon: { type: 'aphid', counts: [2, 3, 4, 5] },
-  },
-  {
-    id: 'web',
-    name: '蛛网陷阱',
-    kind: 'summon',
-    tags: ['共生'],
-    damage: 3,
-    cooldown: 3.0,
-    range: 240,
-    scaling: { toxin: 0.5 },
-    critMultiplier: 2,
-    knockback: 0,
-    icon: 'w-web',
-    summon: { type: 'web', max: 3, duration: 8, slow: 0.4 },
-  },
-  // ---------- M6：新的攻击形态 ----------
-  {
-    id: 'boomerang',
-    name: '回旋叶刃',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 7,
-    cooldown: 1.1,
-    range: 230,
-    scaling: { ranged: 0.8 },
-    critMultiplier: 2,
-    knockback: 110,
-    icon: 'w-boomerang',
-    projectile: { texture: 'leafblade', speed: 560, radius: 10, pierce: 999, spin: 18, spread: 0, returning: true },
-  },
-  {
-    id: 'dungball',
-    name: '滚粪球',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 14,
-    cooldown: 2.4,
-    range: 220,
-    scaling: { melee: 1 },
-    critMultiplier: 2,
-    knockback: 360,
-    icon: 'w-dungball',
-    projectile: { texture: 'dungball', speed: 250, radius: 11, pierce: 999, spin: 7, spread: 0, roll: { grow: 1 } },
-  },
-  {
-    id: 'firebeam',
-    name: '萤火光束',
-    kind: 'ranged',
-    tags: ['火焰'],
-    damage: 3,
-    cooldown: 0.2,
-    range: 240,
-    scaling: { ranged: 0.4 },
-    critMultiplier: 1.5,
-    knockback: 0,
-    icon: 'w-firebeam',
-    beam: true,
-    onHit: { burn: true },
-  },
-  {
-    id: 'moths',
-    name: '绕身飞蛾',
-    kind: 'summon',
-    tags: ['共生'],
-    damage: 5,
-    cooldown: 0.5,
-    range: 0,
-    scaling: {},
-    critMultiplier: 2,
-    knockback: 90,
-    icon: 'w-moths',
-    summon: { type: 'moth', counts: [2, 3, 4, 5] },
-  },
-  {
-    id: 'skipstone',
-    name: '弹跳石子',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 8,
-    cooldown: 1.0,
-    range: 250,
-    scaling: { ranged: 0.9 },
-    critMultiplier: 2,
-    knockback: 120,
-    icon: 'w-skipstone',
-    projectile: { texture: 'pebble', speed: 720, radius: 6, pierce: 0, spin: 12, spread: 0, bounce: { times: 3, range: 150, falloff: 0.15 } },
-  },
-  {
-    id: 'thunder',
-    name: '雷甲触须',
-    kind: 'ranged',
-    tags: ['电'],
-    damage: 10,
-    cooldown: 1.4,
-    range: 250,
-    scaling: { ranged: 0.7 },
-    critMultiplier: 2,
-    knockback: 60,
-    icon: 'w-thunder',
-    chain: { jumps: 4, range: 150, falloff: 0.15 },
-  },
-  {
-    id: 'mine',
-    name: '种子地雷',
-    kind: 'device',
-    tags: ['机关'],
-    damage: 20,
-    cooldown: 2.0,
-    range: 0,
-    scaling: { engineering: 1.5 },
-    critMultiplier: 2,
-    knockback: 220,
-    icon: 'w-mine',
-    device: { type: 'mine', max: 4, radius: 70 },
-  },
-  {
-    id: 'turret',
-    name: '蚁丘炮台',
-    kind: 'device',
-    tags: ['机关'],
-    damage: 8,
-    cooldown: 0.8,
-    range: 250,
-    scaling: { engineering: 1 },
-    critMultiplier: 2,
-    knockback: 80,
-    icon: 'w-turret',
-    device: { type: 'turret', max: 2, placeEvery: 4 },
-  },
-  // ---------- M6：新的效果类型 ----------
-  {
-    id: 'flamegland',
-    name: '爆燃腺',
-    kind: 'ranged',
-    tags: ['火焰'],
-    damage: 2,
-    cooldown: 0.15,
-    range: 140,
-    scaling: { ranged: 0.3 },
-    critMultiplier: 2,
-    knockback: 0,
-    icon: 'w-flamegland',
-    projectile: { texture: 'flame', speed: 360, radius: 11, pierce: 3, spin: 3, spread: 0.28, fade: true },
-    onHit: { burn: true },
-  },
-  {
-    id: 'frostdew',
-    name: '霜露弹',
-    kind: 'ranged',
-    tags: ['投掷'],
-    damage: 8,
-    cooldown: 0.9,
-    range: 255,
-    scaling: { ranged: 0.9 },
-    critMultiplier: 2,
-    knockback: 30,
-    icon: 'w-frostdew',
-    projectile: { texture: 'frostshot', speed: 760, radius: 6, pierce: 0, spin: 0, spread: 0 },
-    onHit: { freeze: 1 },
-  },
-  {
-    id: 'armorbreak',
-    name: '破甲刺',
-    kind: 'melee',
-    tags: ['尖刺'],
-    damage: 8,
-    cooldown: 0.7,
-    range: 130,
-    scaling: { melee: 0.8 },
-    critMultiplier: 2,
-    knockback: 120,
-    icon: 'w-armorbreak',
-    melee: { hitRadius: 15, style: 'pierce' },
-    onHit: { vulnerable: true },
-  },
-  {
-    id: 'honeyjar',
-    name: '蜂蜜罐',
-    kind: 'ranged',
-    tags: ['蜂蜜'],
-    damage: 8,
-    cooldown: 1.0,
-    range: 300,
-    scaling: { ranged: 0.6 },
-    critMultiplier: 2,
-    knockback: 100,
-    icon: 'w-honeyjar',
-    projectile: { texture: 'honeyblob', speed: 600, radius: 7, pierce: 0, spin: 6, spread: 0 },
-    onHit: { heal: 0.1 },
-    lowHpHaste: 0.3,
-  },
-  {
-    id: 'scarab',
-    name: '金龟子钳',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 9,
-    cooldown: 1.1,
-    range: 145,
-    scaling: { melee: 0.9 },
-    critMultiplier: 2,
-    knockback: 240,
-    icon: 'w-scarab',
-    melee: { hitRadius: 19, style: 'sweep', arc: 0.85 },
-    onHit: { nectarOnKill: 0.25 },
-  },
-  // ---------- M6：成长型 ----------
-  {
-    id: 'scarred',
-    name: '战痕大颚',
-    kind: 'melee',
-    tags: ['甲角'],
-    damage: 8,
-    cooldown: 1.0,
-    range: 145,
-    scaling: { melee: 1 },
-    critMultiplier: 2,
-    knockback: 260,
-    icon: 'w-scarred',
-    melee: { hitRadius: 21, style: 'snap' },
-    growth: { kills: 40 },
-  },
-  // ---------- 土豆兄弟枪械系列 ----------
-  {
-    id: 'pistol',
-    name: '手枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 10,
-    cooldown: 1.0,
-    range: 225,
-    scaling: { ranged: 1 },
-    critMultiplier: 2,
-    knockback: 180,
-    icon: 'w-pistol',
-    projectile: { texture: 'bullet', speed: 920, radius: 4.5, pierce: 1, spin: 0, spread: 0.03 },
-  },
-  {
-    id: 'smg',
-    name: '冲锋枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 3,
-    cooldown: 0.16,
-    range: 200,
-    scaling: { ranged: 0.5 },
-    critMultiplier: 1.5,
-    knockback: 25,
-    icon: 'w-smg',
-    projectile: { texture: 'bullet', speed: 980, radius: 4, pierce: 0, spin: 0, spread: 0.16 },
-  },
-  {
-    id: 'shotgun',
-    name: '霰弹枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 4,
-    cooldown: 1.35,
-    range: 180,
-    scaling: { ranged: 0.65 },
-    critMultiplier: 2,
-    knockback: 130,
-    icon: 'w-shotgun',
-    projectile: { texture: 'pellet', speed: 880, radius: 4.5, pierce: 1, spin: 0, spread: 0.05, count: 5, arc: 0.48 },
-  },
-  {
-    id: 'revolver',
-    name: '左轮手枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 16,
-    cooldown: 1.25,
-    range: 245,
-    scaling: { ranged: 1.25 },
-    critMultiplier: 2.5,
-    knockback: 280,
-    icon: 'w-revolver',
-    projectile: { texture: 'heavybullet', speed: 1060, radius: 5.5, pierce: 1, spin: 0, spread: 0.01 },
-  },
-  {
-    id: 'lasergun',
-    name: '激光枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 22,
-    cooldown: 1.65,
-    range: 280,
-    scaling: { ranged: 1.4 },
-    critMultiplier: 2.2,
-    knockback: 120,
-    icon: 'w-lasergun',
-    projectile: { texture: 'laserbolt', speed: 1280, radius: 5, pierce: 3, spin: 0, spread: 0 },
-  },
-  {
-    id: 'snipergun',
-    name: '狙击枪',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 28,
-    cooldown: 2.0,
-    range: 305,
-    scaling: { ranged: 1.6 },
-    critMultiplier: 2.5,
-    knockback: 220,
-    icon: 'w-snipergun',
-    projectile: { texture: 'heavybullet', speed: 1360, radius: 5.5, pierce: 3, spin: 0, spread: 0 },
-  },
-  {
-    id: 'rocket',
-    name: '火箭筒',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 24,
-    cooldown: 2.1,
-    range: 265,
-    scaling: { ranged: 1.3 },
-    critMultiplier: 2,
-    knockback: 320,
-    icon: 'w-rocket',
-    projectile: { texture: 'rocketproj', speed: 680, radius: 7, pierce: 0, spin: 0, spread: 0.02, explode: 85 },
-  },
-  {
-    id: 'minigun',
-    name: '加特林',
-    kind: 'ranged',
-    tags: ['枪械'],
-    damage: 2,
-    cooldown: 0.1,
-    range: 215,
-    scaling: { ranged: 0.45 },
-    critMultiplier: 1.5,
-    knockback: 20,
-    icon: 'w-minigun',
-    projectile: { texture: 'bullet', speed: 1040, radius: 4, pierce: 1, spin: 0, spread: 0.18 },
-  },
-  // ---------- 不在商店出售 ----------
-  {
-    id: 'workers',
-    name: '工蚁',
-    kind: 'summon',
-    tags: [],
-    damage: 6,
-    cooldown: 0.9,
-    range: 400,
-    scaling: { melee: 0.5 },
-    critMultiplier: 2,
-    knockback: 60,
-    icon: 'w-aphids',
-    summon: { type: 'aphid' },
-    shop: false,
-  },
-];
+export function tierOf(def: WeaponDef, tier: number): WeaponTier {
+  const i = Math.max(0, Math.min(3, Math.floor(tier)));
+  return def.tiers[i] ?? def.tiers[0];
+}
 
-export const WEAPONS: Record<string, WeaponDef> = Object.fromEntries(LIST.map((d) => [d.id, d]));
+/** 蚁后的工蚁：不在商店出售 */
+const WORKERS: WeaponDef = {
+  id: 'workers',
+  name: '工蚁',
+  kind: 'summon',
+  classes: ['Support'],
+  damage: 6,
+  cooldown: 0.9,
+  range: 400,
+  scaling: { melee: 0.5 },
+  critMultiplier: 2,
+  knockback: 60,
+  tiers: [
+    { damage: 6, cooldown: 0.9, critChance: 0.03, critMultiplier: 2, range: 400, knockback: 60, lifesteal: 0, price: 0, scaling: { melee: 0.5 } },
+    { damage: 9, cooldown: 0.88, critChance: 0.03, critMultiplier: 2, range: 400, knockback: 60, lifesteal: 0, price: 0, scaling: { melee: 0.5 } },
+    { damage: 13, cooldown: 0.86, critChance: 0.03, critMultiplier: 2, range: 400, knockback: 60, lifesteal: 0, price: 0, scaling: { melee: 0.5 } },
+    { damage: 20, cooldown: 0.84, critChance: 0.03, critMultiplier: 2, range: 400, knockback: 60, lifesteal: 0, price: 0, scaling: { melee: 0.5 } },
+  ],
+  icon: 'w-aphids',
+  summon: { type: 'aphid' },
+  shop: false,
+};
+
+/** 全部武器定义（95 把 Brotato 对齐武器 + 蚁后的工蚁） */
+const ALL: WeaponDef[] = [...BROTATO_WEAPONS, WORKERS];
+
+export const WEAPONS: Record<string, WeaponDef> = Object.fromEntries(ALL.map((d) => [d.id, d]));
 
 /** 商店里能出现的武器 */
-export const SHOP_WEAPONS = Object.values(WEAPONS).filter((d) => d.shop !== false);
+export const SHOP_WEAPONS = BROTATO_WEAPONS;

@@ -183,7 +183,7 @@ const LIST: EnemyDef[] = [
 export const ENEMIES: Record<string, EnemyDef> = Object.fromEntries(LIST.map((d) => [d.id, d]));
 
 /** 默认生命成长：每过一波 +55% 基础生命 */
-export const DEFAULT_HP_GROWTH = 0.55;
+export const DEFAULT_HP_GROWTH = 0.65;
 
 /** 每过一波：生命 × (1 + 成长率 × (波数 − 1)) */
 export function enemyHp(def: EnemyDef, wave: number): number {
@@ -191,7 +191,7 @@ export function enemyHp(def: EnemyDef, wave: number): number {
 }
 
 /** 默认伤害成长：每过一波 +30% 基础伤害（小怪基础伤害只有 1~2，成长太低会被取整吃掉） */
-export const DEFAULT_DAMAGE_GROWTH = 0.3;
+export const DEFAULT_DAMAGE_GROWTH = 0.35;
 
 /** 每过一波：伤害 × (1 + 成长率 × (波数 − 1)) */
 export function enemyDamage(def: EnemyDef, wave: number): number {

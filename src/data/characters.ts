@@ -1,6 +1,6 @@
 import type { Stats } from '../core/stats';
 import type { Mods } from './items';
-import type { WeaponKind, WeaponTag } from './weapons';
+import type { WeaponClass, WeaponKind } from './weapons';
 
 /** 解锁条件：单局内达成 */
 export type UnlockRule =
@@ -59,7 +59,7 @@ export interface CharacterDef {
   /** 只能装这些类型的武器 */
   allowedKinds?: WeaponKind[];
   /** 商店出武器时有一半概率从这些标签里出 */
-  favorTags?: WeaponTag[];
+  favorClasses?: WeaponClass[];
   /** null 表示初始可用 */
   unlock: UnlockRule | null;
 }
@@ -75,7 +75,7 @@ const LIST: CharacterDef[] = [
     perks: { freeReroll: true },
     pros: ['每次进商店，第一次刷新免费', '初始武器四选一'],
     cons: [],
-    startWeapons: ['mandible', 'slingshot', 'acid', 'pistol'],
+    startWeapons: ['claw', 'slingshot', 'flamethrower', 'pistol'],
     unlock: null,
   },
   {
@@ -88,7 +88,7 @@ const LIST: CharacterDef[] = [
     perks: {},
     pros: ['近战 +3', '甲壳 +3', '最大生命 +10'],
     cons: ['远程武器伤害 −50%', '移速 −8%'],
-    startWeapons: ['horn'],
+    startWeapons: ['spear'],
     unlock: null,
   },
   {
@@ -101,7 +101,7 @@ const LIST: CharacterDef[] = [
     perks: { hurtCloud: true },
     pros: ['毒素 +3', '受到伤害时向身后喷一团毒雾'],
     cons: ['近战、远程的固定加成只算一半'],
-    startWeapons: ['acid'],
+    startWeapons: ['flamethrower'],
     unlock: { kind: 'toxinDamage', amount: 3000 },
   },
   {
@@ -140,7 +140,7 @@ const LIST: CharacterDef[] = [
     perks: {},
     pros: ['近战暴击倍率 +0.5', '伤害 +25%'],
     cons: ['只有 4 个武器槽', '只能装近战武器'],
-    startWeapons: ['scythe'],
+    startWeapons: ['light-saber'],
     slots: 4,
     allowedKinds: ['melee'],
     unlock: { kind: 'meleeKills', amount: 500 },
@@ -167,7 +167,7 @@ const LIST: CharacterDef[] = [
     perks: { speedToDamage: true, idlePenalty: { delay: 0.5, mult: 0.5 } },
     pros: ['移速 +15%', '每 1% 移速加成 = 伤害 +1%'],
     cons: ['静止超过 0.5 秒伤害 −50%'],
-    startWeapons: ['legspike'],
+    startWeapons: ['knife'],
     unlock: { kind: 'speed', amount: 0.4 },
   },
   {
@@ -191,7 +191,7 @@ const LIST: CharacterDef[] = [
     perks: { thorns: { base: 3 }, noDodge: true },
     pros: ['被怪碰到时反弹 (3 + 甲壳) 点伤害', '甲壳 +3'],
     cons: ['闪避固定为 0'],
-    startWeapons: ['shellshield'],
+    startWeapons: ['spiky-shield'],
     unlock: { kind: 'armor', amount: 15 },
   },
   {
@@ -203,7 +203,7 @@ const LIST: CharacterDef[] = [
     perks: { lifestealOnly: true },
     pros: ['吸取 +15%'],
     cons: ['回复固定为 0', '果实、蘑菇等回血无效'],
-    startWeapons: ['stinger'],
+    startWeapons: ['tranq-rifle'],
     unlock: { kind: 'lifesteal', amount: 150 },
   },
   {
@@ -215,7 +215,7 @@ const LIST: CharacterDef[] = [
     perks: { touchPickup: { mult: 1.5 } },
     pros: ['亲自捡到的花蜜平均每颗算 1.5 颗', '移速 +5%'],
     cons: ['感应范围为 0，要走过去捡', '波次结束时没捡的只算一颗'],
-    startWeapons: ['dungball'],
+    startWeapons: ['rock'],
     unlock: { kind: 'totalNectar', amount: 1500 },
   },
   {
@@ -228,8 +228,8 @@ const LIST: CharacterDef[] = [
     perks: {},
     pros: ['工程 +6', '开局自带蚁丘炮台', '商店更容易出机关武器'],
     cons: ['非机关武器伤害 −30%'],
-    startWeapons: ['turret'],
-    favorTags: ['机关'],
+    startWeapons: ['wrench'],
+    favorClasses: ['Tool'],
     unlock: { kind: 'devices', amount: 30 },
   },
 ];

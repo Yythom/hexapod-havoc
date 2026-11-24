@@ -287,6 +287,11 @@ export class ProjectileManager {
     } else if (p.texture === 'leafblade') {
       this.fx.star(p.x, p.y, 13, 0x9cff58, ang);
     }
+    if (p.crit && p.src) {
+      const sp = p.src.def.special;
+      if (sp?.pierceOnCrit) p.pierce += sp.pierceOnCrit;
+      if (sp?.bounceOnCrit && p.bounce) p.bouncesLeft += sp.bounceOnCrit;
+    }
     this.resolver.hit(e, p.damage, p.crit, p.dirX, p.dirY, p.knockback, p.src ?? null);
   }
 

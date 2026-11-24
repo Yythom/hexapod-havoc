@@ -4,7 +4,7 @@ import { effectiveRange, growthBonus, weaponDamage } from '../core/combat';
 import type { OwnedWeapon } from '../core/RunState';
 import { attackInterval, BASE_STATS, formatStat, formatStatDelta, STAT_KEYS, STAT_META, type Stats } from '../core/stats';
 import { MOD_LABEL, type ItemDef, type Mods } from '../data/items';
-import { KIND_LABEL, TIERS, type WeaponDef, type WeaponTag } from '../data/weapons';
+import { CLASS_LABEL, KIND_LABEL, TIERS, tierOf, type WeaponClass, type WeaponDef } from '../data/weapons';
 import { chamferPoints } from './Button';
 
 /** 土豆兄弟风格（Brotato）色板：哑光炭黑石板 + 纯黑重墨描边 + 骨白高对比字 + 鲜明绿红数值 */
@@ -25,18 +25,25 @@ export const COLOR = {
   special: '#74d6ff',
 };
 
-/** 武器套装标签配色（深炭底 + 鲜明描边） */
-export const TAG_STYLE: Record<WeaponTag, { bg: number; border: number; text: string }> = {
-  甲角: { bg: 0x342014, border: 0xc87a38, text: '#ffca88' },
-  尖刺: { bg: 0x381820, border: 0xd05264, text: '#ff9ea8' },
-  投掷: { bg: 0x162a3a, border: 0x4ea0d4, text: '#9ad8ff' },
-  枪械: { bg: 0x2a241a, border: 0xd8a848, text: '#ffe296' },
-  腺体: { bg: 0x1b3014, border: 0x68be3a, text: '#baf488' },
-  共生: { bg: 0x143024, border: 0x40b07a, text: '#96f0c0' },
-  火焰: { bg: 0x3c1c0c, border: 0xee7828, text: '#ffae6e' },
-  电: { bg: 0x182442, border: 0x6296f8, text: '#b2d0ff' },
-  机关: { bg: 0x2c2616, border: 0xb2944c, text: '#ecd492' },
-  蜂蜜: { bg: 0x362a10, border: 0xe2ae28, text: '#ffe076' },
+/** 17 个 Weapon Class 的配色（深炭底 + 鲜明描边） */
+export const CLASS_STYLE: Record<WeaponClass, { bg: number; border: number; text: string }> = {
+  Blade: { bg: 0x381820, border: 0xd05264, text: '#ff9ea8' },
+  Blunt: { bg: 0x342014, border: 0xc87a38, text: '#ffca88' },
+  Elemental: { bg: 0x3c1c0c, border: 0xee7828, text: '#ffae6e' },
+  Ethereal: { bg: 0x182a30, border: 0x50c8c0, text: '#9cf0e8' },
+  Explosive: { bg: 0x382c10, border: 0xe0b030, text: '#ffe08a' },
+  Gun: { bg: 0x2a241a, border: 0xd8a848, text: '#ffe296' },
+  Heavy: { bg: 0x2a2c32, border: 0x9aa4b8, text: '#d0d8e8' },
+  Legendary: { bg: 0x2e1838, border: 0xb066e8, text: '#d8a8ff' },
+  Medical: { bg: 0x143024, border: 0x40b07a, text: '#96f0c0' },
+  Medieval: { bg: 0x1a2238, border: 0x6a92d8, text: '#b8ccff' },
+  Musical: { bg: 0x34182c, border: 0xd068a8, text: '#ffb0d8' },
+  Naval: { bg: 0x142c34, border: 0x48a8c0, text: '#9ce0f0' },
+  Precise: { bg: 0x361c18, border: 0xe07848, text: '#ffb08a' },
+  Primitive: { bg: 0x1b3014, border: 0x68be3a, text: '#baf488' },
+  Support: { bg: 0x14302a, border: 0x50b890, text: '#a0f0d0' },
+  Tool: { bg: 0x2c2616, border: 0xb2944c, text: '#ecd492' },
+  Unarmed: { bg: 0x302824, border: 0xc89060, text: '#f0c8a0' },
 };
 
 const STAT_DOT: Record<keyof Stats, number> = {
@@ -47,6 +54,8 @@ const STAT_DOT: Record<keyof Stats, number> = {
   melee: 0xe47e38,
   ranged: 0x5cb6f0,
   toxin: 0x90dc3c,
+  elemental: 0xff9a3c,
+  curse: 0xb06cff,
   attackSpeedPct: 0xf4d84c,
   critChance: 0xf27e46,
   range: 0x7ac0e8,
@@ -348,16 +357,8 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
     pierce: '破甲穿刺',
   };
   if (def.melee && meleeLabel[def.melee.style]) parts.push(meleeLabel[def.melee.style]);
-  if (tier >= 2 && def.melee) parts.push(tier >= 3 ? '附带强力穿透剑气波' : '附带穿透剑气波');
-  if (tier >= 1 && p) {
-    if ((p.count ?? 1) > 1) parts.push(`升阶 +${(tier >= 1 ? 1 : 0) + (tier >= 2 ? 1 : 0) + (tier >= 3 ? 2 : 0)} 弹丸`);
-    else if (p.explode) parts.push(`爆炸半径 +${Math.round(18 * tier)}%${tier >= 3 ? '，双发齐射' : ''}`);
-    else if (!p.lob && !p.returning && !p.roll) parts.push(tier >= 3 ? '三发齐射，+2 穿透' : tier >= 2 ? '双发齐射，+1 穿透' : '+1 穿透');
-  }
-  if (tier >= 1 && def.chain) parts.push(`升阶 +${tier} 跳跃`);
-  if (tier >= 2 && def.beam) parts.push(`额外分叉照射 ${tier >= 3 ? 2 : 1} 个目标`);
-  if (tier >= 2 && def.device) parts.push(`部署上限 +${Math.floor(tier / 2)}`);
-  if (def.critMultiplier !== 2) parts.push(`暴击 ×${def.critMultiplier}`);
+  const cm = tierOf(def, tier).critMultiplier;
+  if (cm !== 2) parts.push(`暴击 ×${cm}`);
   if (def.summon?.type === 'aphid') parts.push(`召唤 ${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只蚜虫`);
   if (def.summon?.type === 'moth') parts.push(`${(def.summon.counts?.[tier] ?? 2) + mods.summonCount} 只飞蛾绕身旋转，碰到怪造成伤害`);
   if (def.summon?.type === 'web') parts.push(`减速 ${Math.round((def.summon.slow ?? 0) * 100)}%，最多 ${def.summon.max} 张`);
@@ -367,6 +368,8 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
   const hit = def.onHit;
   if (hit?.burn) parts.push('点燃命中的怪');
   if (hit?.freeze) parts.push(`每次命中叠 ${hit.freeze} 层冰（每层减速 15%），3 层冻住`);
+  if (hit?.poison) parts.push(`命中叠 ${hit.poison} 层毒`);
+  if (hit?.slow) parts.push(`命中减速 ${Math.round(hit.slow * 100)}%`);
   if (hit?.vulnerable) parts.push('命中让怪易伤 3 秒');
   if (hit?.heal) parts.push(`命中时 ${Math.round(hit.heal * 100)}% 概率回 1 血`);
   if (def.lowHpHaste) parts.push(`生命低于 50% 时攻速 +${Math.round(def.lowHpHaste * 100)}%`);
@@ -382,14 +385,15 @@ function weaponSpecial(def: WeaponDef, tier: number, mods: Mods, owned?: OwnedWe
 export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mods, owned?: OwnedWeapon | null): Line[] {
   let dmg = weaponDamage(def, tier, stats, mods, owned);
   if (def.summon) dmg *= 1 + mods.summonDamagePct;
-  const scaling = Object.entries(def.scaling)
+  const t = tierOf(def, tier);
+  const scaling = Object.entries(t.scaling)
     .map(([k, c]) => `${STAT_META[k as keyof Stats].label}×${Math.round((c as number) * 100)}%`)
     .join(' ');
   const isDevice = !!def.device;
   const interval = isDevice
-    ? (def.cooldown * TIERS[tier].cooldown) / (def.device!.type === 'turret' ? Math.max(0.2, 1 + mods.turretSpeedPct) : 1)
-    : attackInterval(def.cooldown * TIERS[tier].cooldown, stats);
-  const range = effectiveRange(def, stats);
+    ? t.cooldown / (def.device!.type === 'turret' ? Math.max(0.2, 1 + mods.turretSpeedPct) : 1)
+    : attackInterval(t.cooldown, stats);
+  const range = effectiveRange(def, stats, tier);
   const dmgLabel =
     def.summon?.type === 'web' ? `每秒伤害 ${Math.round(dmg)}` : def.summon ? `每只伤害 ${Math.round(dmg)}` : def.beam ? `每次伤害 ${Math.round(dmg)}` : `伤害 ${Math.round(dmg)}`;
   let timing: string;
@@ -408,6 +412,10 @@ export function weaponLines(def: WeaponDef, tier: number, stats: Stats, mods: Mo
 
 export function weaponTypeLine(def: WeaponDef, tier: number): string {
   return `${TIERS[tier].name} · ${KIND_LABEL[def.kind]}`;
+}
+
+export function classLine(def: WeaponDef): string {
+  return def.classes.map((c) => CLASS_LABEL[c]).join(' / ');
 }
 
 /** 竖排放置几行说明文字 */

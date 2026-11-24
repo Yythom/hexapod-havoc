@@ -217,6 +217,7 @@ export class BeetleView extends Phaser.GameObjects.Container {
 
   /** amount：0 静止 ~ 1 全速行走 */
   animate(dt: number, amount: number): void {
+    if (!Number.isFinite(amount)) amount = 0;
     this.auraTime += dt;
     this.walkAmount += (amount - this.walkAmount) * Math.min(1, dt * 12);
     this.walkPhase += dt * (4 + 14 * this.walkAmount);

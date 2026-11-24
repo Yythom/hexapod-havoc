@@ -1,14 +1,16 @@
 import { ITEMS, type ItemDef } from '../data/items';
-import { SHOP_WEAPONS, TIERS, type WeaponDef, type WeaponKind, type WeaponTag } from '../data/weapons';
+import { SHOP_WEAPONS, TIERS, WEAPONS, type WeaponClass, type WeaponDef, type WeaponKind } from '../data/weapons';
 import { rollTier } from './progression';
 import type { RunState } from './RunState';
 
 /** 商店规则：含流派关联加权与无用道具过滤 */
 
 export const OFFER_COUNT = 4;
-const WEAPON_OFFER_CHANCE = 0.36;
-const WEAPON_OFFER_CHANCE_FILLING = 0.5;
-const SELL_RATIO = 0.35;
+const WEAPON_OFFER_CHANCE = 0.23;
+const WEAPON_OFFER_CHANCE_FILLING = 0.35;
+const SELL_RATIO = 0.25;
+/** 非唯一道具最多堆叠 5 件，避免 100+ 道具时单项属性爆表 */
+const MAX_ITEM_STACK = 4;
 const MAX_TIER = TIERS.length - 1;
 
 export interface Offer {
@@ -21,7 +23,7 @@ export interface Offer {
 interface BuildProfile {
   weaponIds: Set<string>;
   kinds: Set<WeaponKind>;
-  tags: Set<WeaponTag>;
+  classes: Set<WeaponClass>;
   hasMelee: boolean;
   hasRanged: boolean;
   hasToxin: boolean;
@@ -55,7 +57,7 @@ function buildProfile(run: RunState): BuildProfile {
   const c = run.character;
   const weaponIds = new Set<string>();
   const kinds = new Set<WeaponKind>();
-  const tags = new Set<WeaponTag>(c.favorTags ?? []);
+  const classes = new Set<WeaponClass>(c.favorClasses ?? []);
   let hasMelee = (c.stats.melee ?? 0) > 0;
   let hasRanged = (c.stats.ranged ?? 0) > 0 && (c.mods?.rangedDamagePct ?? 0) >= 0;
   let hasToxin = (c.stats.toxin ?? 0) > 0 || !!c.perks.hurtCloud || (run.items.widowsilk ?? 0) > 0;
@@ -73,16 +75,16 @@ function buildProfile(run: RunState): BuildProfile {
     if (!w) continue;
     weaponIds.add(w.id);
     kinds.add(w.kind);
-    for (const t of w.tags) tags.add(t);
+    for (const t of w.classes) classes.add(t);
     if (w.kind === 'melee' || w.scaling.melee) hasMelee = true;
     if ((w.kind === 'ranged' || w.scaling.ranged) && (c.mods?.rangedDamagePct ?? 0) >= 0) hasRanged = true;
-    if (w.kind === 'toxin' || w.scaling.toxin || w.projectile?.poison) hasToxin = true;
+    if (w.kind === 'toxin' || w.scaling.toxin || w.projectile?.poison || w.onHit?.poison) hasToxin = true;
     if (w.kind === 'summon') hasSummon = true;
     if (w.device?.type === 'turret') hasTurret = true;
     if (w.device?.type === 'mine') hasMine = true;
-    if (w.onHit?.burn || w.tags.includes('火焰')) hasBurn = true;
+    if (w.onHit?.burn || w.classes.includes('Elemental')) hasBurn = true;
     if (w.onHit?.freeze) hasFreeze = true;
-    if (w.chain || w.tags.includes('电')) hasChain = true;
+    if (w.chain || w.classes.includes('Elemental')) hasChain = true;
     if (w.projectile?.returning || w.projectile?.bounce) hasBounce = true;
     if (w.projectile && !w.projectile.lob && !w.projectile.returning && !w.projectile.roll) hasProjectiles = true;
   }
@@ -98,7 +100,7 @@ function buildProfile(run: RunState): BuildProfile {
   return {
     weaponIds,
     kinds,
-    tags,
+    classes,
     hasMelee,
     hasRanged,
     hasToxin,
@@ -116,14 +118,15 @@ function buildProfile(run: RunState): BuildProfile {
 
 /** 价格随波次上涨：每过一波 +15% 基础价 */
 export function priceMult(wave: number): number {
-  return 1 + 0.15 * (wave - 1);
+  return 1 + 0.22 * (wave - 1);
 }
 
 /** 折扣最多 30% */
 const MAX_DISCOUNT = -0.3;
 
-export function weaponPrice(tier: number, wave: number, discount = 0): number {
-  return Math.max(1, Math.round(TIERS[tier].price * priceMult(wave) * (1 + discount)));
+export function weaponPrice(def: WeaponDef, tier: number, wave: number, discount = 0): number {
+  const base = def.tiers[Math.max(0, Math.min(3, tier))]?.price ?? TIERS[tier].price;
+  return Math.max(1, Math.round(base * priceMult(wave) * (1 + discount)));
 }
 
 export function itemPrice(id: string, wave: number, discount = 0): number {
@@ -133,7 +136,7 @@ export function itemPrice(id: string, wave: number, discount = 0): number {
 /** 商品的实际售价（含蜗牛会员卡等折扣） */
 export function offerPrice(o: Offer, run: RunState): number {
   const d = Math.max(MAX_DISCOUNT, run.mods.pricePct);
-  return o.kind === 'weapon' ? weaponPrice(o.tier, run.wave, d) : itemPrice(o.id, run.wave, d);
+  return o.kind === 'weapon' ? weaponPrice(WEAPONS[o.id], o.tier, run.wave, d) : itemPrice(o.id, run.wave, d);
 }
 
 export function sellValue(price: number): number {
@@ -149,6 +152,7 @@ export function rerollCost(wave: number, times: number): number {
 function itemAllowed(id: string, run: RunState): boolean {
   const d = ITEMS[id];
   if (d.unique && run.items[d.id]) return false;
+  if (!d.unique && (run.items[d.id] ?? 0) >= MAX_ITEM_STACK) return false;
   const perks = run.character.perks;
   const m = d.mods;
   if (run.weaponSlots === 0) {
@@ -237,20 +241,20 @@ function itemWeight(d: ItemDef, run: RunState, prof: BuildProfile): number {
 function weaponWeight(d: WeaponDef, run: RunState, prof: BuildProfile): number {
   let w = 0.7;
   if (prof.weaponIds.has(d.id)) w = 3.8;
-  else if (d.tags.some((t) => prof.tags.has(t))) w = 2.8;
+  else if (d.classes.some((t) => prof.classes.has(t))) w = 2.8;
   else if (prof.kinds.has(d.kind)) w = 1.8;
 
   if ((run.character.mods?.rangedDamagePct ?? 0) < 0 && d.kind === 'ranged') w *= 0.2;
   if ((run.character.mods?.nonDeviceDamagePct ?? 0) < 0 && !d.device) w *= 0.25;
-  if (run.character.favorTags?.some((t) => d.tags.includes(t))) w *= 1.5;
+  if (run.character.favorClasses?.some((t) => d.classes.includes(t))) w *= 1.5;
   return w;
 }
 
 /** 这个角色能买的武器 */
-export function weaponPool(run: RunState) {
+export function weaponPool(run: RunState, tier = 0) {
   if (run.weaponSlots === 0) return [];
   const kinds = run.character.allowedKinds;
-  return SHOP_WEAPONS.filter((d) => !kinds || kinds.includes(d.kind));
+  return SHOP_WEAPONS.filter((d) => (!kinds || kinds.includes(d.kind)) && (d.minTier ?? 0) <= tier);
 }
 
 /** 按品质和构筑加权挑一件道具；该品质没有就往低品质找。同一次刷新尽量不重复。 */
@@ -268,7 +272,7 @@ function rollItem(tier: number, run: RunState, prof: BuildProfile, avoidIds?: Se
 
 function rollOffer(run: RunState, prof: BuildProfile, forceWeapon: boolean, avoidItems: Set<string>): Offer {
   const tier = rollTier(run.wave, run.stats.luck);
-  const pool = weaponPool(run);
+  const pool = weaponPool(run, tier);
   const wChance = run.weapons.length < run.weaponSlots ? WEAPON_OFFER_CHANCE_FILLING : WEAPON_OFFER_CHANCE;
   const pickWeapon = pool.length > 0 && (forceWeapon || Math.random() < wChance);
   if (!pickWeapon) {
@@ -336,6 +340,10 @@ export function buyOffer(run: RunState, index: number): boolean {
 }
 
 export function addItem(run: RunState, id: string): void {
+  if (!ITEMS[id].unique && (run.items[id] ?? 0) >= MAX_ITEM_STACK) {
+    run.nectar += 5;
+    return;
+  }
   run.items[id] = (run.items[id] ?? 0) + 1;
   run.recomputeStats();
 }
@@ -360,7 +368,7 @@ export function mergeWeapons(run: RunState, i: number): boolean {
 }
 
 export function weaponSellValue(run: RunState, i: number): number {
-  return sellValue(weaponPrice(run.weapons[i].tier, run.wave));
+  return sellValue(weaponPrice(WEAPONS[run.weapons[i].id], run.weapons[i].tier, run.wave));
 }
 
 /** 卖掉第 i 把武器，返回得到的花蜜。最后一把不能卖。 */

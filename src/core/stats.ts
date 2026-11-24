@@ -9,6 +9,10 @@ export interface Stats {
   melee: number;
   ranged: number;
   toxin: number;
+  /** Brotato 的 Elemental：火焰、冰、电与元素武器共用 */
+  elemental: number;
+  /** Brotato 的 Curse：越高敌人越强、掉落越好 */
+  curse: number;
   attackSpeedPct: number;
   critChance: number;
   range: number;
@@ -31,6 +35,8 @@ export const ZERO_STATS: Readonly<Stats> = {
   melee: 0,
   ranged: 0,
   toxin: 0,
+  elemental: 0,
+  curse: 0,
   attackSpeedPct: 0,
   critChance: 0,
   range: 0,
@@ -60,6 +66,8 @@ export const STAT_META: Record<keyof Stats, { label: string; pct: boolean }> = {
   melee: { label: '近战', pct: false },
   ranged: { label: '远程', pct: false },
   toxin: { label: '毒素', pct: false },
+  elemental: { label: '元素', pct: false },
+  curse: { label: '诅咒', pct: false },
   attackSpeedPct: { label: '攻速', pct: true },
   critChance: { label: '暴击', pct: true },
   range: { label: '射程', pct: false },

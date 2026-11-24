@@ -22,17 +22,17 @@ import {
   weaponSellValue,
   type Offer,
 } from '../core/shop';
-import { activeSets, SET_THRESHOLDS, SETS, tagCounts } from '../core/sets';
+import { activeSets, classCounts, SET_THRESHOLDS, SETS } from '../core/sets';
 import { formatStat, formatStatDelta, STAT_META } from '../core/stats';
 import { ITEMS, type ItemDef } from '../data/items';
 import { TIER_ROMAN, weaponTex } from '../art/icons';
 import { SPRITE_RES } from '../art/draw';
-import { TIERS, WEAPONS, type WeaponTag } from '../data/weapons';
+import { CLASS_LABEL, TIERS, WEAPONS, type WeaponClass } from '../data/weapons';
 import { createButton, drawKeycap } from '../ui/Button';
 import { setupUICamera } from '../ui/camera';
 import {
   COLOR,
-  TAG_STYLE,
+  CLASS_STYLE,
   cardTitle,
   displayLabel,
   divider,
@@ -475,21 +475,21 @@ export class IntermissionScene extends Phaser.Scene {
   }
 
   private setLines(root: Container): void {
-    const counts = [...tagCounts(this.run.weapons)];
-    const active = new Map(activeSets(this.run.weapons).map((a) => [a.tag, a]));
+    const counts = [...classCounts(this.run.weapons)];
+    const active = new Map(activeSets(this.run.weapons).map((a) => [a.cls, a]));
     const rowH = PHONE ? 26 : 24;
     const maxRows = Math.floor((H - 8 - (LOW_Y + 118)) / rowH);
     const twoCols = counts.length > maxRows;
     const colW = (586 - 16 - CARD_X0) / 2;
-    counts.forEach(([tag, count], i) => {
+    counts.forEach(([cls, count], i) => {
       const col = twoCols ? Math.floor(i / Math.ceil(counts.length / 2)) : 0;
       const row = twoCols ? i % Math.ceil(counts.length / 2) : i;
       const x = CARD_X0 + col * colW;
       const y = LOW_Y + 118 + row * rowH;
-      const on = active.get(tag);
+      const on = active.get(cls);
       const next = SET_THRESHOLDS.find((n) => n > count);
-      const ts = TAG_STYLE[tag];
-      const tagPill = pill(this, x + 28, y + 10, `${tag}×${count}`, ts.bg, ts.border, ts.text, 12, 8, 20);
+      const ts = CLASS_STYLE[cls];
+      const tagPill = pill(this, x + 28, y + 10, `${CLASS_LABEL[cls]}×${count}`, ts.bg, ts.border, ts.text, 12, 8, 20);
       tagPill.x = x + tagPill.width / 2;
       root.add(tagPill);
 
@@ -497,7 +497,7 @@ export class IntermissionScene extends Phaser.Scene {
       if (twoCols) {
         info = on ? on.level.text : next ? `${next} 把生效` : '';
       } else {
-        const nextText = next ? `（${next}把：${SETS[tag][SET_THRESHOLDS.indexOf(next as 2 | 4 | 6)].text}）` : '';
+        const nextText = next ? `（${next}把：${SETS[cls][SET_THRESHOLDS.indexOf(next as 2 | 3 | 4 | 5 | 6)].text}）` : '';
         info = on ? `${on.level.text}${nextText}` : nextText.replace(/^（|）$/g, '');
       }
       const t = label(this, x + tagPill.width + 8, y + 10, info, twoCols ? 13 : 14, on ? COLOR.good : COLOR.dim).setOrigin(0, 0.5);
@@ -548,7 +548,7 @@ export class IntermissionScene extends Phaser.Scene {
     title: string,
     typeLine: string,
     lines: Line[],
-    tags?: WeaponTag[],
+    classes?: WeaponClass[],
     weaponTier?: number,
   ): void {
     const t = TIERS[tier];
@@ -570,11 +570,11 @@ export class IntermissionScene extends Phaser.Scene {
     root.add(label(this, tx, CARD_Y + 56, typeLine, 12, COLOR.dim).setOrigin(0, 0.5));
 
     let bodyY = CARD_Y + 92;
-    if (tags && tags.length > 0) {
+    if (classes && classes.length > 0) {
       let px = x + 14;
-      for (const tg of tags) {
-        const ts = TAG_STYLE[tg];
-        const p = pill(this, px, bodyY + 12, tg, ts.bg, ts.border, ts.text, 11, 8, 19);
+      for (const cls of classes) {
+        const ts = CLASS_STYLE[cls];
+        const p = pill(this, px, bodyY + 12, CLASS_LABEL[cls], ts.bg, ts.border, ts.text, 11, 8, 19);
         p.x = px + p.width / 2;
         root.add(p);
         px += p.width + 6;
@@ -583,7 +583,7 @@ export class IntermissionScene extends Phaser.Scene {
     }
 
     root.add(divider(this, x + 14, bodyY, CARD_W - 28, COLOR.border, 0.5));
-    const isItem = !tags || tags.length === 0;
+    const isItem = !classes || classes.length === 0;
     layoutLines(this, root, x + 14, bodyY + (isItem ? 12 : 8), lines, isItem ? 15 : 14, CARD_W - 28, isItem ? 6 : 3, 0);
   }
 
@@ -599,7 +599,7 @@ export class IntermissionScene extends Phaser.Scene {
       title,
       weaponTypeLine(def, tier),
       weaponLines(def, tier, this.run.stats, this.run.mods),
-      def.tags,
+      def.classes,
       tier,
     );
   }
@@ -645,9 +645,9 @@ export class IntermissionScene extends Phaser.Scene {
       c.add(cardTitle(this, cx, y + 130, wTitle, 24, tier.css).setOrigin(0.5));
       c.add(label(this, cx, y + 156, weaponTypeLine(def, w.tier), 15, COLOR.dim).setOrigin(0.5));
 
-      const pills = def.tags.map((tg) => {
-        const ts = TAG_STYLE[tg];
-        return pill(this, 0, y + 182, tg, ts.bg, ts.border, ts.text, 12, 10, 22);
+      const pills = def.classes.map((cls) => {
+        const ts = CLASS_STYLE[cls];
+        return pill(this, 0, y + 182, CLASS_LABEL[cls], ts.bg, ts.border, ts.text, 12, 10, 22);
       });
       const total = pills.reduce((acc, p) => acc + p.width, 0) + 8 * (pills.length - 1);
       let px = cx - total / 2;

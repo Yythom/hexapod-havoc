@@ -20,6 +20,8 @@ import { M6_ITEM_ICONS } from './itemIconsM6';
 import { WEAPON_ICONS } from './weaponIcons';
 import { M6_WEAPON_ICONS } from './weaponIconsM6';
 import { GUN_WEAPON_ICONS } from './weaponIconsGuns';
+import { drawGenericWeaponIcon } from './weaponIconsGeneric';
+import { SHOP_WEAPONS } from '../data/weapons';
 
 export const TIER_ROMAN = ['I', 'II', 'III', 'IV'] as const;
 /** 界面大图武器贴图倍率（桌面端 5x 供商店槽与主菜单巨型展示无锯齿） */
@@ -224,6 +226,15 @@ export function generateIcons(scene: Phaser.Scene): void {
     for (let tier = 0; tier <= 3; tier++) {
       bakeWeaponVariant(scene, weaponTex(key, tier, false), draw, SPRITE_RES, tier, 0);
       bakeWeaponVariant(scene, weaponTex(key, tier, true), draw, UI_WEAPON_RES, tier, 2);
+    }
+  }
+  // Brotato 对齐武器：没有手绘图时按 shape/color 程序化生成
+  for (const w of SHOP_WEAPONS) {
+    if (scene.textures.exists(weaponTex(w.icon, 0, false))) continue;
+    const draw = drawGenericWeaponIcon(w.iconShape ?? 'blade', w.iconColor ?? '#c8c0a8');
+    for (let tier = 0; tier <= 3; tier++) {
+      bakeWeaponVariant(scene, weaponTex(w.icon, tier, false), draw, SPRITE_RES, tier, 0);
+      bakeWeaponVariant(scene, weaponTex(w.icon, tier, true), draw, UI_WEAPON_RES, tier, 2);
     }
   }
   for (const [id, draw] of Object.entries({ ...ITEM_ICONS, ...M6_ITEM_ICONS })) bakeShadedItem(scene, `i-${id}`, 48, 48, draw, SPRITE_RES);
