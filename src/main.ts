@@ -8,6 +8,7 @@ import { bgm } from './audio/bgm';
 import { sfx } from './audio/sfx';
 import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE } from './config';
 import { touchMove } from './core/input';
+import { initPwa } from './core/pwa';
 import { getSettings, useSettingsStore } from './core/settings';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
@@ -30,6 +31,7 @@ factory.text = function (this: Phaser.GameObjects.GameObjectFactory, x, y, text,
 const initSettings = getSettings();
 sfx.init(initSettings.volume);
 bgm.init(initSettings.bgm, initSettings.volume);
+initPwa();
 // 订阅 Zustand 设置 Store：任意位置修改音量/BGM（含跨标签页同步）自动联动音频引擎
 useSettingsStore.subscribe((next, prev) => {
   if (next.volume !== prev.volume) {
@@ -51,7 +53,7 @@ async function preloadFonts(): Promise<void> {
       document.fonts.load('700 24px "Noto Sans SC"', '六足战虫商店属性伤害射程'),
     ]),
     new Promise<void>((resolve) => setTimeout(resolve, 2500)),
-  ]);
+  ]).catch(() => undefined); // 离线（PWA）时未缓存的字体切片会让 fonts.load 直接 reject，不能因此阻塞游戏启动
 }
 
 /**

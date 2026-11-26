@@ -5,6 +5,7 @@ import { sfx } from '../audio/sfx';
 import { DISPLAY_FONT, FONT_FAMILY, fontPx, GAME_HEIGHT, GAME_WIDTH, IS_COARSE_POINTER } from '../config';
 import { CHALLENGE_ORDER, CHALLENGES, type ChallengeId } from '../core/challenges';
 import { DAILY_MUTATORS, getDailyChallenge } from '../core/daily';
+import { hasNativeInstallPrompt, onPwaStateChange, triggerPwaInstall } from '../core/pwa';
 import { getDailyBest, loadActiveRun, loadSave } from '../core/save';
 import { decodeSeedChallenge, generateSeed, normalizeSeed, type SeedChallengePayload } from '../core/seed';
 import { BIOMES, DEFAULT_BIOME } from '../data/biomes';
@@ -435,6 +436,33 @@ export class MenuScene extends Phaser.Scene {
       .text(W - 22, H - 18, 'v0.5', { fontFamily: FONT_FAMILY, fontSize: '14px', fontStyle: 'bold', color: '#787a84' })
       .setOrigin(1, 1)
       .setDepth(30);
+
+    // 8. 若浏览器触发了原生 PWA 安装条件，在主菜单右上角展示轻巧的「安装应用」快捷按钮
+    let installBtn: Phaser.GameObjects.Container | null = null;
+    const syncInstallBtn = () => {
+      if (!this.scene.isActive()) return;
+      if (hasNativeInstallPrompt() && !installBtn) {
+        installBtn = createButton(
+          this,
+          W - 88,
+          36,
+          '📲 安装应用',
+          () => {
+            void triggerPwaInstall().then((res) => {
+              if (res === 'accepted') sfx.play('unlock');
+              syncInstallBtn();
+            });
+          },
+          { width: 132, height: 38, fontSize: 14, primary: false, shape: 'slant', variant: 'emerald' },
+        ).setDepth(35);
+      } else if (!hasNativeInstallPrompt() && installBtn) {
+        installBtn.destroy();
+        installBtn = null;
+      }
+    };
+    syncInstallBtn();
+    const unsubPwa = onPwaStateChange(syncInstallBtn);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubPwa);
 
     const keyboardStart = () => {
       if (this.modal) return;

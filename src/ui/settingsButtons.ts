@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
+import { canInstallPwa, isStandalonePwa, triggerPwaInstall } from '../core/pwa';
 import { exportSaveCode, importSaveCode } from '../core/save';
 import {
   cameraZoomLabel,
@@ -116,10 +117,14 @@ export function addSettingsButtons(
 
     if (options?.showSaveTransfer) {
       const rowY3 = y + 168;
+      const showPwaBtn = canInstallPwa();
+      const btnW = showPwaBtn ? 162 : 240;
+      const exportX = showPwaBtn ? cx - stepX : cx - 128;
+      const importX = showPwaBtn ? cx : cx + 128;
       group.add([
         createButton(
           scene,
-          cx - 128,
+          exportX,
           rowY3,
           '导出存档码',
           () => {
@@ -138,11 +143,11 @@ export function addSettingsButtons(
               window.prompt('请手动复制以下存档码：', code);
             }
           },
-          { width: 240, height: 42, fontSize: 16, primary: false },
+          { width: btnW, height: 42, fontSize: 16, primary: false },
         ),
         createButton(
           scene,
-          cx + 128,
+          importX,
           rowY3,
           '导入存档码',
           () => {
@@ -158,9 +163,33 @@ export function addSettingsButtons(
               build();
             }
           },
-          { width: 240, height: 42, fontSize: 16, primary: false },
+          { width: btnW, height: 42, fontSize: 16, primary: false },
         ),
       ]);
+      if (showPwaBtn) {
+        group.add(
+          createButton(
+            scene,
+            cx + stepX,
+            rowY3,
+            '📲 安装应用',
+            () => {
+              void triggerPwaInstall().then((res) => {
+                if (res === 'accepted') {
+                  transferMsg = '已安装到设备桌面，支持全屏离线畅玩！';
+                  sfx.play('unlock');
+                } else if (res === 'ios-guide') {
+                  transferMsg = 'iOS 请点浏览器「分享」→「添加到主屏幕」';
+                }
+                build();
+              });
+            },
+            { width: btnW, height: 42, fontSize: 16, primary: false, variant: 'emerald' },
+          ),
+        );
+      } else if (isStandalonePwa() && !transferMsg) {
+        transferMsg = '★ 当前已处于 PWA 独立全屏应用模式（支持离线游玩）';
+      }
       if (transferMsg) {
         group.add(
           scene.add
