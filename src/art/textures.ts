@@ -20,6 +20,7 @@ import {
 import { generateCreatures } from './creatures';
 import { generateIcons } from './icons';
 import { generateUIArt } from './uiArt';
+import { generateVfxTextures } from './vfxTextures';
 
 /**
  * 所有贴图都在启动时用 Canvas 2D 代码绘制，不依赖外部素材。
@@ -40,6 +41,7 @@ export function generateTextures(scene: Phaser.Scene): void {
   ground(scene);
   generateM6Art(scene);
   generateUIArt(scene);
+  generateVfxTextures(scene);
 }
 
 /** 甲虫角色的外壳配色和特征（非甲虫角色的身体在 m6Art.ts） */

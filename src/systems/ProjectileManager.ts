@@ -98,17 +98,13 @@ export class ProjectileManager {
   private readonly buf: Enemy[] = [];
   private readonly aoeBuf: Enemy[] = [];
   private readonly bounceBuf: Enemy[] = [];
-  /** 新月穿透剑气波图形层（1:1 渲染真实剑气宽度） */
-  private readonly waveG: Phaser.GameObjects.Graphics;
 
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly fx: Effects,
     private readonly hazards: Hazards,
     private readonly resolver: HitResolver,
-  ) {
-    this.waveG = scene.add.graphics().setDepth(DEPTH.projectile + 1);
-  }
+  ) {}
 
   fire(o: FireOptions): void {
     const scale0 = (o.crit ? 1.3 : 1) / SPRITE_RES;
@@ -150,11 +146,26 @@ export class ProjectileManager {
       p.tripsLeft = o.trips ?? 0;
       p.bouncesLeft = o.bounce?.times ?? 0;
       p.hasPierce = o.pierce > 0;
-      p.sprite.setTexture(o.texture).setPosition(o.x, o.y).setRotation(o.angle).setScale(scale0).setAlpha(1).setVisible(!isWave);
+      p.sprite
+        .setTexture(isWave ? 'fx-blade-wave' : o.texture)
+        .setPosition(o.x, o.y)
+        .setRotation(o.angle)
+        .setScale(isWave ? (o.radius * 2.2) / 128 : scale0)
+        .setAlpha(1)
+        .setVisible(true);
+      if (isWave && o.waveColor !== undefined) p.sprite.setTint(o.waveColor);
+      else p.sprite.clearTint();
       this.list.push(p);
       return;
     }
-    const sprite = this.scene.add.image(o.x, o.y, o.texture).setDepth(DEPTH.projectile).setRotation(o.angle).setScale(scale0).setAlpha(1).setVisible(!isWave);
+    const sprite = this.scene.add
+      .image(o.x, o.y, isWave ? 'fx-blade-wave' : o.texture)
+      .setDepth(DEPTH.projectile)
+      .setRotation(o.angle)
+      .setScale(isWave ? (o.radius * 2.2) / 128 : scale0)
+      .setAlpha(1)
+      .setVisible(true);
+    if (isWave && o.waveColor !== undefined) sprite.setTint(o.waveColor);
     this.list.push({
       ...o,
       sprite,
@@ -176,7 +187,6 @@ export class ProjectileManager {
 
   /** px/py：玩家位置（回旋叶刃要飞回来） */
   update(dt: number, enemies: EnemyManager, px: number, py: number): void {
-    this.waveG.clear();
     // 爆炸 6 件套二次余震结算
     for (let i = this.aftershocks.length - 1; i >= 0; i--) {
       const a = this.aftershocks[i];
@@ -236,26 +246,11 @@ export class ProjectileManager {
       if (p.x < 0 || p.y < 0 || p.x > WORLD_WIDTH || p.y > WORLD_HEIGHT) dead = true;
       p.sprite.setPosition(p.x, p.y);
       if (p.spin !== 0) p.sprite.rotation += dt * p.spin;
-      // 轻量高速弹道线（穿透子弹拖尾更粗更亮，单体子弹在命中点截断绝不画穿目标）
-      if (!p.fade && !p.cloud) {
-        const moved2 = (p.x - p.prevX) * (p.x - p.prevX) + (p.y - p.prevY) * (p.y - p.prevY);
-        if (moved2 > 4) {
-          const tier = p.src?.tier ?? 0;
-          const style = tracerStyle(p.texture, p.crit, tier);
-          if (style) {
-            const pMul = p.hasPierce ? 1.28 : 1;
-            const lMul = p.hasPierce ? 1.45 : 1;
-            this.fx.tracer(p.prevX, p.prevY, p.x, p.y, p.waveColor ?? style.color, style.width * pMul, style.life * lMul);
-          }
-        }
-      }
       if (p.waveColor !== undefined && !dead) {
-        // 新月穿透剑气波：严格按真实碰撞半径 p.radius 画出飞驰月牙弧刃
-        this.drawBladeWave(p);
+        const alpha = Math.min(1, 1.15 - (p.traveled / Math.max(1, p.maxDist)) * 0.55);
+        p.sprite.setAlpha(alpha);
       } else if (p.texture === 'rocketproj') {
-        if (Math.random() < dt * 22) this.fx.smoke(p.x - p.dirX * 10, p.y - p.dirY * 10, Math.atan2(-p.dirY, -p.dirX), 1, 0xd4ccc2);
-      } else if (p.texture === 'dungball' && Math.random() < dt * 12) {
-        this.fx.burst(p.x, p.y, 0xa8824c, 1, 35, 0.55, false);
+        if (Math.random() < dt * 16) this.fx.smoke(p.x - p.dirX * 10, p.y - p.dirY * 10, Math.atan2(-p.dirY, -p.dirX), 1, 0xd4ccc2);
       }
       const k = Math.min(1, p.traveled / p.maxDist);
       if (p.cloud) {
@@ -272,44 +267,8 @@ export class ProjectileManager {
   }
 
   clear(): void {
-    this.waveG.clear();
     this.aftershocks.length = 0;
     for (let i = this.list.length - 1; i >= 0; i--) this.release(i);
-  }
-
-  /** 绘制刀刃 6 件套穿透新月剑气波（宽幅弧刃 1:1 贴合真实判定半径 p.radius） */
-  private drawBladeWave(p: Projectile): void {
-    const g = this.waveG;
-    const ang = Math.atan2(p.dirY, p.dirX);
-    const col = p.waveColor!;
-    const r = p.radius * 1.15;
-    const cx = p.x - p.dirX * r * 0.45;
-    const cy = p.y - p.dirY * r * 0.45;
-    const halfArc = 1.05;
-    const alpha = Math.min(1, 1.15 - (p.traveled / Math.max(1, p.maxDist)) * 0.45);
-    const drawArc = (rad: number, thick: number, c: number, a: number) => {
-      const pts: { x: number; y: number }[] = [];
-      const segs = 12;
-      for (let i = 0; i <= segs; i++) {
-        const t = i / segs;
-        const th = ang - halfArc + halfArc * 2 * t;
-        const bulge = Math.sin(t * Math.PI);
-        const ro = rad + thick * 0.45 * bulge;
-        pts.push({ x: cx + Math.cos(th) * ro, y: cy + Math.sin(th) * ro });
-      }
-      for (let i = segs; i >= 0; i--) {
-        const t = i / segs;
-        const th = ang - halfArc + halfArc * 2 * t;
-        const bulge = Math.sin(t * Math.PI);
-        const ri = rad - thick * 0.65 * bulge;
-        pts.push({ x: cx + Math.cos(th) * ri, y: cy + Math.sin(th) * ri });
-      }
-      g.fillStyle(c, a);
-      g.fillPoints(pts, true);
-    };
-    drawArc(r, 15, 0x050507, 0.72 * alpha);
-    drawArc(r, 11.5, col, 0.92 * alpha);
-    drawArc(r + 1.5, 5.2, 0xffffff, 0.96 * alpha);
   }
 
   /** 回旋叶刃接回来后，如果还有趟数，再朝最近的怪飞出去 */
@@ -340,28 +299,13 @@ export class ProjectileManager {
       if (p.split) this.spawnSplits(p, e);
       if (p.bouncesLeft > 0) {
         const bounced = this.bounce(p, e, enemies);
-        if (!bounced) {
-          p.x = e.x - p.dirX * e.radius * 0.45;
-          p.y = e.y - p.dirY * e.radius * 0.45;
-          this.fx.bulletImpact(p.x, p.y, Math.atan2(p.dirY, p.dirX), p.waveColor ?? 0xffe498);
-        }
         return !bounced;
       }
       if (p.pierce <= 0) {
-        // 单体子弹（或穿透已耗尽）：精准停在命中表面并播干脆收敛火花，立刻销毁消失
-        const hitAng = Math.atan2(p.dirY, p.dirX);
-        p.x = e.x - p.dirX * e.radius * 0.45;
-        p.y = e.y - p.dirY * e.radius * 0.45;
-        if (!p.fade) this.fx.bulletImpact(p.x, p.y, hitAng, p.waveColor ?? 0xffe498);
+        // 单体子弹（或穿透已耗尽）：直接命中消失，不播放额外火花特效
         return true;
       }
-      // 真正发生穿透：在目标背后喷出清晰的定向穿透破空线，让玩家一眼识别“穿过去了”
       p.pierce--;
-      if (!p.fade && p.waveColor === undefined) {
-        const hitAng = Math.atan2(p.dirY, p.dirX);
-        const col = p.texture === 'laserbolt' ? 0x5cf6ff : p.texture === 'frostshot' ? 0x9ceeff : 0xfff0a8;
-        this.fx.pierceBreak(e.x, e.y, hitAng, col);
-      }
     }
     return false;
   }
@@ -380,9 +324,6 @@ export class ProjectileManager {
       }
     }
     if (!best) return false;
-    // 清晰绘制弹跳折线轨迹与弹跳星爆，让弹跳连击一目了然
-    this.fx.tracer(from.x, from.y, best.x, best.y, 0xffe878, 2.6, 0.14);
-    this.fx.star(from.x, from.y, 13, 0xffe468);
     p.bouncesLeft--;
     p.damage = Math.max(1, Math.round(p.damage * (1 - b.falloff)));
     const a = Math.atan2(best.y - p.y, best.x - p.x);
@@ -426,12 +367,6 @@ export class ProjectileManager {
   private strike(p: Projectile, e: Enemy, enemies: EnemyManager): void {
     if (p.poison) {
       enemies.applyPoison(e, p.poison.stacks, p.poison.perStack, p.poison.duration);
-      this.fx.poisonBubbles(e.x, e.y, 2);
-    }
-    if (p.texture === 'honeyblob') {
-      this.fx.burst(p.x, p.y, 0xffd040, 3, 95, 0.6, false);
-    } else if (p.texture === 'laserbolt') {
-      this.fx.burst(p.x, p.y, 0x38f2ff, 2, 90, 0.55, false);
     }
     if (p.crit && p.src) {
       const sp = p.src.def.special;
@@ -489,29 +424,5 @@ export class ProjectileManager {
     p.waveColor = undefined;
     p.hasPierce = false;
     this.pool.push(p);
-  }
-}
-
-function tracerStyle(texture: string, crit: boolean, tier: number): { color: number; width: number; life: number } | null {
-  const boost = (crit ? 0.35 : 0) + tier * 0.12;
-  switch (texture) {
-    case 'bullet':
-    case 'turretshot':
-      return { color: 0xffe8a8, width: 1.5 + boost, life: 0.055 };
-    case 'pellet':
-      return { color: 0xffdf94, width: 1.3 + boost * 0.5, life: 0.045 };
-    case 'heavybullet':
-      return { color: 0xffd068, width: 2.2 + boost, life: 0.07 };
-    case 'laserbolt':
-      return { color: 0x38f2ff, width: 2.2 + boost, life: 0.075 };
-    case 'sparkbolt':
-      return { color: 0xffe468, width: 1.6 + boost, life: 0.055 };
-    case 'frostshot':
-      return { color: 0x9ceeff, width: 1.7 + boost, life: 0.06 };
-    case 'rocketproj':
-      return { color: 0xff9a48, width: 2.2 + boost, life: 0.065 };
-    // 石子/种子/针刺/飞叶/蜂蜜球等实体投射物凭自身贴图飞行即可，不画多余拖尾光
-    default:
-      return null;
   }
 }

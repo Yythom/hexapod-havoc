@@ -10,7 +10,7 @@ import type { Mods } from '../data/items';
 import { tierOf, WEAPONS, type WeaponDef } from '../data/weapons';
 import { MAX_SLOTS } from '../entities/BeetleView';
 import type { Player } from '../entities/Player';
-import type { Effects } from './Effects';
+import type { BashVariant, Effects, SlashVariant } from './Effects';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Hazards } from './Hazards';
 import type { HitResolver, HitSource } from './HitResolver';
@@ -75,6 +75,10 @@ interface Slot {
   swing: number;
   swingTotal: number;
   reach: number;
+  /** 本次攻击对应的真实武器攻击范围上限（特效绝不越界） */
+  maxRange: number;
+  /** 本次挥击是否已触发过“命中目标时”的范围特效 */
+  aoeFxFired: boolean;
   lastExt: number;
   lastAng: number;
   damage: number;
@@ -149,6 +153,8 @@ export class WeaponSystem {
         swing: 0,
         swingTotal: SWING_TIME,
         reach: 0,
+        maxRange: 0,
+        aoeFxFired: false,
         lastExt: 0,
         lastAng: 0,
         damage: 0,
@@ -638,7 +644,6 @@ export class WeaponSystem {
             }
           : d.src,
       });
-      this.fx?.spark(mx, my, isLaser ? 0x38f2ff : isFrost ? 0x7ce8ff : 0xffd890, 2);
       sfx.play(isLaser ? 'zap' : 'shoot');
     }
   }
@@ -682,6 +687,8 @@ export class WeaponSystem {
     const sweep = style === 'sweep';
     s.damage = damage;
     s.crit = crit;
+    s.maxRange = range;
+    s.aoeFxFired = false;
     s.reach = Math.min(MAX_SCREEN_RANGE, (sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range)) * (1 + 0.06 * s.tier));
     s.swingTotal = Math.min(sweep ? SWEEP_TIME : style === 'flurry' ? SWING_TIME * 0.65 : SWING_TIME, interval * 0.8);
     s.swing = s.swingTotal;
@@ -709,84 +716,29 @@ export class WeaponSystem {
   private emitMeleeFx(s: Slot, tx: number, ty: number): void {
     const fx = this.fx;
     if (!fx) return;
-    const melee = s.def.melee!;
+    const def = s.def;
+    const melee = def.melee!;
+    // 单体近战（直刺/连刺/钳咬/突刺）不画额外特效；范围砸击（bash）改在命中目标瞬间触发；
+    // 只有范围横扫（sweep）画出严格限制在武器攻击半径内的挥砍弧迹
+    if (melee.style !== 'sweep') return;
     const tier = s.tier;
+    const enchant = s.owned?.enchant;
     const hitR = this.meleeHitRadius(melee, tier);
-    const critCol = 0xffe078;
-    const dx = Math.cos(s.aim);
-    const dy = Math.sin(s.aim);
-    switch (melee.style) {
-      case 'sweep': {
-        const col = s.crit ? critCol : 0xd8f8c8;
-        fx.slash(tx, ty, s.reach * 0.85 + hitR * 0.25, s.aim, melee.arc ?? 1, col, tier);
-        break;
-      }
-      case 'snap': {
-        const col = s.crit ? critCol : 0xffe4a8;
-        fx.chomp(tx, ty, s.aim, s.reach + hitR * 0.25, col, tier);
-        break;
-      }
-      case 'bash': {
-        fx.bash(tx, ty, s.aim, melee.arc ?? 0.85, s.reach * 0.72 + hitR * 0.55, s.crit ? critCol : 0xa8e4ff, tier);
-        break;
-      }
-      case 'charge': {
-        // 长角 / 长枪等突刺：克制的单道细淡破风线，由武器实体动作唱主角，不画激光柱
-        const sx = tx + dx * Math.min(18, s.reach * 0.2);
-        const sy = ty + dy * Math.min(18, s.reach * 0.2);
-        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xfff2d8, Math.min(7, hitR * 0.42), tier);
-        break;
-      }
-      case 'flurry': {
-        const col = s.crit ? critCol : 0xe4ffc8;
-        for (const off of [-0.07, 0.07]) {
-          const a = s.aim + off;
-          const r = s.reach * 0.94;
-          fx.thrust(tx + Math.cos(a) * 10, ty + Math.sin(a) * 10, tx + Math.cos(a) * r, ty + Math.sin(a) * r, col, 4.2, tier);
-        }
-        break;
-      }
-      case 'pierce': {
-        const sx = tx + dx * 12;
-        const sy = ty + dy * 12;
-        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xe8b8ff, Math.min(6.5, hitR * 0.42), tier);
-        break;
-      }
-      default: {
-        // 普通直刺：极简淡白风痕
-        const sx = tx + dx * 10;
-        const sy = ty + dy * 10;
-        fx.thrust(sx, sy, tx + dx * s.reach, ty + dy * s.reach, s.crit ? critCol : 0xfff2dc, Math.min(6, hitR * 0.38), tier);
-      }
-    }
+    const col = meleeColor(def, enchant, s.crit);
+    const maxR = Math.min(s.maxRange, s.reach * 0.85 + hitR * 0.75);
+    const variant = slashVariantOf(def, enchant);
+    fx.slash(tx, ty, maxR, s.aim, melee.arc ?? 1, col, tier, variant);
   }
 
   private emitShotFx(s: Slot, tx: number, ty: number): void {
     const fx = this.fx;
     if (!fx) return;
-    const tier = s.tier;
-    const col = sparkColor(s.def);
     const proj = s.def.projectile;
-    const isGun = s.def.classes.includes('Gun');
-    const isLaser = s.def.id === 'laser-gun' || proj?.texture === 'laserbolt';
-    const isHeavySmoke = (proj?.count ?? 1) >= 4 || (proj?.explode ?? 0) > 0 || s.def.classes.includes('Explosive') || (isGun && s.def.classes.includes('Heavy'));
-    if (isLaser) {
-      fx.muzzle(tx, ty, s.aim, 0x38f2ff, 12, 1, tier);
-    } else if (isGun) {
-      const heavy = isHeavySmoke || tierOf(s.def, tier).damage >= 16;
-      fx.muzzle(tx, ty, s.aim, col, heavy ? 13 : 9, heavy ? 2 : 1, tier);
-      // 枪械侧向抛壳（非纯能量/喷火类）
-      if (!proj?.fade) {
-        const ejectSide = Math.cos(s.aim) < 0 ? 1 : -1;
-        fx.shellCasing(tx, ty, s.aim + ejectSide * (Math.PI * 0.56));
-      }
-      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, (proj?.explode ?? 0) > 0 ? 2 : 1);
-    } else if (s.def.classes.includes('Elemental') || s.def.onHit?.burn) {
-      if (isHeavySmoke) fx.smoke(tx, ty, s.aim, 1, 0xd8c8b8);
-    } else if (isHeavySmoke) {
-      fx.smoke(tx, ty, s.aim, 1);
+    // 单体远程射击不播枪口闪光/烟雾特效；仅枪械保留极简物理抛壳
+    if (s.def.classes.includes('Gun') && !proj?.fade) {
+      const ejectSide = Math.cos(s.aim) < 0 ? 1 : -1;
+      fx.shellCasing(tx, ty, s.aim + ejectSide * (Math.PI * 0.56));
     }
-    // 弹弓/弓箭/吹箭/石子/投矛等物理投掷物直接凭武器后坐力与弹体本体表现，不再喷多余闪光粒子
   }
 
   private updateSwing(s: Slot, slot: number, tipX: number, tipY: number, dt: number, mods: Mods): void {
@@ -815,12 +767,12 @@ export class WeaponSystem {
         const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
         for (let k = 1; k <= steps; k++) {
           const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
-          for (const f of [0.52, 1]) this.strikeAt(s, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
+          for (const f of [0.52, 1]) this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
         }
         s.lastAng = ang;
       }
     } else if (melee.style === 'bash') {
-      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人（半径与 fx.bash 1:1 对齐）
+      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人（命中目标时再触发与攻击范围 1:1 对齐的震击特效）
       view.setWeaponAim(slot, s.aim);
       if (t < windup) {
         const wk = t / windup;
@@ -834,7 +786,7 @@ export class WeaponSystem {
           const arc = melee.arc ?? 0.85;
           for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
             const a = s.aim + aOff;
-            this.strikeAt(s, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb, a);
+            this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb, a);
           }
         }
         s.lastExt = Math.max(s.lastExt, ext);
@@ -856,7 +808,7 @@ export class WeaponSystem {
           const steps = Math.max(1, Math.ceil((ext - s.lastExt) / SWEEP_STEP));
           for (let k = 1; k <= steps; k++) {
             const e = s.lastExt + ((ext - s.lastExt) * k) / steps;
-            this.strikeAt(s, tipX + dx * e, tipY + dy * e, hitR, kb, s.aim);
+            this.strikeAt(s, tipX, tipY, tipX + dx * e, tipY + dy * e, hitR, kb, s.aim);
           }
         }
         s.lastExt = Math.max(s.lastExt, ext);
@@ -866,7 +818,8 @@ export class WeaponSystem {
   }
 
   /** 武器头扫过 (px,py) 时，命中范围内还没被这一击打过的敌人 */
-  private strikeAt(s: Slot, px: number, py: number, hitR: number, kb: number, strikeAng: number): void {
+  private strikeAt(s: Slot, tipX: number, tipY: number, px: number, py: number, hitR: number, kb: number, strikeAng: number): void {
+    const melee = s.def.melee!;
     for (const en of this.enemies.grid.query(px, py, hitR + MAX_ENEMY_RADIUS, this.buf)) {
       if (!en.active || s.hits.includes(en)) continue;
       const rr = hitR + en.radius;
@@ -874,22 +827,124 @@ export class WeaponSystem {
       const oy = en.y - py;
       if (ox * ox + oy * oy > rr * rr) continue;
       s.hits.push(en);
-      // 怪物本身已有受击闪白/挤压/击退反馈，仅暴击时补一记轻巧金白斩痕，避免普通命中满屏白光
-      if (s.crit) this.fx?.hitSlash(en.x, en.y, strikeAng, 0xffe468, 0.92);
+      // 仅范围性武器在实际命中目标的瞬间触发冲击/爆裂类特效，且严格限制在武器攻击范围内
+      if (!s.aoeFxFired) {
+        const enchant = s.owned?.enchant;
+        if (melee.style === 'bash') {
+          s.aoeFxFired = true;
+          const maxR = Math.min(s.maxRange, s.reach * 0.72 + hitR * 0.85);
+          const col = meleeColor(s.def, enchant, s.crit);
+          this.fx?.bash(tipX, tipY, s.aim, melee.arc ?? 0.85, maxR, col, s.tier, bashVariantOf(s.def, enchant));
+        } else if (melee.style === 'sweep') {
+          s.aoeFxFired = true;
+          const col = meleeColor(s.def, enchant, s.crit);
+          const distFromTip = Math.hypot(en.x - tipX, en.y - tipY);
+          const roomLeft = Math.max(8, s.maxRange - distFromTip);
+          this.fx?.sweepHitBurst(en.x, en.y, Math.min(hitR, roomLeft), strikeAng, col, slashVariantOf(s.def, enchant));
+        }
+      }
       const d = Math.hypot(en.x - this.player.x, en.y - this.player.y) || 1;
       this.resolver.hit(en, s.damage, s.crit, (en.x - this.player.x) / d, (en.y - this.player.y) / d, kb, s.src);
     }
   }
 }
 
-function sparkColor(def: WeaponDef): number {
-  if (def.id === 'laser-gun') return 0x6cf2ff;
-  if (def.classes.includes('Gun')) return 0xffcf54;
-  if (def.kind === 'toxin') return 0xb8ff58;
-  if (def.classes.includes('Elemental') || def.onHit?.burn) return 0xff8a30;
-  if (def.onHit?.freeze) return 0xbfefff;
-  if (def.classes.includes('Medical')) return 0xffc040;
-  return 0xffe6a0;
+function meleeColor(def: WeaponDef, enchant: OwnedWeapon['enchant'], crit: boolean): number {
+  if (crit) return 0xffd848;
+  if (enchant === 'ignite') return 0xff6e24;
+  if (enchant === 'frost') return 0x5ce8ff;
+  if (enchant === 'greed') return 0xffc838;
+  switch (def.id) {
+    case 'torch':
+    case 'plank':
+    case 'flaming-knuckles':
+      return 0xff6c24;
+    case 'light-saber':
+      return 0x2cf2ff;
+    case 'thunder-sword':
+    case 'lightning-shiv':
+      return 0x4cc8ff;
+    case 'plasma-sledge':
+      return 0x3ceeff;
+    case 'power-fist':
+    case 'dex-troyer':
+      return 0xff882c;
+    case 'scythe':
+    case 'ghost-axe':
+    case 'ghost-flint':
+      return 0x4af0c8;
+    case 'vorpal-sword':
+      return 0xc86bff;
+    case 'excalibur':
+      return 0xffd648;
+    case 'cacti-club':
+    case 'pruner':
+      return 0x6ce454;
+    case 'spiky-shield':
+      return 0x58c4ff;
+    case 'trident':
+      return 0x42d8f0;
+    case 'lute':
+      return 0xffd452;
+    case 'circular-saw':
+    case 'chainsaw':
+      return 0xff9a3c;
+    case 'whip':
+      return 0xf0a242;
+    case 'chopper':
+    case 'scissors':
+    case 'meat-tenderizer':
+    case 'sharp-tooth':
+      return 0xf26458;
+    case 'rock':
+    case 'brick':
+      return 0xd48a48;
+    case 'captains-sword':
+    case 'sickle':
+    case 'drill':
+    case 'thief-dagger':
+      return 0xffc442;
+    case 'claw':
+      return 0xffb844;
+    case 'knife':
+      return 0x6ae4ff;
+    case 'stick':
+      return 0xb4dc52;
+    case 'anchor':
+    case 'flail':
+      return 0x86b8e0;
+    case 'sword':
+      return 0x70ccff;
+  }
+  if (def.onHit?.burn) return 0xff7028;
+  if (def.onHit?.freeze) return 0x60e8ff;
+  if (def.onHit?.poison) return 0x8ce842;
+  if (def.classes.includes('Ethereal')) return 0x4af0c8;
+  if (def.classes.includes('Elemental')) return 0x4cc8ff;
+  if (def.classes.includes('Explosive')) return 0xff862c;
+  if (def.classes.includes('Legendary')) return 0xffd648;
+  if (def.classes.includes('Blade')) return 0x70ccff;
+  if (def.classes.includes('Blunt') || def.classes.includes('Heavy')) return 0xf09c48;
+  return 0xffbe54;
+}
+
+function slashVariantOf(def: WeaponDef, enchant: OwnedWeapon['enchant']): SlashVariant {
+  if (def.id === 'whip') return 'whip';
+  if (def.id === 'circular-saw') return 'saw';
+  if (def.id === 'excalibur') return 'holy';
+  if (def.id === 'torch' || def.id === 'plank' || def.onHit?.burn || enchant === 'ignite') return 'fire';
+  if (def.id === 'thunder-sword' || def.id === 'light-saber' || def.classes.includes('Elemental')) return 'electric';
+  if (def.id === 'scythe' || def.id === 'vorpal-sword' || def.classes.includes('Ethereal')) return 'ethereal';
+  if (def.id === 'anchor' || def.id === 'flail' || def.id === 'cacti-club' || def.id === 'shovel' || def.id === 'quarterstaff' || def.classes.includes('Heavy')) return 'heavy';
+  return 'blade';
+}
+
+function bashVariantOf(def: WeaponDef, enchant: OwnedWeapon['enchant']): BashVariant {
+  if (def.id === 'spiky-shield') return 'shield';
+  if (def.id === 'plasma-sledge') return 'plasma';
+  if (def.id === 'power-fist' || def.classes.includes('Explosive') || enchant === 'ignite') return 'explosive';
+  if (def.id === 'rock' || def.id === 'brick') return 'rock';
+  return 'slam';
 }
 
 function shotSound(def: WeaponDef) {

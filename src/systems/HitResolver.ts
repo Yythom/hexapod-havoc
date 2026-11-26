@@ -101,11 +101,6 @@ export class HitResolver {
       this.host.onHitstop?.(e.def.boss ? 0.07 : 0.042);
     }
     if (crit) {
-      // 暴击数字本身已足够醒目，仅在远程暴击时补一记小巧轻闪，不再满屏放星光
-      if (def.kind !== 'melee') {
-        const hitAng = Math.hypot(dirX, dirY) > 0.01 ? Math.atan2(dirY, dirX) : Math.random() * Math.PI;
-        this.fx?.hitSlash(x, y, hitAng, 0xffe468, 0.88);
-      }
       if (mods.critNova > 0) {
         const nr = 58;
         const ndmg = Math.max(1, Math.round(damage * 0.5));
@@ -128,7 +123,6 @@ export class HitResolver {
           const burnDps = damage * BURN_RATIO * (1 + mods.burnDamagePct);
           this.enemies.applyBurn(e, burnDps);
           this.host.onFireHit?.(x, y, burnDps);
-          this.fx?.burst(x, y, 0xff7828, 2, 95, 0.6);
         }
         if (fx.freeze) {
           this.enemies.applyFreeze(e, fx.freeze);
@@ -138,7 +132,6 @@ export class HitResolver {
         }
         if (fx.poison) {
           this.enemies.applyPoison(e, fx.poison, 1, 3 + this.host.mods.poisonDuration);
-          this.fx?.poisonBubbles(x, y, 2);
         }
         if (fx.slow) {
           this.enemies.applySlow(e, 2, Math.max(0.2, 1 - fx.slow));
@@ -171,7 +164,6 @@ export class HitResolver {
       const burnDps = damage * BURN_RATIO * 1.2 * (1 + mods.burnDamagePct);
       if (!killed) this.enemies.applyBurn(e, burnDps);
       this.host.onFireHit?.(x, y, burnDps);
-      this.fx?.burst(x, y, 0xff7828, 3, 100, 0.65);
     }
     if (!killed && enchant === 'frost') {
       this.enemies.applyFreeze(e, 1);
