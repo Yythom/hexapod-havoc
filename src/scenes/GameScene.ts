@@ -241,6 +241,8 @@ export class GameScene extends Phaser.Scene {
     this.padPauseDown = false;
     this.waveKillsById = {};
     touchMove.x = touchMove.y = 0;
+    touchMove.active = false;
+    touchMove.keyboardActive = false;
     if (resume) {
       this.run = RunState.restore(resume);
     } else {
@@ -617,7 +619,8 @@ export class GameScene extends Phaser.Scene {
     if (k.D.isDown || k.RIGHT.isDown) x += 1;
     if (k.W.isDown || k.UP.isDown) y -= 1;
     if (k.S.isDown || k.DOWN.isDown) y += 1;
-    if (x !== 0 || y !== 0) {
+    touchMove.keyboardActive = x !== 0 || y !== 0;
+    if (touchMove.keyboardActive) {
       const l = Math.hypot(x, y);
       return [x / l, y / l];
     }
@@ -1484,8 +1487,9 @@ export class GameScene extends Phaser.Scene {
   private resolveManualAim(): { x: number; y: number } | null {
     const g = this.reticle;
     g.clear();
-    if (IS_COARSE_POINTER) return null;
+    if (IS_COARSE_POINTER || touchMove.active) return null;
     const ptr = this.input.activePointer;
+    if (ptr.wasTouch) return null;
     const active = getSettings().manualAim || ptr.leftButtonDown();
     if (!active || (ptr.x === 0 && ptr.y === 0)) return null;
     this.cameras.main.getWorldPoint(ptr.x, ptr.y, this.aimWorld);
