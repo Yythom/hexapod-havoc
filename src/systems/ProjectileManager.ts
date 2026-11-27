@@ -6,6 +6,7 @@ import type { Effects } from './Effects';
 import { MAX_ENEMY_RADIUS, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Hazards } from './Hazards';
 import type { HitResolver, HitSource } from './HitResolver';
+import type { SnapProj } from '../net/protocol';
 
 export interface PoisonPayload {
   stacks: number;
@@ -409,6 +410,22 @@ export class ProjectileManager {
     const c = p.cloud!;
     this.hazards.addCloud(p.x, p.y, c.radius, c.time, c.damage, c.perStack, c.duration);
     this.fx.burst(p.x, p.y, 0x9ad040, 8, 120, 1);
+  }
+
+  snapshot(): SnapProj[] {
+    const out: SnapProj[] = [];
+    for (const p of this.list) {
+      out.push([
+        p.sprite.texture.key,
+        Math.round(p.x),
+        Math.round(p.y),
+        Math.round(p.sprite.rotation * 100) / 100,
+        Math.round(p.sprite.scaleX * 100) / 100,
+        Math.round(p.sprite.alpha * 100) / 100,
+        p.sprite.tintTopLeft ?? 0xffffff,
+      ]);
+    }
+    return out;
   }
 
   private release(i: number): void {

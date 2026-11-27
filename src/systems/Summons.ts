@@ -5,6 +5,7 @@ import { MAX_SCREEN_RANGE } from '../core/combat';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Effects } from './Effects';
 import type { HitResolver, HitSource } from './HitResolver';
+import type { SnapSprite } from '../net/protocol';
 
 /** 一组蚜虫（来自同一把蚜虫牧群），蚁后的工蚁也走这套 */
 export interface AphidGroup {
@@ -88,6 +89,30 @@ export class Summons {
     let n = this.moths.length;
     for (const a of this.list) if (a.alive) n++;
     return n;
+  }
+
+  snapshot(): SnapSprite[] {
+    const out: SnapSprite[] = [];
+    for (const a of this.list) {
+      if (!a.alive) continue;
+      out.push([
+        a.sprite.texture.key,
+        Math.round(a.x),
+        Math.round(a.y),
+        Math.round(a.sprite.rotation * 100) / 100,
+        Math.round(a.sprite.scaleX * 100) / 100,
+      ]);
+    }
+    for (const m of this.moths) {
+      out.push([
+        m.sprite.texture.key,
+        Math.round(m.x),
+        Math.round(m.y),
+        Math.round(m.sprite.rotation * 100) / 100,
+        Math.round(m.sprite.scaleX * 100) / 100,
+      ]);
+    }
+    return out;
   }
 
   update(dt: number, px: number, py: number, groups: AphidGroup[], mothGroups: MothGroup[], enemies: EnemyManager): void {

@@ -7,9 +7,11 @@ import { codexMilestones, loadSave } from '../core/save';
 import { BASE_STATS } from '../core/stats';
 import { ENEMIES, type EnemyDef } from '../data/enemies';
 import { ITEMS, ZERO_MODS, type ItemDef } from '../data/items';
+import { MECHANICS_GUIDE } from '../data/mechanicsGuide';
 import { CLASS_LABEL, KIND_LABEL, SHOP_WEAPONS, TIERS, type WeaponDef, type WeaponKind } from '../data/weapons';
 import { createButton } from '../ui/Button';
 import { fadeInScene, setupUICamera, transitionTo } from '../ui/camera';
+import { renderMechanicsCards } from '../ui/guideModal';
 import {
   CLASS_STYLE,
   COLOR,
@@ -28,7 +30,7 @@ import {
   weaponTypeLine,
 } from '../ui/widgets';
 
-type Tab = 'weapons' | 'items' | 'enemies';
+type Tab = 'weapons' | 'items' | 'enemies' | 'guide';
 
 const W = GAME_WIDTH;
 const H = GAME_HEIGHT;
@@ -71,9 +73,10 @@ const BEHAVIOR_DESC: Record<string, string> = {
   lootbug: '黄金盗宝虫：限时逃跑，击杀掉落宝箱与大量花蜜。',
 };
 
-/** 后院图鉴：浏览武器（95）、道具与虫敌，展示历史最高品阶/获得数/击杀数 */
+/** 后院图鉴：浏览武器（95）、道具、虫敌与核心机制速查 */
 export class CodexScene extends Phaser.Scene {
   private tab: Tab = 'weapons';
+  private initialTab: Tab = 'weapons';
   private weaponFilter: WeaponKind | 'all' = 'all';
   private page = 0;
   private root: Phaser.GameObjects.Container | null = null;
@@ -83,10 +86,14 @@ export class CodexScene extends Phaser.Scene {
     super('Codex');
   }
 
+  init(data?: { tab?: Tab }): void {
+    this.initialTab = data?.tab ?? 'weapons';
+  }
+
   create(): void {
     setupUICamera(this);
     bgm.setMode('menu');
-    this.tab = 'weapons';
+    this.tab = this.initialTab;
     this.weaponFilter = 'all';
     this.page = 0;
     this.root = null;
@@ -111,10 +118,12 @@ export class CodexScene extends Phaser.Scene {
   private currentTotal(): number {
     if (this.tab === 'weapons') return this.filteredWeapons().length;
     if (this.tab === 'items') return ITEM_LIST.length;
+    if (this.tab === 'guide') return MECHANICS_GUIDE.length;
     return CODEX_ENEMIES.length;
   }
 
   private pageCount(): number {
+    if (this.tab === 'guide') return MECHANICS_GUIDE.length;
     return Math.max(1, Math.ceil(this.currentTotal() / PER_PAGE));
   }
 
@@ -153,7 +162,9 @@ export class CodexScene extends Phaser.Scene {
         ? `已收录武器 ${seenW} / ${SHOP_WEAPONS.length}`
         : this.tab === 'items'
           ? `已收录道具 ${seenI} / ${ITEM_LIST.length}`
-          : `已击败虫敌 ${seenE} / ${CODEX_ENEMIES.length}`;
+          : this.tab === 'guide'
+            ? `机制速查 · 共 ${MECHANICS_GUIDE.length} 篇`
+            : `已击败虫敌 ${seenE} / ${CODEX_ENEMIES.length}`;
     const prog = pill(this, 0, 35, progText, COLOR.panelDeep, COLOR.gold, COLOR.goldText, 13, 12, 26);
     prog.x = 44 + title.width + 18 + prog.width / 2;
     root.add(prog);
@@ -167,18 +178,19 @@ export class CodexScene extends Phaser.Scene {
 
     root.add(createButton(this, W - 96, 35, '返回菜单', () => transitionTo(this, 'Menu'), { width: 138, height: 42, fontSize: 18, primary: false }));
 
-    // 三个分类标签页
+    // 四个分类标签页
     const tabs: { id: Tab; text: string }[] = [
       { id: 'weapons', text: `武器 (${seenW}/${SHOP_WEAPONS.length})` },
       { id: 'items', text: `道具 (${seenI}/${ITEM_LIST.length})` },
       { id: 'enemies', text: `虫敌 (${seenE}/${CODEX_ENEMIES.length})` },
+      { id: 'guide', text: '📖 机制速查' },
     ];
     tabs.forEach((t, idx) => {
       root.add(
-        createButton(this, 146 + idx * 214, 98, t.text, () => this.switchTab(t.id), {
-          width: 202,
+        createButton(this, 123 + idx * 166, 98, t.text, () => this.switchTab(t.id), {
+          width: 158,
           height: 40,
-          fontSize: 17,
+          fontSize: 15.5,
           primary: this.tab === t.id,
         }),
       );
@@ -200,7 +212,7 @@ export class CodexScene extends Phaser.Scene {
         root.add(
           createButton(
             this,
-            738 + idx * 92,
+            758 + idx * 88,
             98,
             f.text,
             () => {
@@ -210,7 +222,7 @@ export class CodexScene extends Phaser.Scene {
               sfx.play('click');
               this.render();
             },
-            { width: 84, height: 34, fontSize: 14, primary: active },
+            { width: 82, height: 34, fontSize: 14, primary: active },
           ),
         );
       });
@@ -219,6 +231,34 @@ export class CodexScene extends Phaser.Scene {
     } else if (this.tab === 'items') {
       const slice = ITEM_LIST.slice(start, start + PER_PAGE);
       slice.forEach((def, i) => this.renderItemCard(root, def, i, save.seenItems[def.id] ?? 0));
+    } else if (this.tab === 'guide') {
+      const activeIdx = Phaser.Math.Clamp(this.page, 0, MECHANICS_GUIDE.length - 1);
+      const activeGuide = MECHANICS_GUIDE[activeIdx];
+      MECHANICS_GUIDE.forEach((gTab, idx) => {
+        const active = idx === activeIdx;
+        root.add(
+          createButton(
+            this,
+            766 + idx * 100,
+            98,
+            gTab.label,
+            () => {
+              if (this.page === idx) return;
+              this.page = idx;
+              sfx.play('click');
+              this.render();
+            },
+            {
+              width: 94,
+              height: 34,
+              fontSize: 13.5,
+              primary: active,
+              accentColor: active ? undefined : gTab.accent,
+            },
+          ),
+        );
+      });
+      renderMechanicsCards(this, root, GRID_X0, GRID_Y0, W - GRID_X0 * 2, H - GRID_Y0 - 82, activeGuide.id);
     } else {
       const slice = CODEX_ENEMIES.slice(start, start + PER_PAGE);
       slice.forEach((def, i) => this.renderEnemyCard(root, def, i, save.enemyKills[def.id] ?? 0));
@@ -227,8 +267,12 @@ export class CodexScene extends Phaser.Scene {
     // 底部分页栏
     const pages = this.pageCount();
     const py = H - 44;
+    const isGuide = this.tab === 'guide';
+    const pageLabel = isGuide
+      ? `第 ${this.page + 1} / ${pages} 篇 · ${MECHANICS_GUIDE[this.page]?.label ?? ''}`
+      : `第 ${this.page + 1} / ${pages} 页`;
     root.add(
-      createButton(this, W / 2 - 140, py, '◀ 上一页', () => this.stepPage(-1), {
+      createButton(this, W / 2 - 156, py, isGuide ? '◀ 上一篇' : '◀ 上一页', () => this.stepPage(-1), {
         width: 136,
         height: 42,
         fontSize: 17,
@@ -236,9 +280,9 @@ export class CodexScene extends Phaser.Scene {
         disabled: this.page <= 0,
       }),
     );
-    root.add(label(this, W / 2, py, `第 ${this.page + 1} / ${pages} 页`, 17, COLOR.text, true).setOrigin(0.5));
+    root.add(label(this, W / 2, py, pageLabel, 17, COLOR.text, true).setOrigin(0.5));
     root.add(
-      createButton(this, W / 2 + 140, py, '下一页 ▶', () => this.stepPage(1), {
+      createButton(this, W / 2 + 156, py, isGuide ? '下一篇 ▶' : '下一页 ▶', () => this.stepPage(1), {
         width: 136,
         height: 42,
         fontSize: 17,

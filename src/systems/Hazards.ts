@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { DEPTH } from '../config';
+import type { SnapHazard } from '../net/protocol';
 import { MAX_ENEMY_RADIUS, type Enemy, type EnemyManager } from './EnemyManager';
 
 interface Zone {
@@ -68,6 +69,14 @@ export class Hazards {
         if (dmg >= 1) enemies.hit(e, dmg, false, 0, 0, 0, z.kind === 'cloud' ? 'poison' : 'normal');
       }
     }
+  }
+
+  snapshot(): SnapHazard[] {
+    const out: SnapHazard[] = [];
+    for (const z of this.list) {
+      out.push([z.kind === 'web' ? 1 : 0, Math.round(z.x), Math.round(z.y), Math.round(z.r), Math.round(z.sprite.alpha * 100) / 100]);
+    }
+    return out;
   }
 
   clear(): void {

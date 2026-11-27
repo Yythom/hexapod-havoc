@@ -7,6 +7,7 @@ import { ENEMIES, enemyDamage, enemyHp, enemySkillDamage, type EnemyDef } from '
 import type { Mods } from '../data/items';
 import type { Effects } from './Effects';
 import type { EnemyShotKind } from './EnemyShots';
+import type { SnapEnemy } from '../net/protocol';
 import { shake } from '../ui/camera';
 import { SpatialGrid } from './SpatialGrid';
 import type { Telegraphs } from './Telegraphs';
@@ -79,6 +80,14 @@ export interface EnemyHost {
   readonly enemySpeedMult?: number;
   /** 爆裂派对：气囊虫自爆/被击杀对周围敌群造成强力连锁伤害 */
   readonly boomParty?: boolean;
+  /** 双人联机：普通/精英与 Boss 的生命倍率 */
+  readonly coopHpMult?: number;
+  readonly coopBossHpMult?: number;
+  /** 双人联机：每次更新单只怪前，把 px/py/pr/hurtPlayer 切换到离 (x,y) 最近的存活玩家 */
+  selectTarget?(x: number, y: number): void;
+  /** 双人联机：范围技能同时检测所有存活玩家 */
+  hurtPlayersInCircle?(cx: number, cy: number, radius: number, damage: number): void;
+  hurtPlayersInSegment?(x0: number, y0: number, x1: number, y1: number, halfW: number, damage: number): void;
   /** 落雷劈中水洼导电回调 */
   onLightningStrike?(x: number, y: number, damage: number): void;
   /** 对玩家造成伤害（走闪避、甲壳、无敌时间） */
@@ -88,8 +97,11 @@ export interface EnemyHost {
 
 export type HitKind = 'normal' | 'poison' | 'burn';
 
+let nextEnemyUid = 1;
+
 export class Enemy {
   readonly sprite: Phaser.GameObjects.Image;
+  uid = 0;
   def!: EnemyDef;
   index = -1;
   hp = 0;
@@ -197,13 +209,49 @@ export class EnemyManager {
     return this.active.length;
   }
 
+  /** 联机快照：导出当前所有存活怪物的紧凑状态 */
+  snapshot(): SnapEnemy[] {
+    const out: SnapEnemy[] = [];
+    for (const e of this.active) {
+      if (!e.active) continue;
+      const flags =
+        (e.flash > 0 ? 1 : 0) |
+        (e.cursed ? 2 : 0) |
+        (e.buffed ? 4 : 0) |
+        (e.def.elite ? 8 : 0) |
+        (e.def.boss ? 16 : 0);
+      const status =
+        (e.poison > 0 ? 1 : 0) |
+        (e.burnTime > 0 ? 2 : 0) |
+        (e.frozen > 0 ? 4 : 0) |
+        (e.slowTime > 0 || e.ice > 0 ? 8 : 0) |
+        (e.vulnTime > 0 ? 16 : 0) |
+        (e.wetTime > 0 ? 32 : 0);
+      out.push([
+        e.uid,
+        e.def.id,
+        Math.round(e.x),
+        Math.round(e.y),
+        Math.round(e.hp),
+        Math.round(e.maxHp),
+        Math.round(e.sprite.scaleX * 100) / 100,
+        Math.round(e.sprite.rotation * 100) / 100,
+        flags,
+        status,
+      ]);
+    }
+    return out;
+  }
+
   spawn(def: EnemyDef, x: number, y: number, wave: number): Enemy {
     const e = this.pool.pop() ?? new Enemy(this.scene, def.texture);
+    e.uid = nextEnemyUid++;
     const mult = this.host.difficulty.mult;
     e.def = def;
     // 每点诅咒 +2% 敌人生命/伤害：诅咒必须是真实风险，而不只是收益
     const curseMult = 1 + Math.max(0, this.host.curse) * 0.02;
-    e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult;
+    const coopMult = def.boss ? (this.host.coopBossHpMult ?? 1) : (this.host.coopHpMult ?? 1);
+    e.maxHp = e.hp = enemyHp(def, wave) * mult * curseMult * coopMult;
     e.lastHitCrit = false;
     e.lastHitMelee = false;
     e.phase = 0;
@@ -309,6 +357,7 @@ export class EnemyManager {
     // 用快照遍历，避免毒/烧/自爆触发尸爆或毒菇连锁击杀多只怪时，swap-pop 导致倒序下标越界崩溃
     for (const e of this.active.slice()) {
       if (!e.active) continue;
+      this.host.selectTarget?.(e.x, e.y);
       e.age += dt;
       this.updateStatus(e, dt);
       if (!e.active) continue;
@@ -639,15 +688,19 @@ export class EnemyManager {
       this.fx.burst(x1, y1, 0xff5468, 4, 110, 0.7);
       sfx.play('spit');
       // 点到线段最近距离判定
-      const vx = x1 - s.x;
-      const vy = y1 - s.y;
-      const len2 = vx * vx + vy * vy || 1;
-      const proj = Phaser.Math.Clamp(((h.px - s.x) * vx + (h.py - s.y) * vy) / len2, 0, 1);
-      const cx = s.x + vx * proj;
-      const cy = s.y + vy * proj;
-      const hitR = s.width * 0.5 + h.pr * 0.85;
-      if ((h.px - cx) ** 2 + (h.py - cy) ** 2 <= hitR * hitR) {
-        h.hurtPlayer(s.damage);
+      if (h.hurtPlayersInSegment) {
+        h.hurtPlayersInSegment(s.x, s.y, x1, y1, s.width * 0.5, s.damage);
+      } else {
+        const vx = x1 - s.x;
+        const vy = y1 - s.y;
+        const len2 = vx * vx + vy * vy || 1;
+        const proj = Phaser.Math.Clamp(((h.px - s.x) * vx + (h.py - s.y) * vy) / len2, 0, 1);
+        const cx = s.x + vx * proj;
+        const cy = s.y + vy * proj;
+        const hitR = s.width * 0.5 + h.pr * 0.85;
+        if ((h.px - cx) ** 2 + (h.py - cy) ** 2 <= hitR * hitR) {
+          h.hurtPlayer(s.damage);
+        }
       }
     }
   }
@@ -663,10 +716,14 @@ export class EnemyManager {
       this.fx.bolt(s.x, s.y);
       sfx.play('lightning');
       this.fx.ring(s.x, s.y, s.r, 0xfff4a0);
-      const dx = h.px - s.x;
-      const dy = h.py - s.y;
-      const rr = s.r + h.pr;
-      if (dx * dx + dy * dy < rr * rr) h.hurtPlayer(s.damage);
+      if (h.hurtPlayersInCircle) {
+        h.hurtPlayersInCircle(s.x, s.y, s.r, s.damage);
+      } else {
+        const dx = h.px - s.x;
+        const dy = h.py - s.y;
+        const rr = s.r + h.pr;
+        if (dx * dx + dy * dy < rr * rr) h.hurtPlayer(s.damage);
+      }
       const enemyStrikeDmg = Math.max(12, Math.round(s.damage * 4.2));
       for (const e of this.grid.query(s.x, s.y, s.r + MAX_ENEMY_RADIUS, this.buf).slice()) {
         if (!e.active || e.def.behavior === 'tree') continue;

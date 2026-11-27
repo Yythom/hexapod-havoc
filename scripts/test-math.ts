@@ -1,4 +1,13 @@
 import assert from 'node:assert/strict';
+import {
+  applyGuestBuild,
+  extractGuestBuild,
+  generateRoomCode,
+  isLocalRoomCode,
+  normalizeRoomCode,
+  REVIVE_TIME,
+  stepReviveProgress,
+} from '../src/net/protocol';
 import { growthBonus, MAX_SCREEN_RANGE, rangeOverflowBonus, weaponCritChance, weaponDamage, weaponLifesteal } from '../src/core/combat';
 import { CHALLENGES, CHALLENGE_ORDER } from '../src/core/challenges';
 import { CONTRACTS, enchantCost, isContractWave, rollContracts } from '../src/core/contracts';
@@ -532,6 +541,48 @@ test('种子分享挑战：确定性分流（商店/升级/宝箱/赌约一致�
   assert.equal(compareSeedTarget({ win: true, wave: 20, kills: 1600, nectar: 5000 }, target), 'beat');
   assert.equal(compareSeedTarget({ win: true, wave: 20, kills: 1520, nectar: 6400 }, target), 'tie');
   assert.equal(compareSeedTarget({ win: false, wave: 20, kills: 9999, nectar: 9999 }, target), 'behind');
+});
+
+test('双人联机协议：房间码编解码、倒地 2.5s 救援进度与客机构筑双向同步', () => {
+  const code = generateRoomCode(false);
+  assert.equal(code.length, 6);
+  assert.equal(isLocalRoomCode(code), false);
+  const localCode = generateRoomCode(true);
+  assert.equal(isLocalRoomCode(localCode), true);
+  assert.equal(normalizeRoomCode(`https://example.com/?coop=${code.toLowerCase()}`), code);
+  assert.equal(normalizeRoomCode(`  ${localCode.toLowerCase()}  `), localCode);
+
+  // 救援进度：在圈内 2.5s 充满，离开后衰减但不小于 0
+  let p = 0;
+  p = stepReviveProgress(p, true, REVIVE_TIME / 2);
+  assert.ok(Math.abs(p - 0.5) < 1e-6);
+  p = stepReviveProgress(p, false, 0.5);
+  assert.ok(p < 0.5 && p > 0.2);
+  p = stepReviveProgress(p, true, REVIVE_TIME);
+  assert.equal(p, 1);
+  assert.equal(stepReviveProgress(0, false, 1), 0);
+
+  // 客机波间商店买完装备后提取快照并同步回房主 run2
+  const guestRun = new RunState({ character: 'spider', difficulty: 2, weapon: 'slingshot', biome: 'pond', seed: 'COOP-TEST' });
+  guestRun.nectar = 128;
+  guestRun.totalNectar = 450;
+  guestRun.level = 7;
+  guestRun.bonus.damagePct = 0.25;
+  guestRun.items.clover = 2;
+  guestRun.weapons.push({ id: 'pistol', tier: 2, cursed: true, enchant: 'vamp' });
+  guestRun.activeContract = 'elite_bounty';
+  guestRun.recomputeStats();
+
+  const hostShadow = new RunState({ character: 'spider', difficulty: 2, weapon: 'slingshot', biome: 'pond', seed: 'COOP-TEST' });
+  applyGuestBuild(hostShadow, extractGuestBuild(guestRun));
+  assert.equal(hostShadow.nectar, 128);
+  assert.equal(hostShadow.level, 7);
+  assert.equal(hostShadow.items.clover, 2);
+  assert.equal(hostShadow.weapons.length, 2);
+  assert.equal(hostShadow.weapons[1].cursed, true);
+  assert.equal(hostShadow.weapons[1].enchant, 'vamp');
+  assert.equal(hostShadow.activeContract, 'elite_bounty');
+  assert.equal(hostShadow.stats.luck, guestRun.stats.luck);
 });
 
 console.log(`\nAll ${passed} invariant tests passed!`);

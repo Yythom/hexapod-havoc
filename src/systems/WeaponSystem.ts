@@ -14,6 +14,7 @@ import type { BashVariant, Effects } from './Effects';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Hazards } from './Hazards';
 import type { HitResolver, HitSource } from './HitResolver';
+import type { SnapSprite } from '../net/protocol';
 import type { ProjectileManager } from './ProjectileManager';
 import type { AphidGroup, MothGroup, Summons } from './Summons';
 
@@ -897,6 +898,22 @@ export class WeaponSystem {
       view.setWeaponMotion(slot, null);
       if (s.def.id === 'circular-saw') view.setWeaponSpin(slot, 9);
     }
+  }
+
+  /** 联机快照：读取各武器槽当前瞄准角 */
+  slotAims(): number[] {
+    return this.slots.map((s) => Math.round(s.aim * 100) / 100);
+  }
+
+  /** 联机快照：导出当前已放置的炮台/地雷 */
+  snapshotDevices(): SnapSprite[] {
+    return this.devices.map((d) => [
+      d.sprite.texture.key,
+      Math.round(d.x),
+      Math.round(d.y),
+      Math.round(d.sprite.rotation * 100) / 100,
+      Math.round(d.sprite.scaleX * 100) / 100,
+    ]);
   }
 
   /** 武器头扫过 (px,py) 时，命中范围内还没被这一击打过的敌人 */

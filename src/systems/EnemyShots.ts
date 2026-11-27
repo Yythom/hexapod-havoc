@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { DEPTH, WORLD_HEIGHT, WORLD_WIDTH } from '../config';
+import type { SnapShot } from '../net/protocol';
 
 export type EnemyShotKind = 'silk' | 'stinger' | 'orb';
 
@@ -64,7 +65,7 @@ export class EnemyShots {
     this.list.push(s);
   }
 
-  /** onHit 返回后子弹消失；obstacles 用于枯叶树洞木桩挡弹 */
+  /** onHit 返回后子弹消失；obstacles 用于枯叶树洞木桩挡弹；p2 用于双人联机同时检测 2P */
   update(
     dt: number,
     px: number,
@@ -73,6 +74,7 @@ export class EnemyShots {
     onHit: (damage: number, kind: EnemyShotKind) => void,
     obstacles?: readonly { x: number; y: number; r: number }[],
     onBlock?: (x: number, y: number) => void,
+    p2?: { x: number; y: number; r: number; alive: boolean; onHit: (damage: number, kind: EnemyShotKind) => void },
   ): void {
     this.pulse += dt;
     const g = this.auraG;
@@ -102,9 +104,18 @@ export class EnemyShots {
           }
         }
       }
-      if (!dead && dx * dx + dy * dy < rr * rr) {
+      if (!dead && pr > 0 && dx * dx + dy * dy < rr * rr) {
         onHit(s.damage, s.kind);
         dead = true;
+      }
+      if (!dead && p2 && p2.alive) {
+        const dx2 = s.x - p2.x;
+        const dy2 = s.y - p2.y;
+        const rr2 = SHOT_RADIUS + p2.r;
+        if (dx2 * dx2 + dy2 * dy2 < rr2 * rr2) {
+          p2.onHit(s.damage, s.kind);
+          dead = true;
+        }
       }
       if (dead) {
         this.release(i);
@@ -134,6 +145,15 @@ export class EnemyShots {
       g.lineStyle(1.6, col, 0.94);
       g.strokeCircle(s.x, s.y, haloR);
     }
+  }
+
+  snapshot(): SnapShot[] {
+    const out: SnapShot[] = [];
+    for (const s of this.list) {
+      const k = s.kind === 'stinger' ? 1 : s.kind === 'orb' ? 2 : 0;
+      out.push([k, Math.round(s.x), Math.round(s.y), Math.round(s.angle * 100) / 100]);
+    }
+    return out;
   }
 
   clear(): void {

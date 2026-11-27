@@ -13,6 +13,8 @@ import { getSettings, useSettingsStore } from './core/settings';
 import { BootScene } from './scenes/BootScene';
 import { CharacterSelectScene } from './scenes/CharacterSelectScene';
 import { CodexScene } from './scenes/CodexScene';
+import { CoopGuestScene } from './scenes/CoopGuestScene';
+import { CoopLobbyScene } from './scenes/CoopLobbyScene';
 import { GameScene } from './scenes/GameScene';
 import { IntermissionScene } from './scenes/IntermissionScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -137,7 +139,7 @@ void preloadFonts().then(() => {
     },
     input: { activePointers: 3, gamepad: true },
     render: { antialias: true },
-    scene: [BootScene, MenuScene, CharacterSelectScene, CodexScene, GameScene, UIScene, IntermissionScene, ResultScene],
+    scene: [BootScene, MenuScene, CharacterSelectScene, CodexScene, CoopLobbyScene, CoopGuestScene, GameScene, UIScene, IntermissionScene, ResultScene],
   });
   installViewportSync(game);
 

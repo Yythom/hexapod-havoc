@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SPRITE_RES } from '../art/draw';
 import { DEPTH, WORLD_HEIGHT, WORLD_WIDTH } from '../config';
+import type { SnapPickup } from '../net/protocol';
 
 type PickupKind = 'nectar' | 'chest' | 'heal' | 'frenzy';
 
@@ -23,6 +24,17 @@ interface Collector {
   x: number;
   y: number;
   radius: number;
+}
+
+export interface CoopPickupResult {
+  nectar1: number;
+  chests1: number;
+  heals1: number;
+  frenzy1: number;
+  nectar2: number;
+  chests2: number;
+  heals2: number;
+  frenzy2: number;
 }
 
 const EDGE = 30;
@@ -162,6 +174,109 @@ export class PickupManager {
         d.sprite.setScale(((1 + bob * 0.1) * sizeBoost) / SPRITE_RES);
       }
     }
+  }
+
+  /** 双人联机：两位玩家各自独立吸引并拾取，波末清场时平均吸回 */
+  updateCoop(
+    dt: number,
+    p1: Collector & { alive: boolean },
+    range1: number,
+    fast1: boolean,
+    p2: Collector & { alive: boolean },
+    range2: number,
+    fast2: boolean,
+    vacuum: boolean,
+  ): CoopPickupResult {
+    const res: CoopPickupResult = { nectar1: 0, chests1: 0, heals1: 0, frenzy1: 0, nectar2: 0, chests2: 0, heals2: 0, frenzy2: 0 };
+    const friction = Math.exp(-6 * dt);
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const d = this.list[i];
+      d.age += dt;
+      const d1 = p1.alive ? Math.hypot(p1.x - d.x, p1.y - d.y) : Infinity;
+      const d2 = p2.alive ? Math.hypot(p2.x - d.x, p2.y - d.y) : Infinity;
+      const r1 = d.kind === 'chest' ? p1.radius + CHEST_TOUCH : range1;
+      const r2 = d.kind === 'chest' ? p2.radius + CHEST_TOUCH : range2;
+
+      let target: 1 | 2 = 1;
+      if (vacuum) {
+        if (!p1.alive) target = 2;
+        else if (!p2.alive) target = 1;
+        else target = d1 <= d2 ? 1 : 2;
+      } else {
+        const in1 = d1 < r1;
+        const in2 = d2 < r2;
+        if (in1 && in2) target = d1 <= d2 ? 1 : 2;
+        else if (in2) target = 2;
+        else if (in1) target = 1;
+        else target = d1 <= d2 ? 1 : 2;
+      }
+      const who = target === 1 ? p1 : p2;
+      const dist = target === 1 ? d1 : d2;
+      const reach = target === 1 ? r1 : r2;
+      const fastPull = target === 1 ? fast1 : fast2;
+
+      if (!d.pulled && d.age > 0.2 && (vacuum || dist < reach)) d.pulled = true;
+      if (d.pulled && !who.alive) {
+        d.pulled = false;
+        d.pullTime = 0;
+      }
+
+      if (d.pulled) {
+        if (dist < who.radius + 6) {
+          if (target === 1) {
+            if (d.kind === 'nectar') res.nectar1 += d.value;
+            else if (d.kind === 'chest') res.chests1++;
+            else if (d.kind === 'frenzy') res.frenzy1++;
+            else res.heals1++;
+          } else {
+            if (d.kind === 'nectar') res.nectar2 += d.value;
+            else if (d.kind === 'chest') res.chests2++;
+            else if (d.kind === 'frenzy') res.frenzy2++;
+            else res.heals2++;
+          }
+          this.release(i);
+          continue;
+        }
+        d.pullTime += dt;
+        const pullMult = fastPull ? 2 : 1;
+        const sp = Math.min(1100 * pullMult, (260 + d.pullTime * 1500) * pullMult);
+        const k = Math.min(dist, sp * dt) / (dist || 1);
+        d.x += (who.x - d.x) * k;
+        d.y += (who.y - d.y) * k;
+      } else {
+        d.x = Phaser.Math.Clamp(d.x + d.vx * dt, EDGE, WORLD_WIDTH - EDGE);
+        d.y = Phaser.Math.Clamp(d.y + d.vy * dt, EDGE, WORLD_HEIGHT - EDGE);
+        d.vx *= friction;
+        d.vy *= friction;
+      }
+      d.sprite.setPosition(d.x, d.y);
+      const bob = Math.sin(d.age * 6 + d.phase);
+      if (d.kind === 'chest') d.sprite.setScale(1.2 / SPRITE_RES).setRotation(bob * 0.08);
+      else if (d.kind === 'frenzy') d.sprite.setScale((1.22 + bob * 0.14) / SPRITE_RES).setRotation(bob * 0.12);
+      else {
+        const sizeBoost = d.kind === 'nectar' ? (d.value >= 10 ? 1.44 : d.value >= 4 ? 1.24 : 1) : 1;
+        d.sprite.setScale(((1 + bob * 0.1) * sizeBoost) / SPRITE_RES);
+      }
+    }
+    return res;
+  }
+
+  snapshot(): SnapPickup[] {
+    const out: SnapPickup[] = [];
+    for (const d of this.list) {
+      const k =
+        d.kind === 'nectar'
+          ? 0
+          : d.kind === 'chest'
+            ? 1
+            : d.kind === 'frenzy'
+              ? 4
+              : d.sprite.texture.key === 'mushroom'
+                ? 3
+                : 2;
+      out.push([k, Math.round(d.x), Math.round(d.y), d.value]);
+    }
+    return out;
   }
 
   /** 立刻收走全部掉落物（回血物直接丢弃） */

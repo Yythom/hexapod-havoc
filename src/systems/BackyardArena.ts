@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { sfx } from '../audio/sfx';
 import { DEPTH, WORLD_HEIGHT, WORLD_MARGIN, WORLD_WIDTH } from '../config';
 import { BIOMES, DEFAULT_BIOME, type BiomeDef } from '../data/biomes';
+import type { SnapArena } from '../net/protocol';
 import type { Effects } from './Effects';
 import { MAX_ENEMY_RADIUS, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Telegraphs } from './Telegraphs';
@@ -79,7 +80,10 @@ export interface ArenaHost {
   py: number;
   pr: number;
   wave: number;
+  /** 双人联机：额外检查 2P 坐标（用于金露花抢点与自然天雷） */
+  p2?: { x: number; y: number; r: number; alive: boolean };
   hurtPlayer(damage: number): void;
+  hurtPlayer2?(damage: number): void;
   onBloomComplete(x: number, y: number): void;
   onArenaHint(text: string): void;
 }
@@ -129,6 +133,21 @@ export class BackyardArena {
   /** 场内静态木桩掩体列表（挡敌弹 & 柔和绕行） */
   get obstacles(): readonly ArenaObstacle[] {
     return this.stumps;
+  }
+
+  snapshot(): SnapArena {
+    return {
+      puddles: this.puddles.map((p) => [Math.round(p.x), Math.round(p.y), Math.round(p.r)]),
+      leaves: this.leafPiles
+        .filter((lp) => lp.cooldown <= 0)
+        .map((lp) => [Math.round(lp.x), Math.round(lp.y), Math.round(lp.r), Math.round(lp.burnLeft * 10) / 10]),
+      stumps: this.stumps.map((s) => [Math.round(s.x), Math.round(s.y), Math.round(s.r)]),
+      bloom: this.bloom
+        ? [Math.round(this.bloom.x), Math.round(this.bloom.y), Math.round(this.bloom.r), Math.round((this.bloom.charge / this.bloom.need) * 100) / 100]
+        : null,
+      flames: this.flames.map((f) => [Math.round(f.x), Math.round(f.y), Math.round(f.r)]),
+      decoys: this.decoys.map((d) => [Math.round(d.x), Math.round(d.y)]),
+    };
   }
 
   /** 当前阵风给移动/弹道施加的轻微矢量偏置 */
@@ -380,10 +399,15 @@ export class BackyardArena {
       this.fx.bolt(s.x, s.y);
       this.fx.ring(s.x, s.y, s.r, 0x9ceeff);
       sfx.play('lightning');
-      // 玩家在圈内受击
+      // 玩家在圈内受击（双人模式两位玩家都检测）
       const pdx = h.px - s.x;
       const pdy = h.py - s.y;
       if (pdx * pdx + pdy * pdy < (s.r + h.pr) ** 2) h.hurtPlayer(s.playerDamage);
+      if (h.p2 && h.p2.alive) {
+        const pdx2 = h.p2.x - s.x;
+        const pdy2 = h.p2.y - s.y;
+        if (pdx2 * pdx2 + pdy2 * pdy2 < (s.r + h.p2.r) ** 2) h.hurtPlayer2?.(s.playerDamage);
+      }
       // 敌人同样吃高额天雷伤害
       for (const e of enemies.grid.query(s.x, s.y, s.r + MAX_ENEMY_RADIUS, this.buf).slice()) {
         if (!e.active) continue;
@@ -398,13 +422,14 @@ export class BackyardArena {
       this.conductLightning(s.x, s.y, s.enemyDamage, enemies);
     }
 
-    // 4. 金露花抢点圈
+    // 4. 金露花抢点圈（双人站圈内共同加速充能）
     if (this.bloom) {
       const b = this.bloom;
       b.life -= dt;
-      const d = Math.hypot(h.px - b.x, h.py - b.y);
-      if (d <= b.r + h.pr) {
-        b.charge += dt;
+      const in1 = Math.hypot(h.px - b.x, h.py - b.y) <= b.r + h.pr;
+      const in2 = !!(h.p2 && h.p2.alive && Math.hypot(h.p2.x - b.x, h.p2.y - b.y) <= b.r + h.p2.r);
+      if (in1 || in2) {
+        b.charge += dt * (in1 && in2 ? 1.5 : 1);
         if (b.charge >= b.need) {
           const bx = b.x;
           const by = b.y;

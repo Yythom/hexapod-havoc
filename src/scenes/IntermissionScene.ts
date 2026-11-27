@@ -44,8 +44,11 @@ import { ITEMS, type ItemDef } from '../data/items';
 import { TIER_ROMAN, weaponTex } from '../art/icons';
 import { SPRITE_RES } from '../art/draw';
 import { CLASS_LABEL, TIERS, WEAPONS, type WeaponClass } from '../data/weapons';
+import { coop } from '../net/coop';
+import { extractGuestBuild } from '../net/protocol';
 import { createButton, drawKeycap } from '../ui/Button';
 import { fadeInScene, setupUICamera } from '../ui/camera';
+import { openMechanicsGuide } from '../ui/guideModal';
 import {
   COLOR,
   CLASS_STYLE,
@@ -151,6 +154,18 @@ export class IntermissionScene extends Phaser.Scene {
     kb.on('keydown-THREE', () => pickSlot(2));
     kb.on('keydown-FOUR', () => pickSlot(3));
     kb.on('keydown-ESC', () => this.closePopup());
+    if (coop.isCoopMatch) {
+      const unsub = coop.onMessage((msg) => {
+        if (msg.type === 'host_ready') {
+          coop.hostReady = msg.ready;
+          if (this.scene.isActive() && this.page === 'shop') this.render();
+        } else if (msg.type === 'guest_ready') {
+          coop.guestReady = msg.ready;
+          if (this.scene.isActive() && this.page === 'shop') this.render();
+        }
+      });
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsub);
+    }
     this.nextPage();
     fadeInScene(this);
   }
@@ -190,7 +205,7 @@ export class IntermissionScene extends Phaser.Scene {
 
   private render(): void {
     for (const id of checkUnlocks(this.run)) this.toast(`解锁新角色：${CHARACTERS[id].name}`);
-    saveActiveRun(this.run.serialize());
+    if (!coop.isCoopMatch) saveActiveRun(this.run.serialize());
     this.closePopup();
     this.root?.destroy();
     this.spinRays = [];
@@ -231,6 +246,27 @@ export class IntermissionScene extends Phaser.Scene {
     root.add(this.add.image(pillX + 24, 34, 'nectar').setDisplaySize(24, 24));
     nectarText.setPosition(pillX + 44, 35);
     root.add(nectarText);
+    root.add(
+      createButton(
+        this,
+        pillX - 58,
+        34,
+        '📖 速查',
+        () => {
+          this.closePopup();
+          const initialTab = this.page === 'shop' || this.page === 'contract' ? 'shop' : 'stats';
+          const handle = openMechanicsGuide(this, {
+            initialTab,
+            depth: 110,
+            onClose: () => {
+              if (this.popup === handle.container) this.popup = null;
+            },
+          });
+          this.popup = handle.container;
+        },
+        { width: 96, height: 36, fontSize: 14, primary: false },
+      ),
+    );
 
     const nectarDelta = this.run.nectar - this.prevNectar;
     if (this.prevNectar >= 0 && nectarDelta !== 0) {
@@ -537,7 +573,34 @@ export class IntermissionScene extends Phaser.Scene {
     const rx = PHONE ? PHONE_BTN_X : RIGHT_X + RIGHT_W / 2;
     const bw = PHONE ? 220 : RIGHT_W;
     const rerollLabel = cost === 0 ? (PHONE ? '免费刷新' : '免费刷新 [R]') : PHONE ? `刷新  ${cost}` : `刷新 [R]  ${cost}`;
-    const nextWaveLabel = run.endless ? `无尽 ▶ 第 ${run.wave + 1} 波` : `出发 ▶ 第 ${run.wave + 1} 波`;
+    const isCoop = coop.isCoopMatch;
+    const myReady = coop.role === 'host' ? coop.hostReady : coop.guestReady;
+    const allyReady = coop.role === 'host' ? coop.guestReady : coop.hostReady;
+    const nextWaveLabel = isCoop
+      ? myReady
+        ? '✓ 已准备（点取消）'
+        : `准备 ▶ 第 ${run.wave + 1} 波`
+      : run.endless
+        ? `无尽 ▶ 第 ${run.wave + 1} 波`
+        : `出发 ▶ 第 ${run.wave + 1} 波`;
+
+    if (isCoop) {
+      root.add(
+        pill(
+          this,
+          rx,
+          PHONE ? 536 : 552,
+          allyReady ? '✓ 队友已准备就绪' : '◌ 队友选购中…',
+          COLOR.panelDeep,
+          allyReady ? 0x5de862 : COLOR.gold,
+          allyReady ? '#a4ffaa' : COLOR.goldText,
+          12.5,
+          12,
+          24,
+        ),
+      );
+    }
+
     root.add(
       createButton(this, rx, PHONE ? 572 : 598, rerollLabel, () => this.rerollShop(), {
         width: bw,
@@ -549,7 +612,14 @@ export class IntermissionScene extends Phaser.Scene {
         disabled: run.nectar < cost,
       }),
     );
-    root.add(createButton(this, rx, PHONE ? 654 : 664, nextWaveLabel, () => this.finish(), { width: bw, height: 58, fontSize: 21 }));
+    root.add(
+      createButton(this, rx, PHONE ? 654 : 664, nextWaveLabel, () => this.finish(), {
+        width: bw,
+        height: 58,
+        fontSize: isCoop ? 19 : 21,
+        variant: isCoop && myReady ? 'emerald' : undefined,
+      }),
+    );
   }
 
   /** 判断买下该武器是否会激活新的套装羁绊或升级到下一档 */
@@ -993,8 +1063,31 @@ export class IntermissionScene extends Phaser.Scene {
   }
 
   private finish(): void {
-    bus.emit(EVT.NEXT_WAVE);
-    this.scene.stop();
+    if (!coop.isCoopMatch) {
+      bus.emit(EVT.NEXT_WAVE);
+      this.scene.stop();
+      return;
+    }
+    if (coop.role === 'host') {
+      coop.hostReady = !coop.hostReady;
+      sfx.play(coop.hostReady ? 'unlock' : 'click');
+      coop.send({ type: 'host_ready', ready: coop.hostReady });
+      if (coop.hostReady && coop.guestReady) {
+        bus.emit(EVT.NEXT_WAVE);
+        this.scene.stop();
+      } else {
+        this.render();
+      }
+    } else if (coop.role === 'guest') {
+      coop.guestReady = !coop.guestReady;
+      sfx.play(coop.guestReady ? 'unlock' : 'click');
+      coop.send({
+        type: 'guest_ready',
+        ready: coop.guestReady,
+        build: coop.guestReady ? extractGuestBuild(this.run) : undefined,
+      });
+      this.render();
+    }
   }
 
   // ---------- 土豆兄弟风格商店卡片（左上角方块图标 + 右侧标题/分类 + 左对齐属性条目） ----------

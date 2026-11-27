@@ -10,9 +10,11 @@ import { activeSets } from '../core/sets';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
 import { CLASS_LABEL, TIERS, WEAPONS } from '../data/weapons';
+import { coop } from '../net/coop';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { chamferPoints, createButton, drawKeycap, fillPoly, slantPoints, strokePoly } from '../ui/Button';
 import { setupUICamera } from '../ui/camera';
+import { openMechanicsGuide, type GuideModalHandle } from '../ui/guideModal';
 import { addSettingsButtons } from '../ui/settingsButtons';
 import { VirtualJoystick } from '../ui/VirtualJoystick';
 import { CLASS_STYLE, COLOR, createStatsPanel, displayLabel, divider, drawChamferPlate, label, panel, pill, slotBox } from '../ui/widgets';
@@ -50,6 +52,10 @@ export class UIScene extends Phaser.Scene {
   private dashText!: Phaser.GameObjects.Text;
   private frenzyBadge!: Phaser.GameObjects.Container;
   private frenzyText!: Phaser.GameObjects.Text;
+  private allyBox!: Phaser.GameObjects.Container;
+  private allyBar!: Phaser.GameObjects.Graphics;
+  private allyNameText!: Phaser.GameObjects.Text;
+  private allyStatusText!: Phaser.GameObjects.Text;
   private mobileDashBtn: Phaser.GameObjects.Container | null = null;
   private waveText!: Phaser.GameObjects.Text;
   private weatherIcon!: Phaser.GameObjects.Image;
@@ -73,6 +79,7 @@ export class UIScene extends Phaser.Scene {
   private joystick!: VirtualJoystick;
   private modal: Phaser.GameObjects.Container | null = null;
   private modalAction: (() => void) | null = null;
+  private guideModal: GuideModalHandle | null = null;
   private paused = false;
   private padResumeDown = false;
   private banners: { text: string; color: string }[] = [];
@@ -139,9 +146,17 @@ export class UIScene extends Phaser.Scene {
     listen(this, EVT.VICTORY_CHOICE, () => this.openVictoryChoice());
 
     const kb = this.input.keyboard!;
-    kb.on('keydown-P', () => this.togglePause());
-    kb.on('keydown-ESC', () => this.togglePause());
-    kb.on('keydown-ENTER', () => this.modalAction?.());
+    kb.on('keydown-P', () => {
+      if (this.guideModal) this.guideModal.close();
+      else this.togglePause();
+    });
+    kb.on('keydown-ESC', () => {
+      if (this.guideModal) this.guideModal.close();
+      else this.togglePause();
+    });
+    kb.on('keydown-ENTER', () => {
+      if (!this.guideModal) this.modalAction?.();
+    });
 
     const autoPause = () => this.pause();
     this.game.events.on(Phaser.Core.Events.BLUR, autoPause);
@@ -224,7 +239,10 @@ export class UIScene extends Phaser.Scene {
     const pad = this.input.gamepad?.pad1;
     if (this.paused && pad) {
       const resumeNow = !!(pad.buttons[9]?.pressed || pad.B || pad.buttons[1]?.pressed);
-      if (resumeNow && !this.padResumeDown) this.togglePause();
+      if (resumeNow && !this.padResumeDown) {
+        if (this.guideModal) this.guideModal.close();
+        else this.togglePause();
+      }
       this.padResumeDown = resumeNow;
     } else {
       this.padResumeDown = false;
@@ -298,6 +316,7 @@ export class UIScene extends Phaser.Scene {
     }
     this.updateBoss(dt);
     this.updateLowHp(dt);
+    this.updateAllyHud();
     this.drawEdgeIndicators();
 
     const t = r.phase !== 'combat' ? -1 : Number.isFinite(r.waveTimeLeft) ? Math.ceil(r.waveTimeLeft) : -3;
@@ -390,7 +409,25 @@ export class UIScene extends Phaser.Scene {
     this.frenzyText = this.add.text(22, 0, '狂热 5.0s', style(12, '#ffe88a', true)).setOrigin(0, 0.5);
     this.frenzyBadge = this.add.container(280, 62, [frBg, frIcon, this.frenzyText]).setVisible(false);
 
-    tl.add([this.hpBar, this.hpText, this.xpBar, this.levelText, this.shieldBadge, nectarIcon, this.nectarText, this.dashBar, this.dashText, this.frenzyBadge]);
+    // 双人联机：左上角队友迷你状态卡（血条 + 倒地救援预警 + 实时延迟）
+    const allyBg = this.add.graphics();
+    drawChamferPlate(allyBg, 0, 0, 196, 46, {
+      fill: 0x11151d,
+      fillAlpha: 0.9,
+      border: 0x5cd8ff,
+      borderWidth: 1.5,
+      shadowX: 2,
+      shadowY: 3,
+      cutBig: 6,
+      cutSmall: 3,
+      inkWidth: 2.2,
+    });
+    this.allyBar = this.add.graphics();
+    this.allyNameText = this.add.text(10, 9, '', style(12, '#9ceeff')).setOrigin(0, 0);
+    this.allyStatusText = this.add.text(186, 9, '', style(11, '#b8d8e8', true)).setOrigin(1, 0);
+    this.allyBox = this.add.container(18, 138, [allyBg, this.allyBar, this.allyNameText, this.allyStatusText]).setVisible(false);
+
+    tl.add([this.hpBar, this.hpText, this.xpBar, this.levelText, this.shieldBadge, nectarIcon, this.nectarText, this.dashBar, this.dashText, this.frenzyBadge, this.allyBox]);
 
     // 移动端右下角独立冲刺大按钮
     if (IS_COARSE_POINTER) {
@@ -728,19 +765,53 @@ export class UIScene extends Phaser.Scene {
   }
 
   private closeModal(): void {
+    this.guideModal?.close();
+    this.guideModal = null;
     this.modal?.destroy();
     this.modal = null;
     this.modalAction = null;
     this.joystick.setEnabled(true);
   }
 
-  /** 屏幕边缘方向指示箭头：指引镜头外的宝藏虫、精英、Boss 与宝箱 */
+  private updateAllyHud(): void {
+    const ally = this.run.coopTeammate;
+    const show = !!ally && (this.run.phase === 'combat' || this.run.phase === 'cleanup');
+    this.allyBox.setVisible(show);
+    if (!show || !ally) return;
+    this.allyNameText.setText(ally.name);
+    const rtt = coop.rttMs > 0 ? `${coop.rttMs}ms` : 'P2P';
+    if (ally.downed) {
+      this.allyStatusText.setText(ally.revivePct > 0 ? `救援 ${Math.round(ally.revivePct * 100)}%` : '⚠ 倒地').setColor('#ff7870');
+    } else {
+      this.allyStatusText.setText(`${ally.hp}/${ally.maxHp} · ${rtt}`).setColor('#b8f0d0');
+    }
+    const g = this.allyBar;
+    g.clear();
+    const bx = 10;
+    const by = 29;
+    const bw = 176;
+    const bh = 9;
+    g.fillStyle(0x0b0e14, 1);
+    g.fillRect(bx, by, bw, bh);
+    if (ally.downed) {
+      g.fillStyle(0x74ea78, 0.95);
+      g.fillRect(bx + 1, by + 1, Math.max(0, (bw - 2) * ally.revivePct), bh - 2);
+    } else {
+      const ratio = ally.maxHp > 0 ? Math.max(0, Math.min(1, ally.hp / ally.maxHp)) : 0;
+      g.fillStyle(ratio < 0.3 ? 0xff5a52 : 0x5cd8ff, 1);
+      g.fillRect(bx + 1, by + 1, Math.max(0, (bw - 2) * ratio), bh - 2);
+    }
+    g.lineStyle(1.4, 0x050507, 1);
+    g.strokeRect(bx, by, bw, bh);
+  }
+
+  /** 屏幕边缘方向指示箭头：指引镜头外的宝藏虫、精英、Boss、宝箱与队友 */
   private drawEdgeIndicators(): void {
     const g = this.edgeIndicators;
     g.clear();
     const markers = this.run.offscreenMarkers;
     if (this.run.phase !== 'combat' || markers.length === 0) return;
-    const gameScene = this.scene.get('Game');
+    const gameScene = this.scene.isActive('Game') ? this.scene.get('Game') : this.scene.get('CoopGuest');
     const cam = gameScene?.cameras?.main;
     if (!cam) return;
     const view = cam.worldView;
@@ -767,9 +838,18 @@ export class UIScene extends Phaser.Scene {
       const sa = Math.sin(ang);
       const pa = -sa;
       const pb = ca;
-      const isDanger = m.kind === 'elite' || m.kind === 'boss';
-      const fillCol = isDanger ? 0xff463e : m.kind === 'lootbug' ? 0xffd44c : m.kind === 'bloom' ? 0xffe458 : 0x62e878;
-      const sz = (m.kind === 'boss' || m.kind === 'bloom' ? 14 : 11) * pulse;
+      const isDanger = m.kind === 'elite' || m.kind === 'boss' || m.kind === 'ally_down';
+      const fillCol =
+        m.kind === 'ally'
+          ? 0x5cd8ff
+          : isDanger
+            ? 0xff463e
+            : m.kind === 'lootbug'
+              ? 0xffd44c
+              : m.kind === 'bloom'
+                ? 0xffe458
+                : 0x62e878;
+      const sz = (m.kind === 'boss' || m.kind === 'bloom' || m.kind === 'ally_down' ? 14 : 11) * pulse;
       const tipX = sx + ca * sz;
       const tipY = sy + sa * sz;
       const backX = sx - ca * (sz * 0.7);
@@ -844,16 +924,24 @@ export class UIScene extends Phaser.Scene {
     return this.run.phase === 'combat' || this.run.phase === 'cleanup';
   }
 
-  private togglePause(): void {
-    if (this.paused) this.resume();
-    else this.pause();
+  applyRemotePause(nextPaused: boolean): void {
+    if (nextPaused && !this.paused) this.pause(false);
+    else if (!nextPaused && this.paused) this.resume(false);
   }
 
-  private pause(): void {
+  private togglePause(): void {
+    if (this.paused) this.resume(true);
+    else this.pause(true);
+  }
+
+  private pause(broadcast = true): void {
     if (this.paused || !this.canPause()) return;
     this.paused = true;
     bgm.setPaused(true);
-    this.scene.pause('Game');
+    if (this.scene.isActive('Game')) this.scene.pause('Game');
+    if (broadcast && coop.isCoopMatch) {
+      coop.send({ type: 'pause_state', paused: true, by: coop.role === 'host' ? 'host' : 'guest' });
+    }
     const r = this.run;
     this.openModal(
       '游戏已暂停',
@@ -865,7 +953,7 @@ export class UIScene extends Phaser.Scene {
             this,
             leftCx,
             top + 86,
-            `${r.biome.name} · 种子 #${r.seed}`,
+            coop.isCoopMatch ? `🤝 房间 ${coop.roomCode} · ${r.biome.name}` : `${r.biome.name} · 种子 #${r.seed}`,
             COLOR.panelDeep,
             r.biome.accent,
             r.biome.css,
@@ -874,8 +962,34 @@ export class UIScene extends Phaser.Scene {
             22,
           ),
         );
-        c.add(createButton(this, leftCx, top + 130, '继续战斗', () => this.resume(), { width: 268, height: 50 }));
-        c.add(createButton(this, leftCx - 134, top + 194, '重新开始', () => this.restart(), { width: 238, height: 46, fontSize: 19, primary: false }));
+        c.add(createButton(this, leftCx - 102, top + 130, '继续战斗', () => this.resume(true), { width: 280, height: 50 }));
+        c.add(
+          createButton(
+            this,
+            leftCx + 150,
+            top + 130,
+            '📖 机制速查',
+            () => {
+              if (this.guideModal) return;
+              this.guideModal = openMechanicsGuide(this, {
+                initialTab: 'combat',
+                depth: 140,
+                onClose: () => {
+                  this.guideModal = null;
+                },
+              });
+            },
+            { width: 196, height: 50, fontSize: 18, primary: false, variant: 'emerald' },
+          ),
+        );
+        c.add(
+          createButton(this, leftCx - 134, top + 194, coop.isCoopMatch ? '返回大厅' : '重新开始', () => (coop.isCoopMatch ? this.toCoopLobby() : this.restart()), {
+            width: 238,
+            height: 46,
+            fontSize: 19,
+            primary: false,
+          }),
+        );
         c.add(createButton(this, leftCx + 134, top + 194, '放弃本局', () => this.toMenu(), { width: 238, height: 46, fontSize: 19, primary: false }));
         addSettingsButtons(this, c, leftCx, top + 258);
 
@@ -913,12 +1027,15 @@ export class UIScene extends Phaser.Scene {
     );
   }
 
-  private resume(): void {
+  private resume(broadcast = true): void {
     if (!this.paused) return;
     this.paused = false;
     bgm.setPaused(false);
     this.closeModal();
-    this.scene.resume('Game');
+    if (this.scene.isPaused('Game')) this.scene.resume('Game');
+    if (broadcast && coop.isCoopMatch) {
+      coop.send({ type: 'pause_state', paused: false, by: coop.role === 'host' ? 'host' : 'guest' });
+    }
   }
 
   private restart(): void {
@@ -927,9 +1044,18 @@ export class UIScene extends Phaser.Scene {
     this.scene.start('Game');
   }
 
-  private toMenu(): void {
+  private toCoopLobby(): void {
     bgm.setPaused(false);
     this.scene.stop('Game');
+    this.scene.stop('CoopGuest');
+    this.scene.start('CoopLobby');
+  }
+
+  private toMenu(): void {
+    bgm.setPaused(false);
+    if (coop.isCoopMatch) coop.disconnect();
+    this.scene.stop('Game');
+    this.scene.stop('CoopGuest');
     this.scene.start('Menu');
   }
 }

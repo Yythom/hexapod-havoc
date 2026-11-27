@@ -12,6 +12,7 @@ import { DIFFICULTIES } from '../data/difficulty';
 import { WAVES } from '../data/waves';
 import { CLASS_LABEL, TIERS, WEAPONS } from '../data/weapons';
 import { BeetleView } from '../entities/BeetleView';
+import { coop } from '../net/coop';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { createButton } from '../ui/Button';
 import { fadeInScene, setupUICamera, transitionTo } from '../ui/camera';
@@ -158,6 +159,8 @@ export class ResultScene extends Phaser.Scene {
       pill(this, leftCx, badgeY + 58, `🏆 挑战 · ${ch?.name ?? r.challenge}`, 0x2a1842, 0xc068ff, '#e4b8ff', 11.5, 10, 20);
     } else if (r.seedTarget) {
       pill(this, leftCx, badgeY + 58, '🌱 种子挑战局', 0x163826, 0x5de862, '#a4ffaa', 11.5, 10, 20);
+    } else if (r.coopPartner) {
+      pill(this, leftCx, badgeY + 58, '🤝 双人合作联机', 0x122a38, 0x5cd8ff, '#a6ecff', 11.5, 10, 20);
     }
 
     // 竖向分割线
@@ -249,6 +252,20 @@ export class ResultScene extends Phaser.Scene {
       news.push(`首次通关主题挑战「${ch?.name ?? r.challenge}」！`);
     }
     for (const id of r.unlocked) news.push(`解锁新角色：${CHARACTERS[id].name}`);
+    if (r.coopPartner) {
+      const pChar = CHARACTERS[r.coopPartner.character]?.name ?? r.coopPartner.character;
+      let pMvp = '';
+      let pBest = 0;
+      for (const w of r.coopPartner.weapons) {
+        if (w.totalDamage > pBest) {
+          pBest = w.totalDamage;
+          pMvp = WEAPONS[w.id]?.name ?? '';
+        }
+      }
+      news.unshift(
+        `队友 ${r.coopPartner.roleLabel}（${pChar} LV.${r.coopPartner.level}）：${r.coopPartner.kills} 杀 · ${r.coopPartner.nectar} 蜜${pMvp ? ` · MVP ${pMvp}` : ''}`,
+      );
+    }
     if (news.length > 0) {
       divider(this, gx0, py + 244, cw * 2 + gap, COLOR.gold, 0.65);
       news.forEach((t, i) => {
@@ -365,11 +382,31 @@ export class ResultScene extends Phaser.Scene {
         transitionTo(this, 'Game');
       }
     };
-    createButton(this, W / 2 - 330, btnY, '再来一局', again, { width: 204, height: 58, fontSize: 21 });
-    createButton(this, W / 2 - 110, btnY, '📋 分享种子', shareSeed, { width: 204, height: 58, fontSize: 20, primary: false, variant: 'emerald' });
-    createButton(this, W / 2 + 110, btnY, '更换角色', () => transitionTo(this, 'CharacterSelect'), { width: 204, height: 58, fontSize: 21, primary: false });
-    createButton(this, W / 2 + 330, btnY, '返回菜单', () => transitionTo(this, 'Menu'), { width: 204, height: 58, fontSize: 21, primary: false });
-    this.input.keyboard!.once('keydown-ENTER', again);
+    if (r.coopPartner) {
+      createButton(this, W / 2 - 220, btnY, '🤝 返回联机大厅', () => transitionTo(this, 'CoopLobby'), {
+        width: 240,
+        height: 58,
+        fontSize: 20,
+        variant: 'emerald',
+      });
+      createButton(
+        this,
+        W / 2 + 220,
+        btnY,
+        '断开并返回菜单',
+        () => {
+          coop.disconnect();
+          transitionTo(this, 'Menu');
+        },
+        { width: 240, height: 58, fontSize: 20, primary: false },
+      );
+    } else {
+      createButton(this, W / 2 - 330, btnY, '再来一局', again, { width: 204, height: 58, fontSize: 21 });
+      createButton(this, W / 2 - 110, btnY, '📋 分享种子', shareSeed, { width: 204, height: 58, fontSize: 20, primary: false, variant: 'emerald' });
+      createButton(this, W / 2 + 110, btnY, '更换角色', () => transitionTo(this, 'CharacterSelect'), { width: 204, height: 58, fontSize: 21, primary: false });
+      createButton(this, W / 2 + 330, btnY, '返回菜单', () => transitionTo(this, 'Menu'), { width: 204, height: 58, fontSize: 21, primary: false });
+      this.input.keyboard!.once('keydown-ENTER', again);
+    }
     fadeInScene(this);
   }
 

@@ -8,6 +8,7 @@ import { DAILY_MUTATORS, getDailyChallenge } from '../core/daily';
 import { hasNativeInstallPrompt, onPwaStateChange, triggerPwaInstall } from '../core/pwa';
 import { getDailyBest, loadActiveRun, loadSave } from '../core/save';
 import { decodeSeedChallenge, generateSeed, normalizeSeed, type SeedChallengePayload } from '../core/seed';
+import { normalizeRoomCode } from '../net/protocol';
 import { BIOMES, DEFAULT_BIOME } from '../data/biomes';
 import { CHARACTERS } from '../data/characters';
 import { DIFFICULTIES } from '../data/difficulty';
@@ -16,6 +17,7 @@ import { BeetleView } from '../entities/BeetleView';
 import { WeatherAmbience } from '../systems/WeatherAmbience';
 import { createButton, slantPoints } from '../ui/Button';
 import { fadeInScene, setupUICamera, transitionTo, uiPointer } from '../ui/camera';
+import { openMechanicsGuide } from '../ui/guideModal';
 import { addSettingsButtons } from '../ui/settingsButtons';
 import { COLOR, displayLabel, divider, drawChamferPlate, label, panel, pill } from '../ui/widgets';
 
@@ -437,7 +439,31 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(1, 1)
       .setDepth(30);
 
-    // 8. 若浏览器触发了原生 PWA 安装条件，在主菜单右上角展示轻巧的「安装应用」快捷按钮
+    // 8. 左上角「机制速查」与「双人联机」快捷入口（对称清爽，不挤占中心封面栈）
+    createButton(
+      this,
+      92,
+      36,
+      '📖 机制速查',
+      () => {
+        if (this.modal) return;
+        this.trackModal(openMechanicsGuide(this).container);
+      },
+      { width: 138, height: 38, fontSize: 14, primary: false, shape: 'slant' },
+    ).setDepth(35);
+    createButton(
+      this,
+      244,
+      36,
+      '🤝 双人联机',
+      () => {
+        if (this.modal) return;
+        transitionTo(this, 'CoopLobby');
+      },
+      { width: 144, height: 38, fontSize: 14.5, primary: false, shape: 'slant', variant: 'emerald' },
+    ).setDepth(35);
+
+    // 9. 若浏览器触发了原生 PWA 安装条件，在主菜单右上角展示轻巧的「安装应用」快捷按钮
     let installBtn: Phaser.GameObjects.Container | null = null;
     const syncInstallBtn = () => {
       if (!this.scene.isActive()) return;
@@ -472,9 +498,19 @@ export class MenuScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown-SPACE', keyboardStart);
     fadeInScene(this);
 
-    // 若 URL 携带好友分享的 ?challenge=HHS1:... 参数，首次进主菜单自动打开挑战书
+    // 若 URL 携带好友联机 ?coop=CODE 或种子挑战 ?challenge=... 参数，首次进主菜单自动打开
     if (typeof window !== 'undefined' && !this.registry.get('urlChallengeHandled')) {
-      const param = new URLSearchParams(window.location.search).get('challenge');
+      const qs = new URLSearchParams(window.location.search);
+      const coopParam = qs.get('coop');
+      if (coopParam) {
+        this.registry.set('urlChallengeHandled', true);
+        const code = normalizeRoomCode(coopParam);
+        if (code) {
+          transitionTo(this, 'CoopLobby', { joinCode: code });
+          return;
+        }
+      }
+      const param = qs.get('challenge');
       if (param) {
         this.registry.set('urlChallengeHandled', true);
         const decoded = decodeSeedChallenge(param);

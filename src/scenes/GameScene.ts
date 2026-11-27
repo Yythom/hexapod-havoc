@@ -30,6 +30,9 @@ import { ENEMIES } from '../data/enemies';
 import { waveDefFor, WAVES } from '../data/waves';
 import { WEAPONS, type WeaponClass } from '../data/weapons';
 import { Player } from '../entities/Player';
+import { coop } from '../net/coop';
+import { CoopHostController } from '../net/coopHost';
+import type { CoopResultPlayer } from '../net/protocol';
 import { shake } from '../ui/camera';
 import { BackyardArena } from '../systems/BackyardArena';
 import { Effects } from '../systems/Effects';
@@ -80,6 +83,8 @@ export interface ResultData {
   weapons?: { id: string; tier: number; totalDamage: number }[];
   /** 最终激活的套装羁绊 */
   sets?: { cls: WeaponClass; count: number }[];
+  /** 双人联机队友战绩（存在则渲染双人结算栏与返回大厅按钮） */
+  coopPartner?: CoopResultPlayer & { roleLabel: string };
 }
 
 /** 波次结束后，等花蜜飞回来的时间 */
@@ -197,6 +202,8 @@ export class GameScene extends Phaser.Scene {
   private waveKillsById: Record<string, number> = {};
   /** 本局新解锁的角色 */
   private unlocked: string[] = [];
+  private coopHost: CoopHostController | null = null;
+  private enemyTarget: 1 | 2 = 1;
   private readonly contactBuf: Enemy[] = [];
   private readonly touching: Enemy[] = [];
 
@@ -240,6 +247,9 @@ export class GameScene extends Phaser.Scene {
     this.padDashDown = false;
     this.padPauseDown = false;
     this.waveKillsById = {};
+    this.coopHost?.destroy();
+    this.coopHost = null;
+    this.enemyTarget = 1;
     touchMove.x = touchMove.y = 0;
     touchMove.active = false;
     touchMove.keyboardActive = false;
@@ -276,6 +286,39 @@ export class GameScene extends Phaser.Scene {
     this.projectiles.onExplode = (r) => this.triggerHitstop(r >= 80 ? 0.032 : 0.022);
     this.weapons.onLightningHit = (x, y, dmg) => this.arena.conductLightning(x, y, dmg, this.enemies);
 
+    if (coop.isHost && coop.match) {
+      this.coopHost = new CoopHostController({
+        scene: this,
+        run1: this.run,
+        player1: this.player,
+        weapons1: this.weapons,
+        summons1: this.summons,
+        enemies: this.enemies,
+        projectiles: this.projectiles,
+        shots: this.shots,
+        hazards: this.hazards,
+        pickups: this.pickups,
+        arena: this.arena,
+        fx: this.fx,
+        match: coop.match,
+        onBothDowned: () => this.die(),
+        onRemotePause: (paused) => {
+          const ui = this.scene.get('UI') as unknown as { applyRemotePause?: (p: boolean) => void };
+          ui?.applyRemotePause?.(paused);
+        },
+        onBothReady: () => {
+          if (this.scene.isActive('Intermission')) this.scene.stop('Intermission');
+          this.startWave(this.run.wave + 1);
+        },
+        onStartEndless: () => bus.emit(EVT.CONTINUE_ENDLESS),
+        onFinishRun: () => bus.emit(EVT.FINISH_RUN),
+      });
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        this.coopHost?.destroy();
+        this.coopHost = null;
+      });
+    }
+
     const scene = this;
     this.arena.host = {
       get px() {
@@ -287,10 +330,15 @@ export class GameScene extends Phaser.Scene {
       get pr() {
         return scene.player.radius;
       },
+      get p2() {
+        const ch = scene.coopHost;
+        return ch ? { x: ch.player2.x, y: ch.player2.y, r: ch.player2.radius, alive: !ch.p2Downed } : undefined;
+      },
       get wave() {
         return scene.run.wave;
       },
       hurtPlayer: (d) => this.damagePlayer(d),
+      hurtPlayer2: (d) => this.coopHost?.damagePlayer2(d),
       onBloomComplete: (bx, by) => this.onBloomComplete(bx, by),
       onArenaHint: (text) => {
         scene.run.arenaHint = text;
@@ -298,13 +346,13 @@ export class GameScene extends Phaser.Scene {
     };
     const host: EnemyHost = {
       get px() {
-        return scene.player.x;
+        return scene.enemyTarget === 2 && scene.coopHost ? scene.coopHost.player2.x : scene.player.x;
       },
       get py() {
-        return scene.player.y;
+        return scene.enemyTarget === 2 && scene.coopHost ? scene.coopHost.player2.y : scene.player.y;
       },
       get pr() {
-        return scene.player.radius;
+        return scene.enemyTarget === 2 && scene.coopHost ? scene.coopHost.player2.radius : scene.player.radius;
       },
       get wave() {
         return scene.run.wave;
@@ -316,7 +364,7 @@ export class GameScene extends Phaser.Scene {
         return scene.run.mods;
       },
       get curse() {
-        return scene.run.stats.curse;
+        return scene.run.stats.curse + (scene.coopHost ? scene.coopHost.run2.stats.curse : 0);
       },
       get enemySpeedMult() {
         return scene.run.hasMutator('turbo') ? 1.15 : 1;
@@ -324,8 +372,50 @@ export class GameScene extends Phaser.Scene {
       get boomParty() {
         return scene.run.hasMutator('boom_party');
       },
+      get coopHpMult() {
+        return scene.coopHost ? 1.45 : 1;
+      },
+      get coopBossHpMult() {
+        return scene.coopHost ? 1.65 : 1;
+      },
+      selectTarget: (x, y) => {
+        scene.enemyTarget = scene.coopHost ? scene.coopHost.nearestLivingTarget(x, y) : 1;
+      },
+      hurtPlayersInCircle: (cx, cy, radius, damage) => {
+        if (!scene.coopHost?.p1Downed) {
+          const dx = scene.player.x - cx;
+          const dy = scene.player.y - cy;
+          if (dx * dx + dy * dy < (radius + scene.player.radius) ** 2) scene.damagePlayer(damage);
+        }
+        if (scene.coopHost && !scene.coopHost.p2Downed) {
+          const p2 = scene.coopHost.player2;
+          const dx = p2.x - cx;
+          const dy = p2.y - cy;
+          if (dx * dx + dy * dy < (radius + p2.radius) ** 2) scene.coopHost.damagePlayer2(damage);
+        }
+      },
+      hurtPlayersInSegment: (x0, y0, x1, y1, halfW, damage) => {
+        const vx = x1 - x0;
+        const vy = y1 - y0;
+        const len2 = vx * vx + vy * vy || 1;
+        const check = (px: number, py: number, pr: number, hurt: () => void) => {
+          const proj = Phaser.Math.Clamp(((px - x0) * vx + (py - y0) * vy) / len2, 0, 1);
+          const cx = x0 + vx * proj;
+          const cy = y0 + vy * proj;
+          const hitR = halfW + pr * 0.85;
+          if ((px - cx) ** 2 + (py - cy) ** 2 <= hitR * hitR) hurt();
+        };
+        if (!scene.coopHost?.p1Downed) check(scene.player.x, scene.player.y, scene.player.radius, () => scene.damagePlayer(damage));
+        if (scene.coopHost && !scene.coopHost.p2Downed) {
+          const p2 = scene.coopHost.player2;
+          check(p2.x, p2.y, p2.radius, () => scene.coopHost!.damagePlayer2(damage));
+        }
+      },
       onLightningStrike: (x, y, dmg) => this.arena.conductLightning(x, y, dmg, this.enemies),
-      hurtPlayer: (d) => this.damagePlayer(d),
+      hurtPlayer: (d) => {
+        if (scene.enemyTarget === 2 && scene.coopHost) scene.coopHost.damagePlayer2(d);
+        else scene.damagePlayer(d);
+      },
       shoot: (x, y, a, sp, d, kind) => this.shots.fire(x, y, a, sp, d, kind),
     };
     this.enemies.host = host;
@@ -406,7 +496,8 @@ export class GameScene extends Phaser.Scene {
     listen(this, EVT.CONTINUE_ENDLESS, () => {
       this.run.endless = true;
       this.run.phase = 'intermission';
-      saveActiveRun(this.run.serialize());
+      if (!this.coopHost) saveActiveRun(this.run.serialize());
+      else this.coopHost.onWaveEnterIntermission(0, 0);
       bus.emit(EVT.INTERMISSION);
       bgm.setMode('shop');
       this.scene.launch('Intermission');
@@ -451,25 +542,30 @@ export class GameScene extends Phaser.Scene {
     }
 
     const stats = run.stats;
+    const p1Downed = !!this.coopHost?.p1Downed;
     this.pollGamepadActions();
-    const [ix, iy] = this.readInput();
-    this.moving = Math.hypot(ix, iy) > 0.1;
-    this.idleTime = Math.hypot(ix, iy) > 0.05 ? 0 : this.idleTime + dt;
+    const [rawIx, rawIy] = this.readInput();
+    const ix = p1Downed ? 0 : rawIx;
+    const iy = p1Downed ? 0 : rawIy;
+    this.moving = !p1Downed && Math.hypot(ix, iy) > 0.1;
+    this.idleTime = p1Downed || Math.hypot(ix, iy) > 0.05 ? 0 : this.idleTime + dt;
     this.ramCd = Math.max(0, this.ramCd - dt);
     this.overhealCd = Math.max(0, this.overhealCd - dt);
     this.player.syncDashConfig(run.maxDashCharges, stats.speedPct, run.mods.dashCooldownPct);
     const [windX, windY] = run.phase === 'combat' ? this.arena.windVector : [0, 0];
-    const dashEnded = this.player.update(
-      dt,
-      ix,
-      iy,
-      moveSpeed(stats),
-      run.shield > 0,
-      windX,
-      windY,
-      !!run.biome.slippery,
-      this.arena.obstacles,
-    );
+    const dashEnded = p1Downed
+      ? false
+      : this.player.update(
+          dt,
+          ix,
+          iy,
+          moveSpeed(stats),
+          run.shield > 0,
+          windX,
+          windY,
+          !!run.biome.slippery,
+          this.arena.obstacles,
+        );
     run.dashCharges = this.player.dashCharges;
     run.dashRatio =
       this.player.dashCharges >= this.player.maxDashCharges
@@ -478,12 +574,12 @@ export class GameScene extends Phaser.Scene {
           ? Math.max(0, 1 - this.player.dashCd / Math.max(0.1, this.player.dashCdMax))
           : 1;
     run.frenzyTime = this.player.frenzyTime;
-    if (this.player.dashTime > 0) {
+    if (!p1Downed && this.player.dashTime > 0) {
       if (Math.random() < dt * 45) {
         this.fx.streaks(this.player.x, this.player.y, this.player.view.rotation + Math.PI, 0xb8f4ff, 1, 130, 0.72);
       }
       if (run.phase === 'combat') this.updateDashActive(dt);
-    } else if (this.player.frenzyTime > 0 && Math.random() < dt * 18) {
+    } else if (!p1Downed && this.player.frenzyTime > 0 && Math.random() < dt * 18) {
       this.fx.burst(this.player.x, this.player.y, 0xffd44c, 1, 65, 0.6);
     }
     if (dashEnded && run.phase === 'combat') this.onDashEnd();
@@ -501,63 +597,79 @@ export class GameScene extends Phaser.Scene {
       const lsCap = run.character.perks.lifestealOnly ? 13 : 10;
       this.lifestealBudget = Math.min(lsCap, this.lifestealBudget + lsCap * dt);
       this.spawner.update(dt, this.elapsed, this.player.x, this.player.y);
-      const missingTenths = Math.floor(Math.max(0, 1 - run.hp / run.maxHp) * 10);
-      const frenzyAspd = this.player.frenzyTime > 0 ? 0.25 : 0;
-      const combatStats =
-        (run.mods.bloodRage > 0 && missingTenths > 0) || frenzyAspd > 0
-          ? {
-              ...stats,
-              damagePct: stats.damagePct + (run.mods.bloodRage > 0 ? missingTenths * 0.08 * run.mods.bloodRage : 0),
-              attackSpeedPct: stats.attackSpeedPct + (run.mods.bloodRage > 0 ? missingTenths * 0.06 * run.mods.bloodRage : 0) + frenzyAspd,
-            }
-          : stats;
-      // 手瞄 / 按住鼠标左键集火（桌面端）
-      const aimPoint = this.resolveManualAim();
-      this.weapons.update(dt, {
-        stats: combatStats,
-        mods: run.mods,
-        damageMult: this.damageMult(),
-        hpRatio: run.hp / run.maxHp,
-        emptySlots: Math.max(0, run.weaponSlots - run.weapons.length),
-        moving: this.moving,
-        workers: run.workerCount,
-        workerTier: run.workerTier,
-        workerHp: Math.round((12 + 4 * (run.wave - 1)) * (1 + Math.max(0, stats.armor) * 0.04)),
-        aimPoint,
-        mantisCrit: this.player.mantisCritTime > 0,
-      });
-      const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0) + run.mods.selfDamagePerSec;
-      if (selfDps > 0 && run.phase === 'combat') {
-        this.selfDamageAcc += selfDps * dt;
-        const n = Math.floor(this.selfDamageAcc);
-        if (n > 0) {
-          this.selfDamageAcc -= n;
-          run.hp -= n;
-          this.fx.number(this.player.x, this.player.y - 26, n, 'player');
-          if (run.hp <= 0) this.die();
+      if (!p1Downed) {
+        const missingTenths = Math.floor(Math.max(0, 1 - run.hp / run.maxHp) * 10);
+        const frenzyAspd = this.player.frenzyTime > 0 ? 0.25 : 0;
+        const combatStats =
+          (run.mods.bloodRage > 0 && missingTenths > 0) || frenzyAspd > 0
+            ? {
+                ...stats,
+                damagePct: stats.damagePct + (run.mods.bloodRage > 0 ? missingTenths * 0.08 * run.mods.bloodRage : 0),
+                attackSpeedPct: stats.attackSpeedPct + (run.mods.bloodRage > 0 ? missingTenths * 0.06 * run.mods.bloodRage : 0) + frenzyAspd,
+              }
+            : stats;
+        // 手瞄 / 按住鼠标左键集火（桌面端）
+        const aimPoint = this.resolveManualAim();
+        this.weapons.update(dt, {
+          stats: combatStats,
+          mods: run.mods,
+          damageMult: this.damageMult(),
+          hpRatio: run.hp / run.maxHp,
+          emptySlots: Math.max(0, run.weaponSlots - run.weapons.length),
+          moving: this.moving,
+          workers: run.workerCount,
+          workerTier: run.workerTier,
+          workerHp: Math.round((12 + 4 * (run.wave - 1)) * (1 + Math.max(0, stats.armor) * 0.04)),
+          aimPoint,
+          mantisCrit: this.player.mantisCritTime > 0,
+        });
+        const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0) + run.mods.selfDamagePerSec;
+        if (selfDps > 0 && run.phase === 'combat') {
+          this.selfDamageAcc += selfDps * dt;
+          const n = Math.floor(this.selfDamageAcc);
+          if (n > 0) {
+            this.selfDamageAcc -= n;
+            run.hp -= n;
+            this.fx.number(this.player.x, this.player.y - 26, n, 'player');
+            if (run.hp <= 0 && !this.coopHost?.onPlayer1Fatal()) this.die();
+          }
         }
+        run.maxSummons = Math.max(run.maxSummons, this.summons.aliveCount);
+        if (!run.waveNoHeal) {
+          if (run.mods.torture > 0) {
+            run.hp = Math.min(run.maxHp, run.hp + 5 * dt);
+          } else {
+            run.hp = Math.min(run.maxHp, run.hp + regenPerSecond(stats) * (1 + run.mods.healingPct) * dt);
+          }
+        }
+        this.checkContact();
+        this.updateItemTimers(dt);
+      } else {
+        this.reticle.clear();
       }
-      run.maxSummons = Math.max(run.maxSummons, this.summons.aliveCount);
+      const ch = this.coopHost;
       this.shots.update(
         dt,
         this.player.x,
         this.player.y,
-        this.player.radius,
+        p1Downed ? 0 : this.player.radius,
         (d, kind) => {
           if (this.damagePlayer(d) && kind === 'silk') this.player.slowTime = SILK_SLOW_TIME;
         },
         this.arena.obstacles,
         (bx, by) => this.fx.burst(bx, by, 0xc89862, 4, 85, 0.7),
+        ch
+          ? {
+              x: ch.player2.x,
+              y: ch.player2.y,
+              r: ch.player2.radius,
+              alive: !ch.p2Downed,
+              onHit: (d, kind) => {
+                if (ch.damagePlayer2(d) && kind === 'silk') ch.player2.slowTime = SILK_SLOW_TIME;
+              },
+            }
+          : undefined,
       );
-      if (!run.waveNoHeal) {
-        if (run.mods.torture > 0) {
-          run.hp = Math.min(run.maxHp, run.hp + 5 * dt);
-        } else {
-          run.hp = Math.min(run.maxHp, run.hp + regenPerSecond(stats) * (1 + run.mods.healingPct) * dt);
-        }
-      }
-      this.checkContact();
-      this.updateItemTimers(dt);
       this.trackBoss();
       this.updateOffscreenMarkers();
       this.checkUnlocks();
@@ -567,35 +679,73 @@ export class GameScene extends Phaser.Scene {
     }
 
     const touch = run.character.perks.touchPickup;
-    this.pickups.update(
-      dt,
-      this.player,
-      touch ? this.player.radius + TOUCH_PICKUP : pickupRange(stats),
-      run.phase === 'cleanup',
-      run.mods.magnetSpeed > 0,
-    );
-    if (this.pickups.gotNectar > 0) {
-      // 蜣螂：亲自捡到的花蜜按倍率算，小数部分按概率进位（波次结束自动收走的不算）；狂潮收割赌约叠乘
-      const touchMult = touch && run.phase === 'combat' ? touch.mult : 1;
-      const mult = touchMult * (run.phase === 'combat' ? run.waveNectarMult : 1);
-      const raw = this.pickups.gotNectar * mult;
-      this.addNectar(Math.floor(raw) + (Math.random() < raw - Math.floor(raw) ? 1 : 0));
-      sfx.play('nectar');
-      if (run.mods.nectarShot > 0 && run.phase === 'combat') {
-        this.nectarShotCount += this.pickups.gotNectar;
-        while (this.nectarShotCount >= 3) {
-          this.nectarShotCount -= 3;
-          this.fireSeekingSparks(this.player.x, this.player.y, 1, 12 + 0.8 * stats.harvest);
+    if (this.coopHost) {
+      const ch = this.coopHost;
+      const got = this.pickups.updateCoop(
+        dt,
+        { x: this.player.x, y: this.player.y, radius: this.player.radius, alive: !ch.p1Downed },
+        touch ? this.player.radius + TOUCH_PICKUP : pickupRange(stats),
+        run.mods.magnetSpeed > 0,
+        { x: ch.player2.x, y: ch.player2.y, radius: ch.player2.radius, alive: !ch.p2Downed },
+        ch.getP2PickupRange(),
+        ch.run2.mods.magnetSpeed > 0,
+        run.phase === 'cleanup',
+      );
+      if (got.nectar1 > 0) {
+        const touchMult = touch && run.phase === 'combat' ? touch.mult : 1;
+        const raw = got.nectar1 * touchMult * (run.phase === 'combat' ? run.waveNectarMult : 1);
+        this.addNectar(Math.floor(raw) + (Math.random() < raw - Math.floor(raw) ? 1 : 0));
+        sfx.play('nectar');
+      }
+      if (got.chests1 > 0) this.addChests(got.chests1);
+      if (got.heals1 > 0 && run.phase === 'combat') this.heal(HEAL_AMOUNT * got.heals1);
+      if (got.frenzy1 > 0 && run.phase === 'combat') {
+        this.player.frenzyTime = 4;
+        this.fx.ring(this.player.x, this.player.y, 44, 0xffd44c);
+        this.fx.number(this.player.x, this.player.y - 36, '琥珀狂热！', 'level');
+        sfx.play('frenzy');
+      }
+      if (got.nectar2 > 0) {
+        const touch2 = ch.run2.character.perks.touchPickup;
+        const mult2 = (touch2 && run.phase === 'combat' ? touch2.mult : 1) * (run.phase === 'combat' ? ch.run2.waveNectarMult : 1);
+        const raw2 = got.nectar2 * mult2;
+        ch.addNectarP2(Math.floor(raw2) + (Math.random() < raw2 - Math.floor(raw2) ? 1 : 0));
+        ch.pushSfx('nectar');
+      }
+      if (got.chests2 > 0) ch.addChestsP2(got.chests2);
+      if (got.heals2 > 0 && run.phase === 'combat') ch.healP2(HEAL_AMOUNT * got.heals2);
+      if (got.frenzy2 > 0 && run.phase === 'combat') ch.giveFrenzyP2(4);
+      ch.update(dt, windX, windY, this.moving);
+    } else {
+      this.pickups.update(
+        dt,
+        this.player,
+        touch ? this.player.radius + TOUCH_PICKUP : pickupRange(stats),
+        run.phase === 'cleanup',
+        run.mods.magnetSpeed > 0,
+      );
+      if (this.pickups.gotNectar > 0) {
+        const touchMult = touch && run.phase === 'combat' ? touch.mult : 1;
+        const mult = touchMult * (run.phase === 'combat' ? run.waveNectarMult : 1);
+        const raw = this.pickups.gotNectar * mult;
+        this.addNectar(Math.floor(raw) + (Math.random() < raw - Math.floor(raw) ? 1 : 0));
+        sfx.play('nectar');
+        if (run.mods.nectarShot > 0 && run.phase === 'combat') {
+          this.nectarShotCount += this.pickups.gotNectar;
+          while (this.nectarShotCount >= 3) {
+            this.nectarShotCount -= 3;
+            this.fireSeekingSparks(this.player.x, this.player.y, 1, 12 + 0.8 * stats.harvest);
+          }
         }
       }
-    }
-    if (this.pickups.gotChests > 0) this.addChests(this.pickups.gotChests);
-    if (this.pickups.gotHeals > 0 && run.phase === 'combat') this.heal(HEAL_AMOUNT * this.pickups.gotHeals);
-    if (this.pickups.gotFrenzy > 0 && run.phase === 'combat') {
-      this.player.frenzyTime = 4;
-      this.fx.ring(this.player.x, this.player.y, 44, 0xffd44c);
-      this.fx.number(this.player.x, this.player.y - 36, '琥珀狂热！', 'level');
-      sfx.play('frenzy');
+      if (this.pickups.gotChests > 0) this.addChests(this.pickups.gotChests);
+      if (this.pickups.gotHeals > 0 && run.phase === 'combat') this.heal(HEAL_AMOUNT * this.pickups.gotHeals);
+      if (this.pickups.gotFrenzy > 0 && run.phase === 'combat') {
+        this.player.frenzyTime = 4;
+        this.fx.ring(this.player.x, this.player.y, 44, 0xffd44c);
+        this.fx.number(this.player.x, this.player.y - 36, '琥珀狂热！', 'level');
+        sfx.play('frenzy');
+      }
     }
     this.fx.update(dt);
 
@@ -603,7 +753,7 @@ export class GameScene extends Phaser.Scene {
       const def = this.currentWaveDef(run.wave);
       const duration = def.duration;
       run.waveTimeLeft = duration === null ? Infinity : Math.max(0, duration - this.elapsed);
-      if (run.hp <= 0) this.die();
+      if (run.hp <= 0 && !this.coopHost?.onPlayer1Fatal()) this.die();
       else if (run.waveTimeLeft <= 0 || this.bossDown) this.endWave();
     } else if (run.phase === 'cleanup') {
       this.phaseTimer -= dt;
@@ -776,7 +926,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.weapons.sync(run.weapons, run.weaponSlots);
     this.arena.startWave(run.activeWeather, run.biome, arenaRng);
-    const spawnBonus = run.mods.spawnRatePct + (contract === 'swarm_harvest' ? 0.4 : 0);
+    const spawnBonus = run.mods.spawnRatePct + (contract === 'swarm_harvest' ? 0.4 : 0) + (this.coopHost ? 0.35 : 0);
+    this.coopHost?.startWave(n);
     this.spawner.startWave(def, n, run.difficulty, spawnBonus, run.hasMutator('treasure'), {
       boomParty: run.hasMutator('boom_party'),
       extraElite: contract === 'elite_bounty',
@@ -1224,7 +1375,7 @@ export class GameScene extends Phaser.Scene {
 
   private performDash(): void {
     const run = this.run;
-    if (run.phase !== 'combat' || this.scene.isPaused('Game')) return;
+    if (run.phase !== 'combat' || this.scene.isPaused('Game') || this.coopHost?.p1Downed) return;
     const [ix, iy] = this.readInput();
     if (!this.player.tryDash(ix, iy, run.stats.speedPct, run.mods.dashCooldownPct, run.maxDashCharges)) return;
     this.dashHitSet.clear();
@@ -1544,6 +1695,12 @@ export class GameScene extends Phaser.Scene {
     if (bloom && isOff(bloom.x, bloom.y)) {
       markers.push({ x: bloom.x, y: bloom.y, kind: 'bloom' });
     }
+    if (this.coopHost) {
+      const p2 = this.coopHost.player2;
+      if (isOff(p2.x, p2.y)) {
+        markers.push({ x: p2.x, y: p2.y, kind: this.coopHost.p2Downed ? 'ally_down' : 'ally' });
+      }
+    }
   }
 
   private trackBoss(): void {
@@ -1635,13 +1792,25 @@ export class GameScene extends Phaser.Scene {
     run.arenaHint = '';
     bus.emit(EVT.WAVE_CLEAR, run.wave);
     sfx.play('waveClear');
+    this.coopHost?.onWaveEndCleanup();
   }
 
   private finishWave(): void {
     const run = this.run;
     const left = this.pickups.collectAll();
-    if (left.nectar > 0) this.addNectar(left.nectar);
-    if (left.chests > 0) run.chests += left.chests;
+    let p2LeftNectar = 0;
+    let p2LeftChests = 0;
+    if (this.coopHost) {
+      const p1N = Math.ceil(left.nectar / 2);
+      p2LeftNectar = left.nectar - p1N;
+      const p1C = Math.ceil(left.chests / 2);
+      p2LeftChests = left.chests - p1C;
+      if (p1N > 0) this.addNectar(p1N);
+      if (p1C > 0) run.chests += p1C;
+    } else {
+      if (left.nectar > 0) this.addNectar(left.nectar);
+      if (left.chests > 0) run.chests += left.chests;
+    }
 
     // 兑现本波已完成的里程碑后院赌约奖励
     const doneContract = run.activeContract;
@@ -1701,6 +1870,7 @@ export class GameScene extends Phaser.Scene {
       if (run.setup.challenge) {
         this.time.delayedCall(1200, () => this.toResult(true));
       } else {
+        this.coopHost?.notifyVictoryChoice();
         this.time.delayedCall(950, () => bus.emit(EVT.VICTORY_CHOICE));
       }
       return;
@@ -1708,7 +1878,11 @@ export class GameScene extends Phaser.Scene {
     this.checkUnlocks();
     run.phase = 'intermission';
     bgm.setMode('shop');
-    saveActiveRun(run.serialize());
+    if (this.coopHost) {
+      this.coopHost.onWaveEnterIntermission(p2LeftNectar, p2LeftChests);
+    } else {
+      saveActiveRun(run.serialize());
+    }
     bus.emit(EVT.INTERMISSION);
     this.scene.launch('Intermission');
   }
@@ -1754,6 +1928,7 @@ export class GameScene extends Phaser.Scene {
     const newEndlessRecord = run.endless ? recordEndlessWave(character, run.wave) : false;
     const newDailyBest = run.setup.daily ? recordDailyResult(run.setup.daily, run.wave, win) : false;
     const newChallengeCleared = run.setup.challenge && win ? recordChallengeCleared(run.setup.challenge) : false;
+    const coopRes = this.coopHost ? this.coopHost.sendMatchResult(win) : null;
     const data: ResultData = {
       win,
       endless: run.endless,
@@ -1778,6 +1953,7 @@ export class GameScene extends Phaser.Scene {
       unlocked: this.unlocked,
       weapons: run.weapons.map((w) => ({ id: w.id, tier: w.tier, totalDamage: w.totalDamage ?? 0 })),
       sets: activeSets(run.weapons).map((s) => ({ cls: s.cls, count: s.count })),
+      coopPartner: coopRes ? { roleLabel: 'P2 · 队友', ...coopRes.guest } : undefined,
     };
     this.scene.stop('UI');
     this.scene.start('Result', data);

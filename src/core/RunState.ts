@@ -37,7 +37,18 @@ export interface OwnedWeapon {
 export interface OffscreenMarker {
   x: number;
   y: number;
-  kind: 'lootbug' | 'elite' | 'boss' | 'chest' | 'bloom';
+  kind: 'lootbug' | 'elite' | 'boss' | 'chest' | 'bloom' | 'ally' | 'ally_down';
+}
+
+export interface CoopTeammateHud {
+  name: string;
+  hp: number;
+  maxHp: number;
+  level: number;
+  downed: boolean;
+  revivePct: number;
+  x: number;
+  y: number;
 }
 
 /** 局中断点续玩存档结构（波间进入商店时自动保存） */
@@ -203,8 +214,14 @@ export class RunState {
 
   /** Boss 战时的血量，给 HUD 显示 */
   boss: { name: string; hp: number; maxHp: number } | null = null;
-  /** 屏幕外高价值目标方向指示（宝藏虫、精英、Boss、宝箱、金露花） */
+  /** 屏幕外高价值目标方向指示（宝藏虫、精英、Boss、宝箱、金露花、队友） */
   offscreenMarkers: OffscreenMarker[] = [];
+  /** 双人联机：队友实时简要状态（供 HUD 展示，单人局为 null） */
+  coopTeammate: CoopTeammateHud | null = null;
+  /** 双人联机：自己当前是否倒地等待救援 */
+  coopDowned = false;
+  /** 双人联机：自己被救起的读条进度（0~1） */
+  coopRevivePct = 0;
   /** 主动冲刺充能进度（0~1，1 表示当前充能格已满） */
   dashRatio = 1;
   /** 当前可用冲刺次数 & 最大充能次数 */
