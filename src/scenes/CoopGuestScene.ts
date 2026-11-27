@@ -84,6 +84,7 @@ export class CoopGuestScene extends Phaser.Scene {
   private padDashDown = false;
   private padPauseDown = false;
   private lastWave = 0;
+  private deadNotified = false;
   private unsubMsg: (() => void) | null = null;
   private unsubState: (() => void) | null = null;
   private unsubSettings: (() => void) | null = null;
@@ -117,6 +118,7 @@ export class CoopGuestScene extends Phaser.Scene {
     this.padDashDown = false;
     this.padPauseDown = false;
     this.lastWave = 1;
+    this.deadNotified = false;
     touchMove.x = touchMove.y = 0;
     touchMove.active = false;
     touchMove.keyboardActive = false;
@@ -412,6 +414,10 @@ export class CoopGuestScene extends Phaser.Scene {
       bus.emit(EVT.WAVE_START, s.wave);
     }
     if (run.phase !== 'intermission') run.phase = s.phase;
+    if (s.phase === 'dead' && !this.deadNotified) {
+      this.deadNotified = true;
+      bus.emit(EVT.PLAYER_DEAD);
+    }
     run.waveTimeLeft = s.waveTimeLeft < 0 ? Infinity : s.waveTimeLeft;
     run.activeWeather = s.activeWeather;
     run.arenaHint = s.arenaHint;

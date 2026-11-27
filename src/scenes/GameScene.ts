@@ -330,6 +330,9 @@ export class GameScene extends Phaser.Scene {
       get pr() {
         return scene.player.radius;
       },
+      get p1Alive() {
+        return !scene.coopHost?.p1Downed;
+      },
       get p2() {
         const ch = scene.coopHost;
         return ch ? { x: ch.player2.x, y: ch.player2.y, r: ch.player2.radius, alive: !ch.p2Downed } : undefined;
@@ -528,6 +531,7 @@ export class GameScene extends Phaser.Scene {
       this.enemies.update(dt);
       this.tel.update(dt);
       this.fx.update(dt);
+      if (run.phase === 'dead') this.coopHost?.tickDeadSnapshot(dt);
       return;
     }
     if (run.phase === 'intermission') {
@@ -596,7 +600,8 @@ export class GameScene extends Phaser.Scene {
       this.streakCd = Math.max(0, this.streakCd - dt);
       const lsCap = run.character.perks.lifestealOnly ? 13 : 10;
       this.lifestealBudget = Math.min(lsCap, this.lifestealBudget + lsCap * dt);
-      this.spawner.update(dt, this.elapsed, this.player.x, this.player.y);
+      const spawnAnchor = p1Downed && this.coopHost && !this.coopHost.p2Downed ? this.coopHost.player2 : this.player;
+      this.spawner.update(dt, this.elapsed, spawnAnchor.x, spawnAnchor.y);
       if (!p1Downed) {
         const missingTenths = Math.floor(Math.max(0, 1 - run.hp / run.maxHp) * 10);
         const frenzyAspd = this.player.frenzyTime > 0 ? 0.25 : 0;
@@ -1012,7 +1017,7 @@ export class GameScene extends Phaser.Scene {
   private damagePlayer(raw: number): boolean {
     const run = this.run;
     const p = this.player;
-    if (run.phase !== 'combat' || p.invuln > 0) return false;
+    if (run.phase !== 'combat' || p.invuln > 0 || this.coopHost?.p1Downed) return false;
     p.invuln = INVULN_TIME;
     this.weapons?.resetRamps();
     if (Math.random() < dodgeChance(run.stats)) {
@@ -1028,7 +1033,7 @@ export class GameScene extends Phaser.Scene {
       return false;
     }
     const dmg = Math.max(1, Math.round(raw * run.waveEnemyDamageMult * damageTakenMultiplier(run.stats.armor)));
-    run.hp -= dmg;
+    run.hp = Math.max(0, run.hp - dmg);
     // 力量三角（Triangle of Power）：每次受伤本波伤害 −2%
     if (run.mods.trianglePenalty > 0) {
       run.waveDamagePenalty += 0.02 * run.mods.trianglePenalty;
@@ -1060,13 +1065,17 @@ export class GameScene extends Phaser.Scene {
       const stats = run.stats;
       this.hazards.addCloud(p.x, p.y, 80 + 10 * stink, 2, (2 + stats.toxin) * stink, poisonPerStack(stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
     }
+    // 联机下立刻结算倒地/全灭，避免同帧内 P2 状态判断出现竞争
+    if (run.hp <= 0 && this.coopHost) {
+      if (!this.coopHost.onPlayer1Fatal()) this.die();
+    }
     return true;
   }
 
   /** 回血：吃治疗效果加成；蚊子只能靠吸取回血；吸取受全局速率桶限制防高频永动；传入来源坐标时发射吸取光丝 */
   private heal(n: number, kind: 'lifesteal' | 'other' = 'other', fromX?: number, fromY?: number): void {
     const run = this.run;
-    if (run.mods.torture > 0 || run.waveNoHeal) return;
+    if (this.coopHost?.p1Downed || run.phase !== 'combat' || run.mods.torture > 0 || run.waveNoHeal) return;
     if (kind === 'other' && run.character.perks.lifestealOnly) return;
     let effectiveN = n;
     if (kind === 'lifesteal') {
@@ -1889,6 +1898,8 @@ export class GameScene extends Phaser.Scene {
 
   private die(): void {
     const run = this.run;
+    if (run.phase === 'dead') return;
+    this.hitstop = 0;
     recordEnemyKillsBatch(this.waveKillsById);
     this.waveKillsById = {};
     const p = this.player;
@@ -1901,12 +1912,14 @@ export class GameScene extends Phaser.Scene {
     this.arena.clear();
     this.summons.clear();
     this.weapons.clearDevices();
+    this.coopHost?.onBothDownedSync();
     this.fx.burst(p.x, p.y, 0xe8832a, 36, 280, 1.5);
     this.fx.burst(p.x, p.y, 0x4a2208, 18, 200, 1.2);
     p.view.setVisible(false);
     shake(this, 260, 0.012);
     sfx.play('death');
     bus.emit(EVT.PLAYER_DEAD);
+    if (this.scene.isPaused('Game')) this.scene.resume('Game');
     this.time.delayedCall(1600, () => this.toResult(run.won));
   }
 

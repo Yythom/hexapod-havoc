@@ -136,6 +136,7 @@ export class UIScene extends Phaser.Scene {
       this.tweens.add({ targets: this.levelText, scale: 1, duration: 350, ease: 'Back.Out' });
     });
     listen(this, EVT.PLAYER_DEAD, () => {
+      if (this.paused) this.resume(false);
       this.joystick.setEnabled(false);
       this.banner(this.run.endless ? `无尽止步第 ${this.run.wave} 波` : '被虫潮淹没了…', this.run.endless ? '#ffd44c' : '#ff5d57');
     });
@@ -158,12 +159,14 @@ export class UIScene extends Phaser.Scene {
       if (!this.guideModal) this.modalAction?.();
     });
 
-    const autoPause = () => this.pause();
+    const autoPause = () => {
+      if (!coop.isCoopMatch) this.pause();
+    };
     this.game.events.on(Phaser.Core.Events.BLUR, autoPause);
     this.game.events.on(Phaser.Core.Events.HIDDEN, autoPause);
     const portrait = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
     const onOrientation = () => {
-      if (portrait.matches) this.pause();
+      if (portrait.matches && !coop.isCoopMatch) this.pause();
     };
     portrait.addEventListener('change', onOrientation);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -253,7 +256,7 @@ export class UIScene extends Phaser.Scene {
     const prevFlash = this.hpFlash;
     if (this.hpFlash > 0) this.hpFlash = Math.max(0, this.hpFlash - dt * 5.5);
 
-    const hp = Math.max(0, Math.ceil(r.hp));
+    const hp = r.coopDowned ? 0 : Math.max(0, Math.ceil(r.hp));
     const hpRatio = r.maxHp > 0 ? Math.min(1, hp / r.maxHp) : 0;
     const prevLag = this.hpLag;
     if (this.hpLag > hpRatio) {
@@ -262,8 +265,8 @@ export class UIScene extends Phaser.Scene {
       this.hpLag = hpRatio;
     }
     const lowPulse = hpRatio < LOW_HP && r.phase === 'combat' && hp > 0;
-    if (hp !== this.shown.hp || r.maxHp !== this.shown.maxHp || Math.abs(this.hpLag - prevLag) > 0.002 || lowPulse || prevFlash > 0) {
-      this.shown.hp = hp;
+    if (r.coopDowned || hp !== this.shown.hp || r.maxHp !== this.shown.maxHp || Math.abs(this.hpLag - prevLag) > 0.002 || lowPulse || prevFlash > 0) {
+      this.shown.hp = r.coopDowned ? -1 : hp;
       this.shown.maxHp = r.maxHp;
       this.drawHp(hp, r.maxHp, hpRatio);
     }
@@ -553,6 +556,16 @@ export class UIScene extends Phaser.Scene {
 
     if (this.hpLag > k + 0.005) {
       fillPoly(g, chamferPoints(x + 1, y + 1, Math.max(10, (w - 2) * this.hpLag), h - 2, 5, 2, 5, 2), 0xf2e4c4, 0.85);
+    }
+
+    const downed = this.run.coopDowned && this.run.phase === 'combat';
+    if (downed) {
+      if (this.run.coopRevivePct > 0.01) {
+        this.fillBarSlice(g, x + 1, y + 1, w - 2, h - 2, this.run.coopRevivePct, 5, 2, 0x5de862);
+      }
+      strokePoly(g, pts, 3, 0xff5a52, 0.7 + 0.3 * Math.sin(this.pulseTime * 10));
+      this.hpText.setText(this.run.coopRevivePct > 0.01 ? `救援中 ${Math.round(this.run.coopRevivePct * 100)}%` : '倒地 · 等待救援');
+      return;
     }
 
     if (k > 0) {

@@ -79,6 +79,8 @@ export interface ArenaHost {
   px: number;
   py: number;
   pr: number;
+  /** 双人联机：P1 是否存活（倒地时不可充能金露花也不再吃天雷） */
+  p1Alive?: boolean;
   wave: number;
   /** 双人联机：额外检查 2P 坐标（用于金露花抢点与自然天雷） */
   p2?: { x: number; y: number; r: number; alive: boolean };
@@ -400,9 +402,11 @@ export class BackyardArena {
       this.fx.ring(s.x, s.y, s.r, 0x9ceeff);
       sfx.play('lightning');
       // 玩家在圈内受击（双人模式两位玩家都检测）
-      const pdx = h.px - s.x;
-      const pdy = h.py - s.y;
-      if (pdx * pdx + pdy * pdy < (s.r + h.pr) ** 2) h.hurtPlayer(s.playerDamage);
+      if (h.p1Alive !== false) {
+        const pdx = h.px - s.x;
+        const pdy = h.py - s.y;
+        if (pdx * pdx + pdy * pdy < (s.r + h.pr) ** 2) h.hurtPlayer(s.playerDamage);
+      }
       if (h.p2 && h.p2.alive) {
         const pdx2 = h.p2.x - s.x;
         const pdy2 = h.p2.y - s.y;
@@ -426,7 +430,7 @@ export class BackyardArena {
     if (this.bloom) {
       const b = this.bloom;
       b.life -= dt;
-      const in1 = Math.hypot(h.px - b.x, h.py - b.y) <= b.r + h.pr;
+      const in1 = h.p1Alive !== false && Math.hypot(h.px - b.x, h.py - b.y) <= b.r + h.pr;
       const in2 = !!(h.p2 && h.p2.alive && Math.hypot(h.p2.x - b.x, h.p2.y - b.y) <= b.r + h.p2.r);
       if (in1 || in2) {
         b.charge += dt * (in1 && in2 ? 1.5 : 1);

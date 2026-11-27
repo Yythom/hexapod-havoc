@@ -387,13 +387,21 @@ export class CoopHostController {
     }
   }
 
-  /** P1 生命归零时尝试转入倒地状态；若 P2 也已倒地则返回 false（全灭） */
+  /** P1 生命归零时尝试转入倒地状态；若 P2 也已倒地或没血则返回 false（全灭） */
   onPlayer1Fatal(): boolean {
-    if (this.p2Downed) return false;
+    if (this.p2Downed || this.run2.hp <= 0) {
+      this.p1Downed = true;
+      this.p2Downed = true;
+      this.deps.run1.hp = 0;
+      this.run2.hp = 0;
+      return false;
+    }
     if (!this.p1Downed) {
       this.p1Downed = true;
       this.p1Revive = 0;
       this.deps.run1.hp = 0;
+      this.deps.player1.dashTime = 0;
+      this.deps.player1.resetMotion();
       this.deps.player1.view.setAlpha(0.48);
       this.deps.fx.ring(this.deps.player1.x, this.deps.player1.y, REVIVE_RADIUS, 0xff5d57);
       this.pushFx({ t: 'ring', x: Math.round(this.deps.player1.x), y: Math.round(this.deps.player1.y), r: REVIVE_RADIUS, col: 0xff5d57 });
@@ -401,8 +409,35 @@ export class CoopHostController {
       bus.emit(EVT.WAVE_EVENT, '⚠ 你已倒地！等待 P2 队友救援', '#ff7a72');
       sfx.play('hurt');
       this.pushSfx('hurt');
+      this.syncHudState();
+      this.sendSnapshot(false);
     }
     return true;
+  }
+
+  /** 双方全灭时清理 P2 战场对象并立刻推送死亡状态快照，避免客机在 1.6s 过渡期间卡住 */
+  onBothDownedSync(): void {
+    this.p1Downed = true;
+    this.p2Downed = true;
+    this.deps.run1.hp = 0;
+    this.run2.hp = 0;
+    this.summons2.clear();
+    this.weapons2.clearDevices();
+    this.player2.view.setVisible(false);
+    this.drawCoopOverlays(this.deps.player1, this.player2);
+    this.syncHudState();
+    this.pushSfx('death');
+    this.sendSnapshot(false);
+  }
+
+  /** 死亡过渡期间继续向客机推送快照，防止客机画面定格 */
+  tickDeadSnapshot(dt: number): void {
+    this.snapAcc += dt;
+    if (this.snapAcc >= SNAP_INTERVAL) {
+      this.snapAcc %= SNAP_INTERVAL;
+      this.syncHudState();
+      this.sendSnapshot(false);
+    }
   }
 
   /** 对 P2 造成伤害 */
@@ -449,8 +484,12 @@ export class CoopHostController {
     }
     if (r2.hp <= 0) {
       r2.hp = 0;
-      if (this.p1Downed) {
+      p2.dashTime = 0;
+      p2.resetMotion();
+      if (this.p1Downed || this.deps.run1.hp <= 0) {
+        this.p1Downed = true;
         this.p2Downed = true;
+        this.deps.run1.hp = 0;
         this.deps.onBothDowned();
       } else {
         this.p2Downed = true;
@@ -460,6 +499,8 @@ export class CoopHostController {
         this.pushFx({ t: 'ring', x: Math.round(p2.x), y: Math.round(p2.y), r: REVIVE_RADIUS, col: 0xff5d57 });
         this.pushFx({ t: 'banner', text: '⚠ 你已倒地！等待 P1 队友救援', col: '#ff7a72' });
         bus.emit(EVT.WAVE_EVENT, '⚠ P2 队友倒地！靠近红圈 2.5 秒救起', '#ff7a72');
+        this.syncHudState();
+        this.sendSnapshot(false);
       }
     }
     return true;
@@ -869,11 +910,13 @@ export class CoopHostController {
   private syncHudState(): void {
     const r1 = this.deps.run1;
     const r2 = this.run2;
+    if (this.p1Downed) r1.hp = 0;
+    if (this.p2Downed) r2.hp = 0;
     r1.coopDowned = this.p1Downed;
     r1.coopRevivePct = this.p1Revive;
     r1.coopTeammate = {
       name: `P2 · ${r2.character.name}`,
-      hp: Math.max(0, Math.ceil(r2.hp)),
+      hp: this.p2Downed ? 0 : Math.max(0, Math.ceil(r2.hp)),
       maxHp: r2.maxHp,
       level: r2.level,
       downed: this.p2Downed,
@@ -894,7 +937,7 @@ export class CoopHostController {
       x: Math.round(p.x),
       y: Math.round(p.y),
       rot: Math.round(p.view.rotation * 100) / 100,
-      hp: Math.max(0, Math.ceil(run.hp)),
+      hp: downed ? 0 : Math.max(0, Math.ceil(run.hp)),
       maxHp: run.maxHp,
       shield: run.shield,
       downed,
