@@ -10,7 +10,7 @@ import type { Mods } from '../data/items';
 import { tierOf, WEAPONS, type WeaponDef } from '../data/weapons';
 import { MAX_SLOTS } from '../entities/BeetleView';
 import type { Player } from '../entities/Player';
-import type { BashVariant, Effects, SlashVariant } from './Effects';
+import type { BashVariant, Effects } from './Effects';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Hazards } from './Hazards';
 import type { HitResolver, HitSource } from './HitResolver';
@@ -79,6 +79,8 @@ interface Slot {
   maxRange: number;
   /** 本次挥击是否已触发过“命中目标时”的范围特效 */
   aoeFxFired: boolean;
+  /** 横扫方向交替（1: 从 -arc 扫到 +arc，-1: 反向回扫，动作更连贯自然） */
+  sweepDir: 1 | -1;
   lastExt: number;
   lastAng: number;
   damage: number;
@@ -155,6 +157,7 @@ export class WeaponSystem {
         reach: 0,
         maxRange: 0,
         aoeFxFired: false,
+        sweepDir: 1,
         lastExt: 0,
         lastAng: 0,
         damage: 0,
@@ -165,6 +168,7 @@ export class WeaponSystem {
     for (let i = 0; i < MAX_SLOTS; i++) {
       const s = this.slots[i];
       view.setWeapon(i, s ? s.def.icon : null, s?.tier ?? 0);
+      if (s?.def.id === 'circular-saw') view.setWeaponSpin(i, 9);
     }
   }
 
@@ -281,7 +285,6 @@ export class WeaponSystem {
         } else if (s.def.melee) {
           const dist = target ? Math.hypot(target.x - tip.x, target.y - tip.y) : range * 0.85;
           this.startSwing(s, dist, range, interval);
-          this.emitMeleeFx(s, tip.x, tip.y);
           // 刀刃 6 件套觉醒：挥击向前释放清晰的新月穿透剑气波（1:1 渲染真实斩击宽度）
           if (mods.bladeWave > 0 && s.def.classes.includes('Blade')) {
             this.projectiles.fire({
@@ -689,11 +692,12 @@ export class WeaponSystem {
     s.crit = crit;
     s.maxRange = range;
     s.aoeFxFired = false;
+    if (sweep) s.sweepDir = s.sweepDir === 1 ? -1 : 1;
     s.reach = Math.min(MAX_SCREEN_RANGE, (sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range)) * (1 + 0.06 * s.tier));
     s.swingTotal = Math.min(sweep ? SWEEP_TIME : style === 'flurry' ? SWING_TIME * 0.65 : SWING_TIME, interval * 0.8);
     s.swing = s.swingTotal;
     s.lastExt = 0;
-    s.lastAng = s.aim - (s.def.melee!.arc ?? 0);
+    s.lastAng = s.aim - (s.def.melee!.arc ?? 0) * s.sweepDir;
     s.hits.length = 0;
   }
 
@@ -711,23 +715,6 @@ export class WeaponSystem {
       default:
         return melee.hitRadius * 0.9 * (1 + 0.12 * tier);
     }
-  }
-
-  private emitMeleeFx(s: Slot, tx: number, ty: number): void {
-    const fx = this.fx;
-    if (!fx) return;
-    const def = s.def;
-    const melee = def.melee!;
-    // 单体近战（直刺/连刺/钳咬/突刺）不画额外特效；范围砸击（bash）改在命中目标瞬间触发；
-    // 只有范围横扫（sweep）画出严格限制在武器攻击半径内的挥砍弧迹
-    if (melee.style !== 'sweep') return;
-    const tier = s.tier;
-    const enchant = s.owned?.enchant;
-    const hitR = this.meleeHitRadius(melee, tier);
-    const col = meleeColor(def, enchant, s.crit);
-    const maxR = Math.min(s.maxRange, s.reach * 0.85 + hitR * 0.75);
-    const variant = slashVariantOf(def, enchant);
-    fx.slash(tx, ty, maxR, s.aim, melee.arc ?? 1, col, tier, variant);
   }
 
   private emitShotFx(s: Slot, tx: number, ty: number): void {
@@ -752,36 +739,95 @@ export class WeaponSystem {
     const windup = melee.style === 'flurry' ? 0 : Math.min(0.13, 0.03 / Math.max(0.08, s.swingTotal));
 
     if (melee.style === 'sweep') {
-      // 扇形横扫：先微反拉蓄力，再高速从一侧扫到另一侧
+      // 扇形横扫：不画刀光特效，靠武器实体左右往复蓄力挥扫运动直接表达范围
+      // 虫鞭走实时软鞭行波、流星锤/锚带铁链、四节棍走四节连杆、长柄镰刀带长杆、圆锯高速自转
       const arc = melee.arc ?? 1;
+      const dir = s.sweepDir;
+      const tetherKind = tetherKindOf(s.def);
+      const isSaw = s.def.id === 'circular-saw';
+      const isPruner = s.def.id === 'pruner';
+      if (isSaw) view.setWeaponSpin(slot, 36);
       if (t < windup) {
         const wk = t / windup;
-        view.setWeaponAim(slot, s.aim - arc - 0.18 * wk);
+        const ang = s.aim - (arc + 0.18 * wk) * dir;
+        view.setWeaponAim(slot, ang);
         view.setWeaponExtend(slot, (-4.5 * wk) / view.scaleX);
+        view.setWeaponMotion(slot, null);
+        if (tetherKind === 'whip' || tetherKind === 'sections') {
+          view.setWeaponTether(slot, { kind: tetherKind, st: 0, dir, ext: 14 / view.scaleX, localAngle: ang - view.rotation, arc });
+        } else if (tetherKind) {
+          view.setWeaponTether(slot, null);
+        }
       } else {
         const st = (t - windup) / (1 - windup);
-        const ang = s.aim - arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(st);
+        const ang = s.aim + (-arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(st)) * dir;
         const ext = s.reach * Math.min(1, st / 0.14, (1 - st) / 0.15) * 0.85;
         view.setWeaponAim(slot, ang);
-        view.setWeaponExtend(slot, ext / view.scaleX);
+        // 虫鞭与四节棍由物理连杆直接画在容器里，手柄不离身；其他武器沿弧挥出
+        view.setWeaponExtend(slot, tetherKind === 'whip' || tetherKind === 'sections' ? 0 : ext / view.scaleX);
+        if (tetherKind) {
+          view.setWeaponTether(slot, {
+            kind: tetherKind,
+            st,
+            dir,
+            ext: ext / view.scaleX,
+            localAngle: ang - view.rotation,
+            arc,
+          });
+        }
+        // 修枝剪横扫中段补一记干脆剪合挤压
+        if (isPruner) {
+          const snap = Math.exp(-Math.pow((st - 0.5) / 0.14, 2));
+          view.setWeaponMotion(slot, snap > 0.05 ? { scaleX: 1 + 0.18 * snap, scaleY: 1 - 0.34 * snap } : null);
+        }
         const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
         for (let k = 1; k <= steps; k++) {
           const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
-          for (const f of [0.52, 1]) this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5);
+          for (const f of [0.52, 1]) this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5 * dir);
         }
         s.lastAng = ang;
       }
     } else if (melee.style === 'bash') {
-      // 盾击震荡波：短距回拉蓄力再猛推并在前方弧面震开敌人（命中目标时再触发与攻击范围 1:1 对齐的震击特效）
+      // 重锤/滚石/砖块/撬棍走“高举蓄力 -> 猛力下砸”立体砸地运动；盾牌/拳套走正前方蓄力重推/直轰
+      const isPushBash = s.def.id === 'spiky-shield' || s.def.id === 'power-fist' || s.def.id === 'cestus';
+      const facingFlip = Math.cos(s.aim) < 0 ? -1 : 1;
       view.setWeaponAim(slot, s.aim);
       if (t < windup) {
         const wk = t / windup;
         view.setWeaponExtend(slot, (-6 * wk) / view.scaleX);
+        if (isPushBash) {
+          view.setWeaponMotion(slot, { scaleX: 1 - 0.12 * wk, scaleY: 1 + 0.1 * wk });
+        } else {
+          // 抬锤蓄力：世界向上高举 + 向后仰倾，地面影子留在下方
+          view.setWeaponMotion(slot, { liftY: -16 * wk, tilt: -0.82 * wk * facingFlip });
+        }
       } else {
         const st = (t - windup) / (1 - windup);
         const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
         const ext = s.reach * 0.72 * Phaser.Math.Easing.Quadratic.Out(out);
         view.setWeaponExtend(slot, ext / view.scaleX);
+        if (isPushBash) {
+          const punch = Math.sin(Math.min(1, st / SWING_OUT) * Math.PI);
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * punch, scaleY: 1 - 0.14 * punch });
+        } else if (st < SWING_OUT) {
+          // 加速下砸：从高处俯冲压向地面
+          const dk = Phaser.Math.Easing.Cubic.In(st / SWING_OUT);
+          const impact = st / SWING_OUT > 0.8 ? (st / SWING_OUT - 0.8) / 0.2 : 0;
+          view.setWeaponMotion(slot, {
+            liftY: Phaser.Math.Linear(-16, 4, dk),
+            tilt: Phaser.Math.Linear(-0.82, 0.44, dk) * facingFlip,
+            scaleX: 1 + 0.18 * impact,
+            scaleY: 1 - 0.18 * impact,
+          });
+        } else {
+          // 砸中地面后的短暂停顿回抬
+          const rk = (st - SWING_OUT) / (1 - SWING_OUT);
+          const ease = Phaser.Math.Easing.Quadratic.Out(rk);
+          view.setWeaponMotion(slot, {
+            liftY: Phaser.Math.Linear(4, 0, ease),
+            tilt: Phaser.Math.Linear(0.44, 0, ease) * facingFlip,
+          });
+        }
         if (ext > s.lastExt) {
           const arc = melee.arc ?? 0.85;
           for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
@@ -792,16 +838,47 @@ export class WeaponSystem {
         s.lastExt = Math.max(s.lastExt, ext);
       }
     } else {
+      const tetherKind = tetherKindOf(s.def);
+      const isBite = s.def.id === 'claw' || s.def.id === 'scissors';
+      const isBuzz = s.def.id === 'chainsaw' || s.def.id === 'drill';
+      const isPunch = s.def.id === 'fist' || s.def.id === 'flaming-knuckles' || s.def.id === 'hand';
       view.setWeaponAim(slot, s.aim);
       if (t < windup) {
         const wk = t / windup;
         view.setWeaponExtend(slot, (-6.5 * wk) / view.scaleX);
+        view.setWeaponMotion(slot, isBite ? { scaleX: 1 - 0.1 * wk, scaleY: 1 + 0.22 * wk } : null);
+        if (tetherKind) view.setWeaponTether(slot, null);
       } else {
         const st = windup > 0 ? (t - windup) / (1 - windup) : t;
         const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
         const ext = s.reach * Phaser.Math.Easing.Quadratic.Out(out);
         // 腿尖在本地坐标系里，刺出距离要换算到本地（菜单里甲虫会放大）
         view.setWeaponExtend(slot, ext / view.scaleX);
+        if (tetherKind) {
+          view.setWeaponTether(slot, {
+            kind: tetherKind,
+            st,
+            dir: 1,
+            ext: ext / view.scaleX,
+            localAngle: s.aim - view.rotation,
+            arc: 0,
+          });
+        }
+        if (isBite) {
+          // 大颚/双刃剪：伸到最远点时利落“咔嚓”咬合压扁再弹回
+          const snap = Math.exp(-Math.pow((st - SWING_OUT) / 0.13, 2));
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * snap, scaleY: 1 - 0.42 * snap });
+        } else if (isBuzz) {
+          // 锯齿颚/钻角：伸出切割/钻进时带高频机械抖动
+          const buzz = out > 0.15 ? 2.4 * out : 0;
+          view.setWeaponMotion(slot, buzz > 0 ? { jitter: buzz, scaleX: 1 + 0.08 * out, scaleY: 1 - 0.05 * out } : null);
+        } else if (isPunch) {
+          // 拳击系：直拳出拳拉伸感
+          const jab = Math.exp(-Math.pow((st - SWING_OUT * 0.88) / 0.16, 2));
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * jab, scaleY: 1 - 0.14 * jab });
+        } else {
+          view.setWeaponMotion(slot, null);
+        }
         if (ext > s.lastExt) {
           const dx = Math.cos(s.aim);
           const dy = Math.sin(s.aim);
@@ -814,11 +891,16 @@ export class WeaponSystem {
         s.lastExt = Math.max(s.lastExt, ext);
       }
     }
-    if (s.swing <= 0) view.setWeaponExtend(slot, 0);
+    if (s.swing <= 0) {
+      view.setWeaponExtend(slot, 0);
+      view.setWeaponTether(slot, null);
+      view.setWeaponMotion(slot, null);
+      if (s.def.id === 'circular-saw') view.setWeaponSpin(slot, 9);
+    }
   }
 
   /** 武器头扫过 (px,py) 时，命中范围内还没被这一击打过的敌人 */
-  private strikeAt(s: Slot, tipX: number, tipY: number, px: number, py: number, hitR: number, kb: number, strikeAng: number): void {
+  private strikeAt(s: Slot, tipX: number, tipY: number, px: number, py: number, hitR: number, kb: number, _strikeAng: number): void {
     const melee = s.def.melee!;
     for (const en of this.enemies.grid.query(px, py, hitR + MAX_ENEMY_RADIUS, this.buf)) {
       if (!en.active || s.hits.includes(en)) continue;
@@ -827,21 +909,12 @@ export class WeaponSystem {
       const oy = en.y - py;
       if (ox * ox + oy * oy > rr * rr) continue;
       s.hits.push(en);
-      // 仅范围性武器在实际命中目标的瞬间触发冲击/爆裂类特效，且严格限制在武器攻击范围内
-      if (!s.aoeFxFired) {
+      // 仅范围砸击类（bash）在命中目标时留下地面裂缝（横扫与单体近战均不加多余光效）
+      if (!s.aoeFxFired && melee.style === 'bash') {
+        s.aoeFxFired = true;
         const enchant = s.owned?.enchant;
-        if (melee.style === 'bash') {
-          s.aoeFxFired = true;
-          const maxR = Math.min(s.maxRange, s.reach * 0.72 + hitR * 0.85);
-          const col = meleeColor(s.def, enchant, s.crit);
-          this.fx?.bash(tipX, tipY, s.aim, melee.arc ?? 0.85, maxR, col, s.tier, bashVariantOf(s.def, enchant));
-        } else if (melee.style === 'sweep') {
-          s.aoeFxFired = true;
-          const col = meleeColor(s.def, enchant, s.crit);
-          const distFromTip = Math.hypot(en.x - tipX, en.y - tipY);
-          const roomLeft = Math.max(8, s.maxRange - distFromTip);
-          this.fx?.sweepHitBurst(en.x, en.y, Math.min(hitR, roomLeft), strikeAng, col, slashVariantOf(s.def, enchant));
-        }
+        const maxR = Math.min(s.maxRange, s.reach * 0.72 + hitR * 0.85);
+        this.fx?.bash(tipX, tipY, s.aim, melee.arc ?? 0.85, maxR, 0xf09c48, s.tier, bashVariantOf(s.def, enchant));
       }
       const d = Math.hypot(en.x - this.player.x, en.y - this.player.y) || 1;
       this.resolver.hit(en, s.damage, s.crit, (en.x - this.player.x) / d, (en.y - this.player.y) / d, kb, s.src);
@@ -849,98 +922,30 @@ export class WeaponSystem {
   }
 }
 
-function meleeColor(def: WeaponDef, enchant: OwnedWeapon['enchant'], crit: boolean): number {
-  if (crit) return 0xffd848;
-  if (enchant === 'ignite') return 0xff6e24;
-  if (enchant === 'frost') return 0x5ce8ff;
-  if (enchant === 'greed') return 0xffc838;
+function tetherKindOf(def: WeaponDef): 'whip' | 'chain' | 'sections' | 'pole' | 'scissor' | null {
   switch (def.id) {
-    case 'torch':
-    case 'plank':
-    case 'flaming-knuckles':
-      return 0xff6c24;
-    case 'light-saber':
-      return 0x2cf2ff;
-    case 'thunder-sword':
-    case 'lightning-shiv':
-      return 0x4cc8ff;
-    case 'plasma-sledge':
-      return 0x3ceeff;
-    case 'power-fist':
-    case 'dex-troyer':
-      return 0xff882c;
-    case 'scythe':
-    case 'ghost-axe':
-    case 'ghost-flint':
-      return 0x4af0c8;
-    case 'vorpal-sword':
-      return 0xc86bff;
-    case 'excalibur':
-      return 0xffd648;
-    case 'cacti-club':
-    case 'pruner':
-      return 0x6ce454;
-    case 'spiky-shield':
-      return 0x58c4ff;
-    case 'trident':
-      return 0x42d8f0;
-    case 'lute':
-      return 0xffd452;
-    case 'circular-saw':
-    case 'chainsaw':
-      return 0xff9a3c;
     case 'whip':
-      return 0xf0a242;
-    case 'chopper':
-    case 'scissors':
-    case 'meat-tenderizer':
-    case 'sharp-tooth':
-      return 0xf26458;
-    case 'rock':
-    case 'brick':
-      return 0xd48a48;
-    case 'captains-sword':
-    case 'sickle':
-    case 'drill':
-    case 'thief-dagger':
-      return 0xffc442;
-    case 'claw':
-      return 0xffb844;
-    case 'knife':
-      return 0x6ae4ff;
-    case 'stick':
-      return 0xb4dc52;
-    case 'anchor':
+      return 'whip';
     case 'flail':
-      return 0x86b8e0;
-    case 'sword':
-      return 0x70ccff;
+    case 'anchor':
+      return 'chain';
+    case 'quarterstaff':
+      return 'sections';
+    case 'dex-troyer':
+      return 'scissor';
+    case 'spear':
+    case 'jousting-lance':
+    case 'trident':
+    case 'hiking-pole':
+    case 'scythe':
+    case 'stick':
+      return 'pole';
+    default:
+      return null;
   }
-  if (def.onHit?.burn) return 0xff7028;
-  if (def.onHit?.freeze) return 0x60e8ff;
-  if (def.onHit?.poison) return 0x8ce842;
-  if (def.classes.includes('Ethereal')) return 0x4af0c8;
-  if (def.classes.includes('Elemental')) return 0x4cc8ff;
-  if (def.classes.includes('Explosive')) return 0xff862c;
-  if (def.classes.includes('Legendary')) return 0xffd648;
-  if (def.classes.includes('Blade')) return 0x70ccff;
-  if (def.classes.includes('Blunt') || def.classes.includes('Heavy')) return 0xf09c48;
-  return 0xffbe54;
-}
-
-function slashVariantOf(def: WeaponDef, enchant: OwnedWeapon['enchant']): SlashVariant {
-  if (def.id === 'whip') return 'whip';
-  if (def.id === 'circular-saw') return 'saw';
-  if (def.id === 'excalibur') return 'holy';
-  if (def.id === 'torch' || def.id === 'plank' || def.onHit?.burn || enchant === 'ignite') return 'fire';
-  if (def.id === 'thunder-sword' || def.id === 'light-saber' || def.classes.includes('Elemental')) return 'electric';
-  if (def.id === 'scythe' || def.id === 'vorpal-sword' || def.classes.includes('Ethereal')) return 'ethereal';
-  if (def.id === 'anchor' || def.id === 'flail' || def.id === 'cacti-club' || def.id === 'shovel' || def.id === 'quarterstaff' || def.classes.includes('Heavy')) return 'heavy';
-  return 'blade';
 }
 
 function bashVariantOf(def: WeaponDef, enchant: OwnedWeapon['enchant']): BashVariant {
-  if (def.id === 'spiky-shield') return 'shield';
   if (def.id === 'plasma-sledge') return 'plasma';
   if (def.id === 'power-fist' || def.classes.includes('Explosive') || enchant === 'ignite') return 'explosive';
   if (def.id === 'rock' || def.id === 'brick') return 'rock';

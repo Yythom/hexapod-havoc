@@ -587,41 +587,26 @@ export class Effects {
     const iy = y + Math.sin(ang) * r * 0.52;
     const maxLocalR = r * 0.44;
     const full = (maxLocalR * 2) / VFX_TEX_SIZE;
+    // 纯地面开裂效果：迅速砸开后在地面短暂停留淡出，不叠加多余光圈
     this.spawnSpriteFx({
       key: `fx-bash-${variant}`,
       x: ix,
       y: iy,
-      s0: full * 0.62,
+      s0: full * 0.82,
       s1: full,
       rot0: ang + (Math.random() - 0.5) * 0.5,
-      alpha0: 0.96,
-      fadeIn: 0.02,
-      total: 0.3,
+      alpha0: 0.94,
+      fadeIn: 0.015,
+      total: 0.48,
       tint: null,
       depth: DEPTH.ground + 2,
     });
-    this.spawnSpriteFx({
-      key: 'fx-nova-ring',
-      x: ix,
-      y: iy,
-      s0: full * 0.35,
-      s1: full,
-      rot0: Math.random() * Math.PI * 2,
-      alpha0: 0.72,
-      fadeIn: 0.015,
-      total: 0.2,
-      tint: color,
-    });
 
-    const spd = Math.min(120, maxLocalR * 2.2);
+    const spd = Math.min(105, maxLocalR * 2.0);
     if (variant === 'rock') {
-      this.burst(ix, iy, 0xc89862, 4, spd, 0.72);
-    } else if (variant === 'plasma') {
-      this.streaks(ix, iy, ang, color, 3, spd, 0.62);
-    } else if (variant === 'explosive') {
-      this.burst(ix, iy, 0xff7a28, 4, spd, 0.72);
-    } else {
-      this.burst(ix, iy, 0xd8b888, 3, spd * 0.85, 0.65);
+      this.burst(ix, iy, 0xb8844c, 3, spd, 0.65);
+    } else if (variant === 'slam') {
+      this.burst(ix, iy, 0x9c8264, 2, spd * 0.8, 0.58);
     }
   }
 

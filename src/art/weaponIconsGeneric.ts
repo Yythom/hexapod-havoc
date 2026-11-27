@@ -145,9 +145,87 @@ export function drawGenericWeaponIcon(shape: string, color: string): Draw2D {
       cCircle(ctx, 15, 8.4, 2.2, 'rgba(255,255,255,0.22)');
       cLine(ctx, [5, 13, 10, 15], dark, 1.0);
     };
+    const flail = () => {
+      // 带刺重铁球 + 顶部挂环（挥扫时由 BeetleView 铁链连回角色）
+      const g = cShellGrad(ctx, 13, 9, 8, '#aab6c8', color, '#242834');
+      cCircle(ctx, 14, 10, 5.8, g, INK, 1.5);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2 + 0.25;
+        const bx = 14 + Math.cos(a) * 5.2;
+        const by = 10 + Math.sin(a) * 5.2;
+        const tx = 14 + Math.cos(a) * 8.6;
+        const ty = 10 + Math.sin(a) * 8.6;
+        const nx = -Math.sin(a) * 1.5;
+        const ny = Math.cos(a) * 1.5;
+        cPoly(ctx, [bx + nx, by + ny, tx, ty, bx - nx, by - ny], '#dce4f0', INK, 1.0);
+      }
+      cCircle(ctx, 6.2, 10, 2.2, undefined, INK, 2.2);
+      cCircle(ctx, 6.2, 10, 2.2, undefined, '#9aa6ba', 1.0);
+    };
+    const anchor = () => {
+      // 重型铁锚：顶部锚环 + 锚干 + 横杠 + 双弯钩爪
+      cCircle(ctx, 4.2, 10, 2.2, undefined, INK, 2.2);
+      cCircle(ctx, 4.2, 10, 2.2, undefined, '#b4c0d2', 1.0);
+      cLine(ctx, [6.5, 10, 19.5, 10], INK, 4.4);
+      cLine(ctx, [6.5, 10, 19.5, 10], color, 2.2);
+      cLine(ctx, [9.5, 5.2, 9.5, 14.8], INK, 3.6);
+      cLine(ctx, [9.5, 5.2, 9.5, 14.8], '#b4c0d2', 1.8);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 4.2;
+      ctx.beginPath();
+      ctx.arc(14.5, 10, 6.4, -1.25, 1.25);
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+      // 双倒刺尖钩
+      cPoly(ctx, [16.5, 3.2, 20.5, 4.4, 17.8, 6.4], '#cfd9e8', INK, 1.0);
+      cPoly(ctx, [16.5, 16.8, 20.5, 15.6, 17.8, 13.6], '#cfd9e8', INK, 1.0);
+    };
+    const crowbar = () => {
+      // 弯钩钢撬棍
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 4.8;
+      ctx.beginPath();
+      ctx.moveTo(3, 12);
+      ctx.lineTo(17, 10.5);
+      ctx.quadraticCurveTo(22.2, 9.5, 20.6, 4.5);
+      ctx.lineTo(17.5, 4.8);
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.6;
+      ctx.stroke();
+      cLine(ctx, [4.5, 11.4, 16.2, 10.2], light, 0.9);
+      cPoly(ctx, [2, 10.4, 5.2, 11.4, 4.8, 13.6, 1.8, 13.4], '#c8d2de', INK, 0.9);
+    };
+    const shovel = () => {
+      // 木柄 + 弧面铁铲斗
+      cLine(ctx, [2.8, 10.5, 13.5, 10], INK, 4.2);
+      cLine(ctx, [3, 10.5, 13.5, 10], '#8a623c', 2.2);
+      cRoundRect(ctx, 1.4, 7.6, 2.4, 5.8, 1, '#5a3a1e', INK, 1.0);
+      const g = cShellGrad(ctx, 17, 9, 7, '#cfd8e4', color, '#3e444e');
+      cPoly(ctx, [13, 5.6, 19.6, 6.4, 22.8, 10, 19.6, 13.6, 13, 14.4], g, INK, 1.4);
+      cLine(ctx, [14.6, 8.2, 20.2, 9.6], light, 1.0);
+    };
+    const plank = () => {
+      // 粗厚带钉木板
+      const g = cShellGrad(ctx, 12, 9, 12, '#d49a5a', color, '#543218');
+      cPoly(ctx, [2.2, 7.2, 22, 6.2, 22.6, 13.8, 2.2, 13.2], g, INK, 1.5);
+      cLine(ctx, [4.5, 9.2, 19.5, 8.8], dark, 0.9);
+      cLine(ctx, [5.5, 11.6, 18.5, 11.4], dark, 0.8);
+      // 外露铁钉与包铁带
+      cLine(ctx, [16.5, 6.4, 16.5, 13.6], '#4a505c', 2.2);
+      cLine(ctx, [18.5, 6.2, 20.2, 3.2], '#d8e0ec', 1.5);
+      cLine(ctx, [20.5, 13.6, 22.2, 16.6], '#d8e0ec', 1.5);
+    };
     switch (shape) {
       case 'club': case 'hammer': case 'mace': case 'brick': club(); break;
       case 'rock': rock(); break;
+      case 'flail': flail(); break;
+      case 'anchor': anchor(); break;
+      case 'crowbar': crowbar(); break;
+      case 'shovel': shovel(); break;
+      case 'plank': plank(); break;
       case 'axe': case 'cleaver': case 'scythe': scythe(); break;
       case 'spear': case 'trident': case 'javelin': case 'staff': case 'awl': case 'drill': spear(); break;
       case 'shield': shield(); break;

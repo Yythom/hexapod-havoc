@@ -777,76 +777,99 @@ export function drawSlashWhip(ctx: Ctx, size = TEX_SIZE): void {
   ctx.restore();
 }
 
-/** 9. 重锤地裂冲击（3D 凹陷阴影坑 + 带亮边倒角的立体地裂 + 扩散柔边尘浪） */
-export function drawBashSlam(ctx: Ctx, size = TEX_SIZE, accent = '#f2a44c', crackGlow = 'rgba(255, 200, 120, 0.55)'): void {
+/** 9. 重锤砸地裂纹（纯地面物理开裂：凹陷土坑阴影 + 主裂纹与分叉细裂 + 自然泥土倒角，无发光环） */
+export function drawBashSlam(ctx: Ctx, size = TEX_SIZE, lipColor = 'rgba(148, 126, 98, 0.42)'): void {
   const cx = size / 2;
   const cy = size / 2;
   const R = size * 0.465;
   const rng = makeRng(5120);
 
-  // 1) 地面凹陷暗影 + 柔边土尘冲击环
-  const pit = ctx.createRadialGradient(cx, cy, R * 0.08, cx, cy, R);
-  pit.addColorStop(0, 'rgba(18, 12, 8, 0.72)');
-  pit.addColorStop(0.42, 'rgba(34, 24, 16, 0.46)');
-  pit.addColorStop(0.74, 'rgba(210, 174, 128, 0.28)');
-  pit.addColorStop(0.9, 'rgba(235, 206, 162, 0.52)');
-  pit.addColorStop(1, 'rgba(235, 206, 162, 0)');
+  // 1) 柔和的地面砸坑暗影（纯阴影层次，不带亮环）
+  const pit = ctx.createRadialGradient(cx, cy, R * 0.06, cx, cy, R * 0.72);
+  pit.addColorStop(0, 'rgba(14, 10, 7, 0.68)');
+  pit.addColorStop(0.45, 'rgba(24, 18, 12, 0.38)');
+  pit.addColorStop(1, 'rgba(24, 18, 12, 0)');
   ctx.fillStyle = pit;
   ctx.beginPath();
-  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.arc(cx, cy, R * 0.72, 0, Math.PI * 2);
   ctx.fill();
 
-  // 2) 立体倒角放射裂纹（先画受光亮边偏移 +1.8px，再压深黑沟槽，产生真实地面开裂厚度）
-  const fissures = 7;
+  // 2) 主裂纹 + 二级分叉细裂（模拟真实地面受冲击开裂的碎裂感）
+  const fissures = 8;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (let i = 0; i < fissures; i++) {
     const baseA = (i / fissures) * Math.PI * 2 + (rng() - 0.5) * 0.28;
-    const len = R * (0.64 + rng() * 0.26);
+    const len = R * (0.64 + rng() * 0.3);
     const pts: [number, number][] = [[cx, cy]];
     const segs = 4;
     for (let s = 1; s <= segs; s++) {
       const u = s / segs;
-      const a = baseA + (rng() - 0.5) * 0.22;
+      const a = baseA + (rng() - 0.5) * 0.24;
       pts.push([cx + Math.cos(a) * len * u, cy + Math.sin(a) * len * u]);
     }
-    // 亮面倒角（左上光源）
-    ctx.strokeStyle = crackGlow;
-    ctx.lineWidth = 4.2;
+
+    // 自然受光土唇倒角（左上轻微受光边缘，非发光效果）
+    ctx.strokeStyle = lipColor;
+    ctx.lineWidth = 3.2;
     ctx.beginPath();
-    pts.forEach(([x, y], idx) => (idx ? ctx.lineTo(x + 1.6, y + 1.6) : ctx.moveTo(x + 1.6, y + 1.6)));
+    pts.forEach(([x, y], idx) => (idx ? ctx.lineTo(x + 1.5, y + 1.5) : ctx.moveTo(x + 1.5, y + 1.5)));
     ctx.stroke();
 
-    // 裂缝深谷（根宽梢细）
+    // 主裂缝深黑沟槽（中心宽、末端收尖）
     for (let s = 0; s < pts.length - 1; s++) {
-      const w = (1 - s / pts.length) * 5.2 + 1.2;
-      ctx.strokeStyle = 'rgba(14, 9, 6, 0.92)';
+      const w = (1 - s / pts.length) * 5.2 + 1.1;
+      ctx.strokeStyle = 'rgba(12, 8, 5, 0.94)';
       ctx.lineWidth = w;
       ctx.beginPath();
       ctx.moveTo(pts[s][0], pts[s][1]);
       ctx.lineTo(pts[s + 1][0], pts[s + 1][1]);
       ctx.stroke();
     }
-  }
-  ctx.restore();
 
-  // 3) 锐利冲击波外圈高光（严格在 R*0.95 内）
-  ctx.save();
-  ctx.strokeStyle = accent;
-  ctx.globalAlpha = 0.78;
-  ctx.lineWidth = 3.2;
-  ctx.shadowColor = accent;
-  ctx.shadowBlur = 8;
+    // 中段分叉出的细小支裂纹
+    const branchIdx = 1 + Math.floor(rng() * 2);
+    const [bx, by] = pts[branchIdx];
+    const side = rng() < 0.5 ? 1 : -1;
+    const ba = baseA + side * (0.45 + rng() * 0.35);
+    const bLen = R * (0.18 + rng() * 0.16);
+    let ex = bx + Math.cos(ba) * bLen;
+    let ey = by + Math.sin(ba) * bLen;
+    const d = Math.hypot(ex - cx, ey - cy);
+    if (d > R * 0.95) {
+      ex = cx + ((ex - cx) / d) * R * 0.95;
+      ey = cy + ((ey - cy) / d) * R * 0.95;
+    }
+    const mx = (bx + ex) * 0.5 + (rng() - 0.5) * 6;
+    const my = (by + ey) * 0.5 + (rng() - 0.5) * 6;
+    ctx.strokeStyle = lipColor;
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    ctx.moveTo(bx + 1, by + 1);
+    ctx.lineTo(mx + 1, my + 1);
+    ctx.lineTo(ex + 1, ey + 1);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(12, 8, 5, 0.86)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(mx, my);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+
+  // 中心砸击碎坑核心
+  ctx.fillStyle = 'rgba(10, 7, 5, 0.85)';
   ctx.beginPath();
-  ctx.arc(cx, cy, R * 0.92, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.ellipse(cx, cy, R * 0.13, R * 0.1, 0.25, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
-/** 10. 滚石 / 碎岩砖砸击（地裂底 + 立体多面体飞溅岩块，明暗双面有石材质感） */
+/** 10. 滚石 / 碎岩砖砸击（纯地裂 + 立体多面体碎岩块，无发光环） */
 export function drawBashRock(ctx: Ctx, size = TEX_SIZE): void {
-  drawBashSlam(ctx, size, '#df9c56', 'rgba(232, 186, 130, 0.65)');
+  drawBashSlam(ctx, size, 'rgba(168, 138, 102, 0.48)');
   const cx = size / 2;
   const cy = size / 2;
   const R = size * 0.45;
@@ -857,7 +880,7 @@ export function drawBashRock(ctx: Ctx, size = TEX_SIZE): void {
     const dist = R * (0.42 + rng() * 0.34);
     const rx = cx + Math.cos(a) * dist;
     const ry = cy + Math.sin(a) * dist;
-    const sz = 7 + rng() * 6;
+    const sz = 6.5 + rng() * 5.5;
     const rot = rng() * Math.PI * 2;
 
     ctx.save();
@@ -870,9 +893,9 @@ export function drawBashRock(ctx: Ctx, size = TEX_SIZE): void {
     ctx.fill();
     // 岩块多边形主体（明暗渐变）
     const rockGrad = ctx.createLinearGradient(-sz, -sz, sz, sz);
-    rockGrad.addColorStop(0, '#f0c48e');
-    rockGrad.addColorStop(0.5, '#b67844');
-    rockGrad.addColorStop(1, '#5a361a');
+    rockGrad.addColorStop(0, '#e8be8a');
+    rockGrad.addColorStop(0.5, '#a86e3e');
+    rockGrad.addColorStop(1, '#523016');
     ctx.fillStyle = rockGrad;
     ctx.strokeStyle = '#1b0f08';
     ctx.lineWidth = 2;
@@ -886,7 +909,7 @@ export function drawBashRock(ctx: Ctx, size = TEX_SIZE): void {
     ctx.fill();
     ctx.stroke();
     // 顶部受光棱面
-    ctx.fillStyle = 'rgba(255, 236, 200, 0.45)';
+    ctx.fillStyle = 'rgba(255, 232, 194, 0.42)';
     ctx.beginPath();
     ctx.moveTo(-sz * 0.6, -sz * 0.22);
     ctx.lineTo(-sz * 0.1, -sz * 0.72);
@@ -979,86 +1002,69 @@ export function drawBashShield(ctx: Ctx, size = TEX_SIZE): void {
   ctx.restore();
 }
 
-/** 12. 等离子锤电裂冲击（电离辉光盘 + 多条高频分叉电弧 + 中心离子核） */
+/** 12. 等离子锤电裂（焦黑地裂 + 缝隙内跃动的电流细弧，去掉整片光圈） */
 export function drawBashPlasma(ctx: Ctx, size = TEX_SIZE): void {
-  const cx = size / 2;
-  const cy = size / 2;
-  const R = size * 0.465;
-  const rng = makeRng(7168);
-
-  // 电离能量圆盘渐变
-  const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, R);
-  g.addColorStop(0, 'rgba(220, 254, 255, 0.9)');
-  g.addColorStop(0.28, 'rgba(56, 224, 255, 0.52)');
-  g.addColorStop(0.7, 'rgba(24, 112, 225, 0.24)');
-  g.addColorStop(0.92, 'rgba(72, 236, 255, 0.65)');
-  g.addColorStop(1, 'rgba(56, 224, 255, 0)');
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 8 条蛛网状高频电弧从中心劈向四周（全部收在 R*0.95 内）
-  for (let i = 0; i < 8; i++) {
-    const baseA = (i / 8) * Math.PI * 2 + (rng() - 0.5) * 0.22;
-    const len = R * (0.76 + rng() * 0.18);
-    const pts: [number, number][] = [[cx, cy]];
-    for (let s = 1; s <= 5; s++) {
-      const u = s / 5;
-      const a = baseA + (rng() - 0.5) * 0.3;
-      pts.push([cx + Math.cos(a) * len * u, cy + Math.sin(a) * len * u]);
-    }
-    drawLightningArc(ctx, pts, 'rgba(42, 212, 255, 0.92)', '#ffffff', 1.8);
-  }
-
-  // 外缘锐利电环
-  ctx.save();
-  ctx.shadowColor = 'rgba(56, 232, 255, 0.95)';
-  ctx.shadowBlur = 10;
-  ctx.strokeStyle = 'rgba(180, 250, 255, 0.92)';
-  ctx.lineWidth = 2.6;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R * 0.93, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-/** 13. 烈焰爆拳砸击（焦黑岩裂内嵌熔岩橙红发光沟壑 + 热浪环） */
-export function drawBashExplosive(ctx: Ctx, size = TEX_SIZE): void {
-  drawBashSlam(ctx, size, '#ff7828', 'rgba(255, 130, 36, 0.8)');
+  drawBashSlam(ctx, size, 'rgba(92, 168, 204, 0.42)');
   const cx = size / 2;
   const cy = size / 2;
   const R = size * 0.46;
-  const rng = makeRng(5120); // 与 drawBashSlam 同种子对齐裂缝！
+  const rng = makeRng(5120);
 
-  // 中心熔岩炙热核
-  const core = ctx.createRadialGradient(cx, cy, 2, cx, cy, R * 0.52);
-  core.addColorStop(0, 'rgba(255, 250, 200, 0.95)');
-  core.addColorStop(0.35, 'rgba(255, 136, 32, 0.65)');
-  core.addColorStop(1, 'rgba(255, 64, 16, 0)');
-  ctx.fillStyle = core;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R * 0.52, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 裂缝中透出滚烫熔岩细线
-  ctx.save();
-  ctx.shadowColor = 'rgba(255, 110, 20, 0.95)';
-  ctx.shadowBlur = 7;
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 7; i++) {
-    const baseA = (i / 7) * Math.PI * 2 + (rng() - 0.5) * 0.28;
-    const len = R * (0.64 + rng() * 0.26);
+  // 仅在裂缝内部贴着缝隙窜出电弧，不画多余外圈光环
+  for (let i = 0; i < 8; i++) {
+    const baseA = (i / 8) * Math.PI * 2 + (rng() - 0.5) * 0.28;
+    const len = R * (0.64 + rng() * 0.3);
     const pts: [number, number][] = [[cx, cy]];
     for (let s = 1; s <= 4; s++) {
       const u = s / 4;
-      const a = baseA + (rng() - 0.5) * 0.22;
+      const a = baseA + (rng() - 0.5) * 0.24;
       pts.push([cx + Math.cos(a) * len * u, cy + Math.sin(a) * len * u]);
     }
-    ctx.strokeStyle = '#ffdf78';
-    ctx.lineWidth = 2.1;
+    // 消耗与 drawBashSlam 相同的分支随机数，保持坐标完全对齐
+    rng();
+    rng();
+    rng();
+    rng();
+    rng();
+    rng();
+    drawLightningArc(ctx, pts, 'rgba(42, 212, 255, 0.85)', '#e8fdff', 1.4);
+  }
+}
+
+/** 13. 烈焰爆拳地裂（焦黑地裂 + 缝底暗红余烬细线，无多余光圈） */
+export function drawBashExplosive(ctx: Ctx, size = TEX_SIZE): void {
+  drawBashSlam(ctx, size, 'rgba(186, 102, 58, 0.46)');
+  const cx = size / 2;
+  const cy = size / 2;
+  const R = size * 0.46;
+  const rng = makeRng(5120);
+
+  // 裂缝沟底透出的炽热熔岩缝，克制不糊
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < 8; i++) {
+    const baseA = (i / 8) * Math.PI * 2 + (rng() - 0.5) * 0.28;
+    const len = R * (0.64 + rng() * 0.3);
+    const pts: [number, number][] = [[cx, cy]];
+    for (let s = 1; s <= 4; s++) {
+      const u = s / 4;
+      const a = baseA + (rng() - 0.5) * 0.24;
+      pts.push([cx + Math.cos(a) * len * u, cy + Math.sin(a) * len * u]);
+    }
+    rng();
+    rng();
+    rng();
+    rng();
+    rng();
+    rng();
+    ctx.strokeStyle = 'rgba(255, 118, 28, 0.85)';
+    ctx.lineWidth = 2.0;
     ctx.beginPath();
     pts.forEach(([x, y], idx) => (idx ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 224, 128, 0.9)';
+    ctx.lineWidth = 0.9;
     ctx.stroke();
   }
   ctx.restore();

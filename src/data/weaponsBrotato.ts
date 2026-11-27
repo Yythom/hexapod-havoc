@@ -1130,7 +1130,8 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
   "iconColor": "#9ce8d8",
   "melee": {
    "hitRadius": 20,
-   "style": "thrust"
+   "style": "sweep",
+   "arc": 1
   },
   "growth": {
    "kills": 25
@@ -1450,7 +1451,8 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
   "iconColor": "#b07a48",
   "melee": {
    "hitRadius": 20,
-   "style": "thrust"
+   "style": "sweep",
+   "arc": 0.9
   }
  },
  {
@@ -1848,7 +1850,8 @@ export const BROTATO_WEAPONS: WeaponDef[] = [
   "iconColor": "#d8a050",
   "melee": {
    "hitRadius": 20,
-   "style": "thrust"
+   "style": "sweep",
+   "arc": 0.9
   },
   "onHit": {
    "vulnerable": true

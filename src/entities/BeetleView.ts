@@ -111,9 +111,38 @@ export const SLOT_COUNT = 6;
 /** 武器槽最多 9 个（蜘蛛 8 个 + 第七条腿） */
 export const MAX_SLOTS = 9;
 
+/** 鞭类/链锤/长柄/伸缩臂武器的实时物理连结状态（本地坐标系） */
+export interface WeaponTether {
+  kind: 'whip' | 'chain' | 'sections' | 'pole' | 'scissor';
+  /** 挥扫/刺出进度 0~1 */
+  st: number;
+  /** 1 或 -1，决定甩动弯曲方向 */
+  dir: 1 | -1;
+  /** 本地伸展距离 */
+  ext: number;
+  /** 当前指向角（本地弧度） */
+  localAngle: number;
+  /** 挥扫半角 */
+  arc: number;
+}
+
+/** 单次攻击帧的武器实体姿态微调（抬锤下砸、咬合挤压、电锯震动等，纯实体物理表现） */
+export interface WeaponMotion {
+  /** 世界竖直方向抬升/下砸偏移（负值向上抬起，正值下砸） */
+  liftY?: number;
+  /** 武器绕自身中心额外倾角（弧度） */
+  tilt?: number;
+  /** 武器轴向/法向弹性缩放 */
+  scaleX?: number;
+  scaleY?: number;
+  /** 高频机械震动幅度（像素） */
+  jitter?: number;
+}
+
 /** 甲虫的外观：身体、六条会走路的关节腿、腿尖上挂的武器、护盾与增益光环 */
 export class BeetleView extends Phaser.GameObjects.Container {
   private readonly legs: Phaser.GameObjects.Graphics;
+  private readonly weaponTethers: Phaser.GameObjects.Graphics;
   private readonly aura: Phaser.GameObjects.Graphics;
   private readonly shell: Phaser.GameObjects.Image;
   private readonly plan: BodyPlan;
@@ -127,6 +156,15 @@ export class BeetleView extends Phaser.GameObjects.Container {
   private readonly weaponScale: number[] = new Array(MAX_SLOTS).fill(1);
   /** 近战武器刺出去的距离 */
   private readonly weaponExtend: number[] = new Array(MAX_SLOTS).fill(0);
+  /** 武器真实瞄准角（本地坐标系，独立于圆锯自转/重锤倾角） */
+  private readonly weaponAimLocal: number[] = new Array(MAX_SLOTS).fill(0);
+  /** 圆锯等旋转武器的自转速度与累计角度 */
+  private readonly weaponSpinRate: number[] = new Array(MAX_SLOTS).fill(0);
+  private readonly weaponSpinAngle: number[] = new Array(MAX_SLOTS).fill(0);
+  /** 鞭子/铁链/长杆/伸缩臂的实时物理连结参数 */
+  private readonly tetherStates: (WeaponTether | null)[] = new Array(MAX_SLOTS).fill(null);
+  /** 武器额外实体姿态（下砸抬升、咬合挤压、震动） */
+  private readonly motionStates: (WeaponMotion | null)[] = new Array(MAX_SLOTS).fill(null);
   private weaponsVisible = true;
   private walkPhase = 0;
   private walkAmount = 0;
@@ -145,8 +183,9 @@ export class BeetleView extends Phaser.GameObjects.Container {
     const shadow = scene.add.image(2, 6, 'shadow').setScale(1 / SPRITE_RES).setAlpha(0.9);
     this.legs = scene.add.graphics();
     this.shell = scene.add.image(0, 0, shell).setScale(1 / SPRITE_RES);
+    this.weaponTethers = scene.add.graphics();
     this.aura = scene.add.graphics();
-    this.add([shadow, this.legs, this.shell, this.aura]);
+    this.add([shadow, this.legs, this.shell, this.weaponTethers, this.aura]);
     scene.add.existing(this);
     this.drawLegs();
   }
@@ -183,6 +222,11 @@ export class BeetleView extends Phaser.GameObjects.Container {
     const texScale = hiRes ? UI_WEAPON_RES : SPRITE_RES;
     this.weaponScale[slot] = (1 + 0.08 * tier) / texScale;
     this.weaponExtend[slot] = 0;
+    this.weaponAimLocal[slot] = this.tipLocalAngle(slot);
+    this.weaponSpinRate[slot] = 0;
+    this.weaponSpinAngle[slot] = 0;
+    this.tetherStates[slot] = null;
+    this.motionStates[slot] = null;
     if (!texture) {
       this.weaponActive[slot] = false;
       sprite?.setVisible(false);
@@ -214,7 +258,7 @@ export class BeetleView extends Phaser.GameObjects.Container {
   setWeaponAim(slot: number, worldAngle: number, kick = 0, recoilMag = 6): void {
     const sprite = this.weaponSprites[slot];
     if (!sprite) return;
-    sprite.rotation = worldAngle - this.rotation;
+    this.weaponAimLocal[slot] = worldAngle - this.rotation;
     sprite.setFlipY(Math.cos(worldAngle) < 0);
     if (kick > 0) {
       this.weaponKick[slot] = kick;
@@ -244,6 +288,21 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.weaponExtend[slot] = distance;
   }
 
+  /** 设置软体/链锤/长柄武器的实时物理连结状态（null 表示收起归位） */
+  setWeaponTether(slot: number, state: WeaponTether | null): void {
+    this.tetherStates[slot] = state;
+  }
+
+  /** 设置武器当前帧的额外实体姿态（抬锤下砸、夹咬挤压、电锯震动） */
+  setWeaponMotion(slot: number, motion: WeaponMotion | null): void {
+    this.motionStates[slot] = motion;
+  }
+
+  /** 设置旋转类武器（圆锯甲）的自转角速度（弧度/秒） */
+  setWeaponSpin(slot: number, radPerSec: number): void {
+    this.weaponSpinRate[slot] = radPerSec;
+  }
+
   /** 腿尖（武器挂点）的世界坐标 */
   tipWorld(slot: number, out: Phaser.Math.Vector2): Phaser.Math.Vector2 {
     const [lx, ly] = this.tipLocal(slot);
@@ -270,8 +329,10 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.drawAura();
     for (let i = 0; i < MAX_SLOTS; i++) {
       if (this.weaponKick[i] > 0) this.weaponKick[i] = Math.max(0, this.weaponKick[i] - dt);
+      if (this.weaponSpinRate[i] !== 0) this.weaponSpinAngle[i] += this.weaponSpinRate[i] * dt;
       this.placeWeapon(i);
     }
+    this.drawTethers();
   }
 
   private legOffset(group: number): number {
@@ -294,8 +355,21 @@ export class BeetleView extends Phaser.GameObjects.Container {
   private placeWeapon(slot: number): void {
     const sprite = this.weaponSprites[slot];
     if (!sprite || !this.weaponActive[slot] || !this.weaponsVisible) return;
+    const tether = this.tetherStates[slot];
+    // 虫鞭与四节棍在挥扫时由实时物理连杆完整表现，隐藏静止小图标
+    if (tether?.kind === 'whip' || tether?.kind === 'sections') {
+      sprite.setVisible(false);
+      this.weaponShadows[slot]?.setVisible(false);
+      return;
+    }
+    if (!sprite.visible) {
+      sprite.setVisible(true);
+      this.weaponShadows[slot]?.setVisible(true);
+    }
     const [bx, by] = this.tipLocal(slot);
     const ext = this.weaponExtend[slot];
+    const aim = this.weaponAimLocal[slot];
+    const motion = this.motionStates[slot];
     // 真实沿枪管反方向的物理后坐回弹：瞬时猛缩 -> 弹性微过冲回位 + 轻微轴向压缩
     const kick = this.weaponKick[slot];
     let recoil = 0;
@@ -310,7 +384,6 @@ export class BeetleView extends Phaser.GameObjects.Container {
         punch = 0.6 + 0.4 * k;
       } else {
         const k = (p - 0.18) / 0.82;
-        // 阻尼弹性回位（带约 12% 的柔和前冲收束）
         const ease = 1 - Math.pow(1 - k, 2.4);
         const overshoot = Math.sin(k * Math.PI) * 0.14 * mag;
         recoil = -mag * (1 - ease) + overshoot;
@@ -318,25 +391,322 @@ export class BeetleView extends Phaser.GameObjects.Container {
       }
     }
     const wave = Math.sin(this.auraTime * 2.5 + slot * 1.15);
-    const bob = Math.abs(ext) > 1 || kick > 0.01 ? 0 : wave * 1.8;
-    // 在世界竖直方向做轻盈悬浮呼吸，同时把投影始终落在武器正下方地面
+    const bob = Math.abs(ext) > 1 || kick > 0.01 || motion ? 0 : wave * 1.8;
+    // 在世界竖直方向做悬浮呼吸 / 重锤抬升下砸，同时把投影始终留在武器正下方地面
     const c = Math.cos(this.rotation);
     const s = Math.sin(this.rotation);
-    const bobLx = bob * s;
-    const bobLy = bob * c;
+    const lift = bob + (motion?.liftY ?? 0);
+    const liftLx = lift * s;
+    const liftLy = lift * c;
+    const jit = motion?.jitter ?? 0;
+    const jx = jit > 0 ? Math.sin(this.auraTime * 78 + slot * 2.3) * jit : 0;
+    const jy = jit > 0 ? Math.cos(this.auraTime * 91 + slot * 1.7) * jit : 0;
+
     const reach = ext + recoil;
-    const wx = bx + Math.cos(sprite.rotation) * reach + bobLx;
-    const wy = by + Math.sin(sprite.rotation) * reach + bobLy;
-    sprite.setPosition(wx, wy);
+    const gx = bx + Math.cos(aim) * reach;
+    const gy = by + Math.sin(aim) * reach;
+    sprite.setPosition(gx + liftLx + jx, gy + liftLy + jy);
+    const tilt = motion?.tilt ?? 0;
+    const spin = this.weaponSpinRate[slot] !== 0 ? this.weaponSpinAngle[slot] : 0;
+    sprite.rotation = aim + tilt + spin;
+
     const baseSc = this.weaponScale[slot];
-    sprite.setScale(baseSc * (1 - punch * 0.14), baseSc * (1 + punch * 0.1));
+    const sx = (motion?.scaleX ?? 1) * (1 - punch * 0.14);
+    const sy = (motion?.scaleY ?? 1) * (1 + punch * 0.1);
+    sprite.setScale(baseSc * sx, baseSc * sy);
 
     const shadow = this.weaponShadows[slot];
     if (shadow) {
       const shOffY = 7;
-      shadow.setPosition(bx + Math.cos(sprite.rotation) * reach + shOffY * s, by + Math.sin(sprite.rotation) * reach + shOffY * c);
+      shadow.setPosition(gx + shOffY * s, gy + shOffY * c);
       shadow.setRotation(-this.rotation);
-      shadow.setScale(1 - wave * 0.08, 1 - wave * 0.05);
+      // 武器高高抬起时地面投影同步略缩小，营造立体高低差
+      const liftShrink = lift < 0 ? Math.max(0.55, 1 + lift * 0.022) : 1;
+      shadow.setScale((1 - wave * 0.08) * liftShrink, (1 - wave * 0.05) * liftShrink);
+    }
+  }
+
+  /** 绘制虫鞭实时甩鞭行波动画 & 流星锤/锚壳重锤的牵引铁链（纯实体物理运动，无光效） */
+  private drawTethers(): void {
+    const g = this.weaponTethers;
+    g.clear();
+    if (!this.weaponsVisible) return;
+    const cRot = Math.cos(this.rotation);
+    const sRot = Math.sin(this.rotation);
+    // 世界竖直向下方向的投影偏移（转换到容器本地坐标）
+    const shX = 6 * sRot;
+    const shY = 6 * cRot;
+
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      const t = this.tetherStates[i];
+      if (!t || !this.weaponActive[i]) continue;
+      const [bx, by] = this.tipLocal(i);
+
+      if (t.kind === 'whip') {
+        const ang = t.localAngle;
+        const ux = Math.cos(ang);
+        const uy = Math.sin(ang);
+        const nx = -uy;
+        const ny = ux;
+        const st = t.st;
+        // 手柄留在槽位处微甩，绝不脱离角色飞出去
+        const handleLen = 11;
+        const hx0 = bx - ux * 3;
+        const hy0 = by - uy * 3;
+        const hx1 = bx + ux * handleLen;
+        const hy1 = by + uy * handleLen;
+
+        // 鞭身从手柄尖端向外延展至 t.ext，并沿绳身传播一道真实的甩鞭行波：
+        // 蓄力/初段大幅 S 形甩卷 -> 中段抽直破空 -> 末段自然回卷收回
+        const ropeLen = Math.max(10, t.ext - handleLen);
+        const segs = 18;
+        const crackTaut = 1 - Math.exp(-Math.pow((st - 0.54) / 0.18, 2)); // 0.54 处瞬间抽紧拉直
+        const waveAmp = Math.min(24, ropeLen * 0.24) * (0.25 + 0.75 * crackTaut) * Math.sin(Math.min(1, st) * Math.PI);
+        const phase = st * 11.5;
+        const pts: [number, number][] = [];
+        for (let k = 0; k <= segs; k++) {
+          const u = k / segs;
+          // 梢端角滞后感：甩动前半段梢部滞后拖尾，过中段后甩过头抽响
+          const lag = (0.5 - st) * 0.42 * u * u * t.dir;
+          const a = ang + lag;
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          const lnx = -sa;
+          const lny = ca;
+          // 行波从手腕(u=0)向鞭梢(u=1)传递，振幅中段最大、梢尖利落收束
+          const wave = Math.sin(u * Math.PI * 2.2 - phase) * Math.sin(u * Math.PI) * waveAmp * t.dir;
+          const dist = ropeLen * u;
+          pts.push([hx1 + ca * dist + lnx * wave, hy1 + sa * dist + lny * wave]);
+        }
+
+        // 1) 地面柔影
+        g.lineStyle(4.2, 0x080604, 0.22);
+        g.beginPath();
+        g.moveTo(hx0 + shX, hy0 + shY);
+        for (let k = 0; k < pts.length; k++) g.lineTo(pts[k][0] + shX, pts[k][1] + shY);
+        g.strokePath();
+
+        // 2) 鞭绳分段由粗到细绘制（黑墨外轮廓 + 编织皮革暖棕 + 顶部柔高光）
+        for (let k = 0; k < segs; k++) {
+          const u = k / segs;
+          const [x0, y0] = pts[k];
+          const [x1, y1] = pts[k + 1];
+          const w = Math.max(1.3, (1 - u * 0.72) * 4.8);
+          g.lineStyle(w + 2.6, 0x1c0f08, 0.94);
+          g.beginPath();
+          g.moveTo(x0, y0);
+          g.lineTo(x1, y1);
+          g.strokePath();
+          g.lineStyle(w, u > 0.86 ? 0x4a2414 : 0xc6823c, 0.98);
+          g.beginPath();
+          g.moveTo(x0, y0);
+          g.lineTo(x1, y1);
+          g.strokePath();
+          if (u < 0.72) {
+            g.lineStyle(Math.max(0.8, w * 0.35), 0xf2c886, 0.65);
+            g.beginPath();
+            g.moveTo(x0 - nx * 0.5, y0 - ny * 0.5);
+            g.lineTo(x1 - nx * 0.5, y1 - ny * 0.5);
+            g.strokePath();
+          }
+        }
+
+        // 3) 握把（深木色缠革 + 黄铜尾帽，稳稳留在槽位处）
+        g.lineStyle(7.2, 0x1a0e06, 0.96);
+        g.beginPath();
+        g.moveTo(hx0, hy0);
+        g.lineTo(hx1, hy1);
+        g.strokePath();
+        g.lineStyle(4.4, 0x6b3b1e, 1);
+        g.beginPath();
+        g.moveTo(hx0, hy0);
+        g.lineTo(hx1, hy1);
+        g.strokePath();
+        g.fillStyle(0xd8a84e, 1);
+        g.fillCircle(hx0, hy0, 2.6);
+      } else if (t.kind === 'sections') {
+        // 四节棍：4 段硬木棍以钢环铰接，从槽位向挥扫方向甩出微弯
+        const ang = t.localAngle;
+        const ux = Math.cos(ang);
+        const uy = Math.sin(ang);
+        const nx = -uy;
+        const ny = ux;
+        const totalLen = Math.max(18, t.ext);
+        const bend = Math.min(20, totalLen * 0.16) * Math.sin(Math.min(1, t.st) * Math.PI) * -t.dir;
+        const knots: [number, number][] = [];
+        for (let k = 0; k <= 4; k++) {
+          const u = k / 4;
+          const off = Math.sin(u * Math.PI) * bend;
+          knots.push([bx + ux * (totalLen * u) + nx * off, by + uy * (totalLen * u) + ny * off]);
+        }
+        // 地面投影
+        g.lineStyle(4.5, 0x080604, 0.22);
+        g.beginPath();
+        g.moveTo(knots[0][0] + shX, knots[0][1] + shY);
+        for (let k = 1; k <= 4; k++) g.lineTo(knots[k][0] + shX, knots[k][1] + shY);
+        g.strokePath();
+        // 4 节木棍 + 金属铰链环
+        for (let k = 0; k < 4; k++) {
+          const [x0, y0] = knots[k];
+          const [x1, y1] = knots[k + 1];
+          const sx = x0 + (x1 - x0) * 0.08;
+          const sy = y0 + (y1 - y0) * 0.08;
+          const ex = x0 + (x1 - x0) * 0.92;
+          const ey = y0 + (y1 - y0) * 0.92;
+          g.lineStyle(6.4, 0x1a0e06, 0.95);
+          g.beginPath();
+          g.moveTo(sx, sy);
+          g.lineTo(ex, ey);
+          g.strokePath();
+          g.lineStyle(3.6, k % 2 === 0 ? 0xb47e42 : 0x9c6832, 1);
+          g.beginPath();
+          g.moveTo(sx, sy);
+          g.lineTo(ex, ey);
+          g.strokePath();
+          if (k > 0) {
+            g.fillStyle(0x161a22, 0.96);
+            g.fillCircle(x0, y0, 3.0);
+            g.fillStyle(0xb8c6d8, 1);
+            g.fillCircle(x0, y0, 1.6);
+          }
+        }
+      } else if (t.kind === 'pole') {
+        // 长柄杆（长角 / 骑甲长枪 / 三叉戟 / 镰臂 / 远足杖）：将刺出或挥出的长柄连回槽位
+        const sprite = this.weaponSprites[i];
+        if (!sprite) continue;
+        const wx = sprite.x;
+        const wy = sprite.y;
+        const dx = wx - bx;
+        const dy = wy - by;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 14) continue;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const ex = wx - ux * 6;
+        const ey = wy - uy * 6;
+        g.lineStyle(3.8, 0x080604, 0.2);
+        g.beginPath();
+        g.moveTo(bx + shX, by + shY);
+        g.lineTo(ex + shX, ey + shY);
+        g.strokePath();
+        g.lineStyle(5.2, 0x1a1008, 0.94);
+        g.beginPath();
+        g.moveTo(bx, by);
+        g.lineTo(ex, ey);
+        g.strokePath();
+        g.lineStyle(2.8, 0x9a7246, 1);
+        g.beginPath();
+        g.moveTo(bx, by);
+        g.lineTo(ex, ey);
+        g.strokePath();
+        g.lineStyle(1.0, 0xd8b47c, 0.6);
+        g.beginPath();
+        g.moveTo(bx, by);
+        g.lineTo(ex, ey);
+        g.strokePath();
+      } else if (t.kind === 'scissor') {
+        // 爆雷钳机械剪刀伸缩臂：手风琴式交叉金属连杆，让 400px 远程抓钳有扎实的机械结构
+        const sprite = this.weaponSprites[i];
+        if (!sprite) continue;
+        const wx = sprite.x;
+        const wy = sprite.y;
+        const dx = wx - bx;
+        const dy = wy - by;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 14) continue;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const nx = -uy;
+        const ny = ux;
+        const cells = Math.min(8, Math.max(3, Math.round(dist / 36)));
+        const halfW = Math.max(3.5, Math.min(8.5, 11 - dist * 0.018));
+        // 交叉连杆阴影与钢梁
+        for (let k = 0; k < cells; k++) {
+          const d0 = (dist * k) / cells;
+          const d1 = (dist * (k + 1)) / cells;
+          const a0x = bx + ux * d0 + nx * halfW;
+          const a0y = by + uy * d0 + ny * halfW;
+          const b0x = bx + ux * d0 - nx * halfW;
+          const b0y = by + uy * d0 - ny * halfW;
+          const a1x = bx + ux * d1 + nx * halfW;
+          const a1y = by + uy * d1 + ny * halfW;
+          const b1x = bx + ux * d1 - nx * halfW;
+          const b1y = by + uy * d1 - ny * halfW;
+          g.lineStyle(3.4, 0x16181e, 0.92);
+          g.beginPath();
+          g.moveTo(a0x, a0y);
+          g.lineTo(b1x, b1y);
+          g.moveTo(b0x, b0y);
+          g.lineTo(a1x, a1y);
+          g.strokePath();
+          g.lineStyle(1.6, 0xc2ccd8, 0.96);
+          g.beginPath();
+          g.moveTo(a0x, a0y);
+          g.lineTo(b1x, b1y);
+          g.moveTo(b0x, b0y);
+          g.lineTo(a1x, a1y);
+          g.strokePath();
+          // 中心铰接铆钉
+          const cx = bx + ux * ((d0 + d1) * 0.5);
+          const cy = by + uy * ((d0 + d1) * 0.5);
+          g.fillStyle(0xe8b848, 1);
+          g.fillCircle(cx, cy, 1.5);
+        }
+      } else {
+        // 铁链（流星锤 / 锚壳重锤）：把飞出的锤头/船锚用一节节铁链牢牢拴在角色槽位上
+        const sprite = this.weaponSprites[i];
+        if (!sprite) continue;
+        const wx = sprite.x;
+        const wy = sprite.y;
+        const dx = wx - bx;
+        const dy = wy - by;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 10) continue;
+        const nx = -dy / dist;
+        const ny = dx / dist;
+        // 挥扫惯性弧度：链条略向挥扫反方向微弯
+        const bow = Math.min(18, dist * 0.14) * Math.sin(Math.min(1, t.st) * Math.PI) * -t.dir;
+        const mx = (bx + wx) * 0.5 + nx * bow;
+        const my = (by + wy) * 0.5 + ny * bow;
+        const evalQ = (u: number): [number, number] => {
+          const inv = 1 - u;
+          return [inv * inv * bx + 2 * inv * u * mx + u * u * wx, inv * inv * by + 2 * inv * u * my + u * u * wy];
+        };
+
+        // 铁链地面微影
+        g.lineStyle(3.2, 0x080604, 0.2);
+        g.beginPath();
+        for (let k = 0; k <= 10; k++) {
+          const [px, py] = evalQ(k / 10);
+          if (k === 0) g.moveTo(px + shX, py + shY);
+          else g.lineTo(px + shX, py + shY);
+        }
+        g.strokePath();
+
+        // 一节一节的铁链环（深墨边 + 钢灰环身 + 高光点）
+        const links = Math.max(3, Math.round(dist / 8.5));
+        for (let k = 0; k < links; k++) {
+          const u0 = k / links;
+          const u1 = Math.min(1, (k + 0.85) / links);
+          const [x0, y0] = evalQ(u0);
+          const [x1, y1] = evalQ(u1);
+          const wide = k % 2 === 0;
+          g.lineStyle(wide ? 5.2 : 4.2, 0x141820, 0.95);
+          g.beginPath();
+          g.moveTo(x0, y0);
+          g.lineTo(x1, y1);
+          g.strokePath();
+          g.lineStyle(wide ? 2.8 : 2.0, wide ? 0x8a9ab0 : 0x627086, 1);
+          g.beginPath();
+          g.moveTo(x0, y0);
+          g.lineTo(x1, y1);
+          g.strokePath();
+          if (wide) {
+            g.fillStyle(0xd8e4f4, 0.78);
+            g.fillCircle((x0 + x1) * 0.5, (y0 + y1) * 0.5, 1.0);
+          }
+        }
+      }
     }
   }
 
