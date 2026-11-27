@@ -7,14 +7,16 @@ const DEADZONE = 0.12;
 const FULL_AT = 0.6;
 const BASE_R = 72;
 const KNOB_R = 28;
-const MOUSE_FALLBACK_ID = -2;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-interface PendingPointer {
-  id: number;
-  pointerType: string;
-  x: number;
-  y: number;
+type ActiveMode = 'none' | 'touch' | 'pointer';
+
+function findTouch(list: TouchList, id: number): Touch | null {
+  for (let i = 0; i < list.length; i++) {
+    const t = list.item(i);
+    if (t && t.identifier === id) return t;
+  }
+  return null;
 }
 
 function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -25,7 +27,8 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 
 function createJoystickOverlay(): { svg: SVGSVGElement; base: SVGGElement; knob: SVGGElement } {
   const svg = svgEl('svg', { width: '100%', height: '100%' });
-  svg.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:20;display:none;';
+  svg.style.cssText =
+    'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;z-index:20;display:none;';
 
   const base = svgEl('g', {});
   base.appendChild(svgEl('circle', { cx: 0, cy: 0, r: BASE_R, fill: 'rgba(20,13,7,0.34)', stroke: 'rgba(255,224,152,0.5)', 'stroke-width': 3 }));
@@ -61,51 +64,54 @@ function createJoystickOverlay(): { svg: SVGSVGElement; base: SVGGElement; knob:
 
 /**
  * 全视口浮动摇杆（包括宽屏手机横屏两侧的黑边留白区域）：
- * - 画布内按空白处由 Phaser 判定不穿透按钮后触发；
- * - 画布外（左右留白黑边/上下边距）由 window PointerEvent 直接接管；
- * - 拖动全程由 window 追踪，跨过画布边界也不会断触或卡死。
+ * - 触屏直接基于 window TouchEvent（Touch.identifier + ev.touches 实时触点表），
+ *   彻底避免 Touch.identifier 与 PointerEvent.pointerId 混用错配，且在系统漏发 touchend/touchcancel 时自动自愈；
+ * - 鼠标 / 手写笔由 window PointerEvent 接管；
+ * - 按下时同步调用 Phaser 命中检测，点中暂停/冲刺等 UI 按钮时不触发摇杆。
  */
 export class VirtualJoystick {
+  private readonly scene: Phaser.Scene;
   private readonly canvas: HTMLCanvasElement;
   private readonly svg: SVGSVGElement;
   private readonly base: SVGGElement;
   private readonly knob: SVGGElement;
-  private pointerId = -1;
+  private activeMode: ActiveMode = 'none';
+  private activeId = 0;
   private ox = 0;
   private oy = 0;
   private activeScale = 1;
   private enabled = true;
-  /** Phaser 的 MouseManager/TouchManager 使用 mousedown/touchstart，需通过前置 pointerdown 关联真实的 PointerEvent.pointerId */
-  private readonly pendingCanvasDowns: PendingPointer[] = [];
+  private destroyed = false;
 
   constructor(
     scene: Phaser.Scene,
     private readonly radius = BASE_R * HUD_SCALE,
   ) {
+    this.scene = scene;
     this.canvas = scene.game.canvas;
     const overlay = createJoystickOverlay();
     this.svg = overlay.svg;
     this.base = overlay.base;
     this.knob = overlay.knob;
 
-    const input = scene.input;
-    input.on('pointerdown', this.onCanvasDown, this);
-    window.addEventListener('pointerdown', this.onWindowDown);
-    window.addEventListener('pointermove', this.onWindowMove);
-    window.addEventListener('pointerup', this.onWindowUp);
-    window.addEventListener('pointercancel', this.onWindowUp);
-    window.addEventListener('blur', this.onBlur);
+    window.addEventListener('touchstart', this.onTouchStart, { passive: false });
+    window.addEventListener('touchmove', this.onTouchMove, { passive: false });
+    window.addEventListener('touchend', this.onTouchEnd);
+    window.addEventListener('touchcancel', this.onTouchEnd);
+    window.addEventListener('pointerdown', this.onPointerDown);
+    window.addEventListener('pointermove', this.onPointerMove);
+    window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerUp);
+    window.addEventListener('blur', this.onRelease);
+    window.addEventListener('pagehide', this.onRelease);
+    window.addEventListener('orientationchange', this.onRelease);
+    window.addEventListener('contextmenu', this.onRelease);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
 
-    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.release();
-      input.off('pointerdown', this.onCanvasDown, this);
-      window.removeEventListener('pointerdown', this.onWindowDown);
-      window.removeEventListener('pointermove', this.onWindowMove);
-      window.removeEventListener('pointerup', this.onWindowUp);
-      window.removeEventListener('pointercancel', this.onWindowUp);
-      window.removeEventListener('blur', this.onBlur);
-      this.svg.remove();
-    });
+    scene.events.on(Phaser.Scenes.Events.PAUSE, this.onRelease);
+    scene.events.on(Phaser.Scenes.Events.SLEEP, this.onRelease);
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, this.destroy);
+    scene.events.once(Phaser.Scenes.Events.DESTROY, this.destroy);
   }
 
   setEnabled(v: boolean): void {
@@ -118,8 +124,33 @@ export class VirtualJoystick {
     return Math.max(0.45, (this.radius / BASE_R) * (rectH / GAME_HEIGHT));
   }
 
-  private start(id: number, x: number, y: number): void {
-    this.pointerId = id;
+  private hitsInteractiveUI(clientX: number, clientY: number): boolean {
+    const rect = this.canvas.getBoundingClientRect();
+    if (
+      rect.width <= 0 ||
+      rect.height <= 0 ||
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return false;
+    }
+    const input = this.scene.input;
+    if (!this.scene.sys?.isActive() || !input?.isActive()) return false;
+    const probe = {
+      x: ((clientX - rect.left) / rect.width) * this.scene.scale.width,
+      y: ((clientY - rect.top) / rect.height) * this.scene.scale.height,
+      worldX: 0,
+      worldY: 0,
+      camera: null,
+    } as unknown as Phaser.Input.Pointer;
+    return input.hitTestPointer(probe).length > 0;
+  }
+
+  private start(mode: Exclude<ActiveMode, 'none'>, id: number, x: number, y: number): void {
+    this.activeMode = mode;
+    this.activeId = id;
     this.ox = x;
     this.oy = y;
     this.activeScale = this.cssScale();
@@ -151,89 +182,115 @@ export class VirtualJoystick {
     touchMove.y = (dy / len) * m;
   }
 
-  private takePendingCanvasDown(isMouse: boolean): PendingPointer | undefined {
-    const idx = this.pendingCanvasDowns.findIndex((item) =>
-      isMouse ? item.pointerType !== 'touch' : item.pointerType !== 'mouse',
-    );
-    if (idx === -1) return undefined;
-    return this.pendingCanvasDowns.splice(idx, 1)[0];
-  }
-
-  private matchesActive(ev: PointerEvent): boolean {
-    if (this.pointerId === -1) return false;
-    if (this.pointerId === MOUSE_FALLBACK_ID) return ev.pointerType === 'mouse';
-    return ev.pointerId === this.pointerId;
-  }
-
-  private onCanvasDown(p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
-    const isMouse = !p.wasTouch;
-    if (isMouse && p.button !== 0) return;
-    const pending = this.takePendingCanvasDown(isMouse);
-    if (!this.enabled || this.pointerId !== -1 || over.length > 0) return;
-
-    const ev = p.event as PointerEvent | TouchEvent | MouseEvent | undefined;
-    if (ev && 'pointerId' in ev) {
-      this.start(ev.pointerId, ev.clientX, ev.clientY);
+  private readonly onTouchStart = (ev: TouchEvent): void => {
+    if (!this.enabled) {
+      if (this.activeMode !== 'none') this.release();
       return;
     }
-    if (pending) {
-      this.start(pending.id, pending.x, pending.y);
-      return;
+    // 实时校验当前追踪的触点是否仍在屏幕上：若系统漏发了 touchend/touchcancel，立即释放避免轮盘卡死
+    if (this.activeMode === 'touch') {
+      if (findTouch(ev.touches, this.activeId)) return;
+      this.release();
+    } else if (this.activeMode === 'pointer') {
+      this.release();
     }
-    const touch = ev && 'changedTouches' in ev ? ev.changedTouches[0] : undefined;
-    const rect = this.canvas.getBoundingClientRect();
-    const x = touch
-      ? touch.clientX
-      : ev && 'clientX' in ev
-        ? ev.clientX
-        : rect.left + (p.x / (this.canvas.width || 1)) * rect.width;
-    const y = touch
-      ? touch.clientY
-      : ev && 'clientY' in ev
-        ? ev.clientY
-        : rect.top + (p.y / (this.canvas.height || 1)) * rect.height;
-    this.start(touch ? touch.identifier : isMouse ? MOUSE_FALLBACK_ID : p.id, x, y);
-  }
 
-  private readonly onWindowDown = (ev: PointerEvent): void => {
-    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
-    if (!this.enabled || this.pointerId !== -1) return;
-    // 画布内部需等 Phaser onCanvasDown 判定是否点中按钮，这里先记下 PointerEvent 以便关联 pointerId
-    if (ev.target === this.canvas) {
-      this.pendingCanvasDowns.push({
-        id: ev.pointerId,
-        pointerType: ev.pointerType,
-        x: ev.clientX,
-        y: ev.clientY,
-      });
-      if (this.pendingCanvasDowns.length > 8) this.pendingCanvasDowns.shift();
+    for (let i = 0; i < ev.changedTouches.length; i++) {
+      const t = ev.changedTouches.item(i);
+      if (!t) continue;
+      if (this.hitsInteractiveUI(t.clientX, t.clientY)) continue;
+      this.start('touch', t.identifier, t.clientX, t.clientY);
+      if (ev.target !== this.canvas && ev.cancelable) ev.preventDefault();
       return;
     }
-    this.start(ev.pointerId, ev.clientX, ev.clientY);
   };
 
-  private readonly onWindowMove = (ev: PointerEvent): void => {
-    if (!this.matchesActive(ev)) return;
-    if (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0) {
+  private readonly onTouchMove = (ev: TouchEvent): void => {
+    if (this.activeMode !== 'touch') return;
+    if (!this.enabled) {
+      this.release();
+      return;
+    }
+    const active = findTouch(ev.touches, this.activeId);
+    if (!active) {
+      this.release();
+      return;
+    }
+    if (ev.target !== this.canvas && ev.cancelable) ev.preventDefault();
+    this.move(active.clientX, active.clientY);
+  };
+
+  private readonly onTouchEnd = (ev: TouchEvent): void => {
+    if (this.activeMode !== 'touch') return;
+    if (findTouch(ev.changedTouches, this.activeId) || !findTouch(ev.touches, this.activeId)) {
+      this.release();
+    }
+  };
+
+  private readonly onPointerDown = (ev: PointerEvent): void => {
+    // 触屏设备统一由 TouchEvent 追踪（有 ev.touches 真值表可自愈）；仅无 TouchEvent 的环境回退到 PointerEvent
+    if (ev.pointerType === 'touch' && 'ontouchstart' in window) return;
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    if (!this.enabled) return;
+    if (this.activeMode === 'touch') return;
+    if (this.activeMode === 'pointer') {
+      if (ev.pointerType === 'mouse') this.release();
+      else return;
+    }
+    if (this.hitsInteractiveUI(ev.clientX, ev.clientY)) return;
+    this.start('pointer', ev.pointerId, ev.clientX, ev.clientY);
+  };
+
+  private readonly onPointerMove = (ev: PointerEvent): void => {
+    if (this.activeMode !== 'pointer' || ev.pointerId !== this.activeId) return;
+    if (!this.enabled || (ev.pointerType === 'mouse' && (ev.buttons & 1) === 0)) {
       this.release();
       return;
     }
     this.move(ev.clientX, ev.clientY);
   };
 
-  private readonly onWindowUp = (ev: PointerEvent): void => {
-    const pendingIdx = this.pendingCanvasDowns.findIndex((item) => item.id === ev.pointerId);
-    if (pendingIdx !== -1) this.pendingCanvasDowns.splice(pendingIdx, 1);
-    if (this.matchesActive(ev)) this.release();
+  private readonly onPointerUp = (ev: PointerEvent): void => {
+    if (this.activeMode === 'pointer' && ev.pointerId === this.activeId) {
+      this.release();
+    }
   };
 
-  private readonly onBlur = (): void => {
+  private readonly onVisibilityChange = (): void => {
+    if (document.hidden) this.release();
+  };
+
+  private readonly onRelease = (): void => {
     this.release();
   };
 
+  private readonly destroy = (): void => {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.release();
+    window.removeEventListener('touchstart', this.onTouchStart);
+    window.removeEventListener('touchmove', this.onTouchMove);
+    window.removeEventListener('touchend', this.onTouchEnd);
+    window.removeEventListener('touchcancel', this.onTouchEnd);
+    window.removeEventListener('pointerdown', this.onPointerDown);
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('blur', this.onRelease);
+    window.removeEventListener('pagehide', this.onRelease);
+    window.removeEventListener('orientationchange', this.onRelease);
+    window.removeEventListener('contextmenu', this.onRelease);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.scene.events.off(Phaser.Scenes.Events.PAUSE, this.onRelease);
+    this.scene.events.off(Phaser.Scenes.Events.SLEEP, this.onRelease);
+    this.scene.events.off(Phaser.Scenes.Events.SHUTDOWN, this.destroy);
+    this.scene.events.off(Phaser.Scenes.Events.DESTROY, this.destroy);
+    this.svg.remove();
+  };
+
   private release(): void {
-    this.pointerId = -1;
-    this.pendingCanvasDowns.length = 0;
+    this.activeMode = 'none';
+    this.activeId = 0;
     this.svg.style.display = 'none';
     touchMove.x = touchMove.y = 0;
   }
