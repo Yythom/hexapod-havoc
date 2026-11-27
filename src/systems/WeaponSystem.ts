@@ -72,6 +72,8 @@ interface Slot {
   /** Railgun：距离下一次蓄力加伤的时间 */
   rampTimer: number;
   aim: number;
+  /** 武器当前平滑渲染朝向（杜绝换目标或收招时瞬间 180° 瞬移乱甩） */
+  visualAim: number;
   // 近战动作状态
   swing: number;
   swingTotal: number;
@@ -153,6 +155,7 @@ export class WeaponSystem {
         placeCd: 0.2 + i * 0.1,
         rampTimer: 5,
         aim: view.rotation + view.tipLocalAngle(i),
+        visualAim: view.rotation + view.tipLocalAngle(i),
         swing: 0,
         swingTotal: SWING_TIME,
         reach: 0,
@@ -169,7 +172,21 @@ export class WeaponSystem {
     for (let i = 0; i < MAX_SLOTS; i++) {
       const s = this.slots[i];
       view.setWeapon(i, s ? s.def.icon : null, s?.tier ?? 0);
-      if (s?.def.id === 'circular-saw') view.setWeaponSpin(i, 9);
+      if (s?.def.id === 'circular-saw') {
+        view.setWeaponSpin(i, 9);
+      } else if (s?.def.kind === 'melee' && !tetherKindOf(s.def)) {
+        // 手持近战武器以握柄/腕部为枢轴贴牢爪尖，挥砍/下砸/刺击全程绕手部发力，绝不脱手乱飞
+        const compactGrip =
+          s.def.id === 'spiky-shield' ||
+          s.def.id === 'power-fist' ||
+          s.def.id === 'cestus' ||
+          s.def.id === 'fist' ||
+          s.def.id === 'flaming-knuckles' ||
+          s.def.id === 'hand' ||
+          s.def.id === 'claw' ||
+          s.def.id === 'scissors';
+        view.setWeaponPivot(i, compactGrip ? 0.24 : 0.14);
+      }
     }
   }
 
@@ -267,18 +284,24 @@ export class WeaponSystem {
       const range = this.rangeOf(s.def, stats, s.tier, s.slotBonus);
       const aimPt = ctx.aimPoint;
       const target = aimPt ? this.nearestToFocus(tip.x, tip.y, range, aimPt.x, aimPt.y) : this.enemies.nearest(tip.x, tip.y, range);
-      if (aimPt) {
-        s.aim = Math.atan2(aimPt.y - tip.y, aimPt.x - tip.x);
-      } else if (target) {
-        s.aim = Math.atan2(target.y - tip.y, target.x - tip.x);
+      const exactAim = aimPt
+        ? Math.atan2(aimPt.y - tip.y, aimPt.x - tip.x)
+        : target
+          ? Math.atan2(target.y - tip.y, target.x - tip.x)
+          : null;
+      if (exactAim !== null) {
+        // 平滑转向目标，防止左右两只怪等距时每帧 180° 疯狂来回抽搐
+        s.aim = Phaser.Math.Angle.RotateTo(s.aim, exactAim, (aimPt ? 24 : 16) * dt);
       } else {
         this.idleAim(s, i, dt);
       }
 
       let kick = 0;
-      let recoilMag = 6;
+      let recoilMag = 4.2;
       const canManualFire = !!aimPt && !summon && !s.def.beam && !s.def.chain && (!!target || this.enemies.count > 0);
       if ((target || canManualFire) && s.cd <= 0) {
+        // 出手瞬间校准到真实目标角，确保命中精准但平时不抖动
+        if (exactAim !== null) s.aim = exactAim;
         const interval = this.intervalOf(s);
         s.cd = interval;
         if (summon?.type === 'web') {
@@ -315,14 +338,14 @@ export class WeaponSystem {
             this.fireBeam(s, tip.x, tip.y, target);
             this.onAttack?.();
             kick = 0.09;
-            recoilMag = 3.5;
+            recoilMag = 3.2;
           }
         } else if (s.def.chain) {
           if (target) {
             this.fireChain(s, tip.x, tip.y, target);
             this.onAttack?.();
-            kick = 0.12;
-            recoilMag = 4.8;
+            kick = 0.11;
+            recoilMag = 4.0;
           }
         } else {
           const lobTarget = target ?? (aimPt ? ({ x: aimPt.x, y: aimPt.y } as Enemy) : null);
@@ -333,12 +356,15 @@ export class WeaponSystem {
             if (s.def.special?.turretResetOnAttack) this.resetTurrets();
             sfx.play(shotSound(s.def));
             const heavy = (s.def.projectile?.count ?? 1) >= 4 || (s.def.projectile?.explode ?? 0) > 0 || tierOf(s.def, s.tier).damage >= 16;
-            kick = heavy ? 0.16 : 0.11;
-            recoilMag = heavy ? 9.2 : 5.6;
+            kick = heavy ? 0.14 : 0.1;
+            recoilMag = heavy ? 6.8 : 4.2;
           }
         }
       }
-      view.setWeaponAim(i, s.aim, kick, recoilMag);
+      if (s.swing <= 0) {
+        s.visualAim = Phaser.Math.Angle.RotateTo(s.visualAim, s.aim, 18 * dt);
+        view.setWeaponAim(i, s.visualAim, kick, recoilMag);
+      }
     });
 
     // 蚁后的工蚁：和蚜虫同一套逻辑
@@ -364,7 +390,8 @@ export class WeaponSystem {
   private idleAim(s: Slot, i: number, dt: number): void {
     const view = this.player.view;
     s.aim = Phaser.Math.Angle.RotateTo(s.aim, view.rotation + view.tipLocalAngle(i), 6 * dt);
-    view.setWeaponAim(i, s.aim);
+    s.visualAim = Phaser.Math.Angle.RotateTo(s.visualAim, s.aim, 14 * dt);
+    view.setWeaponAim(i, s.visualAim);
   }
 
   private rangeOf(def: WeaponDef, stats: Stats, tier: number, slotBonus?: SlotBonus): number {
@@ -693,12 +720,13 @@ export class WeaponSystem {
     s.crit = crit;
     s.maxRange = range;
     s.aoeFxFired = false;
-    if (sweep) s.sweepDir = s.sweepDir === 1 ? -1 : 1;
-    s.reach = Math.min(MAX_SCREEN_RANGE, (sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range)) * (1 + 0.06 * s.tier));
+    s.sweepDir = s.sweepDir === 1 ? -1 : 1;
+    s.reach = Math.min(MAX_SCREEN_RANGE, sweep || style === 'bash' ? range : Phaser.Math.Clamp(dist, 28, range));
     s.swingTotal = Math.min(sweep ? SWEEP_TIME : style === 'flurry' ? SWING_TIME * 0.65 : SWING_TIME, interval * 0.8);
     s.swing = s.swingTotal;
     s.lastExt = 0;
-    s.lastAng = s.aim - (s.def.melee!.arc ?? 0) * s.sweepDir;
+    const extraArc = sweep && !tetherKindOf(s.def) ? 0.28 : 0;
+    s.lastAng = s.aim - ((s.def.melee!.arc ?? 0) + extraArc) * s.sweepDir;
     s.hits.length = 0;
   }
 
@@ -740,156 +768,217 @@ export class WeaponSystem {
     const windup = melee.style === 'flurry' ? 0 : Math.min(0.13, 0.03 / Math.max(0.08, s.swingTotal));
 
     if (melee.style === 'sweep') {
-      // 扇形横扫：不画刀光特效，靠武器实体左右往复蓄力挥扫运动直接表达范围
-      // 虫鞭走实时软鞭行波、流星锤/锚带铁链、四节棍走四节连杆、长柄镰刀带长杆、圆锯高速自转
       const arc = melee.arc ?? 1;
       const dir = s.sweepDir;
       const tetherKind = tetherKindOf(s.def);
       const isSaw = s.def.id === 'circular-saw';
       const isPruner = s.def.id === 'pruner';
       if (isSaw) view.setWeaponSpin(slot, 36);
-      if (t < windup) {
-        const wk = t / windup;
-        const ang = s.aim - (arc + 0.18 * wk) * dir;
-        view.setWeaponAim(slot, ang);
-        view.setWeaponExtend(slot, (-4.5 * wk) / view.scaleX);
-        view.setWeaponMotion(slot, null);
-        if (tetherKind === 'whip' || tetherKind === 'sections') {
-          view.setWeaponTether(slot, { kind: tetherKind, st: 0, dir, ext: 14 / view.scaleX, localAngle: ang - view.rotation, arc });
-        } else if (tetherKind) {
-          view.setWeaponTether(slot, null);
-        }
-      } else {
-        const st = (t - windup) / (1 - windup);
-        const ang = s.aim + (-arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(st)) * dir;
-        const ext = s.reach * Math.min(1, st / 0.14, (1 - st) / 0.15) * 0.85;
-        view.setWeaponAim(slot, ang);
-        // 虫鞭与四节棍由物理连杆直接画在容器里，手柄不离身；其他武器沿弧挥出
-        view.setWeaponExtend(slot, tetherKind === 'whip' || tetherKind === 'sections' ? 0 : ext / view.scaleX);
-        if (tetherKind) {
+
+      if (tetherKind) {
+        // 有绳/链/长柄/四节棍连结的横扫：手柄/底座牢牢钉在爪尖，仅按合理物理长度挥扫，绝不飞离半屏
+        const isPole = tetherKind === 'pole';
+        const maxVisExt = isPole ? Math.min(26, s.reach * 0.34) : tetherKind === 'chain' ? Math.min(68, s.reach * 0.65) : Math.min(96, s.reach * 0.8);
+        if (t < windup) {
+          const wk = t / windup;
+          const ang = s.aim - (arc + 0.16 * wk) * dir;
+          s.visualAim = ang;
+          view.setWeaponAim(slot, ang, 0, 0, s.aim);
+          view.setWeaponExtend(slot, isPole ? (maxVisExt * (0.75 - 0.12 * wk)) / view.scaleX : (-3 * wk) / view.scaleX);
+          view.setWeaponMotion(slot, null);
+          if (tetherKind === 'whip' || tetherKind === 'sections') {
+            view.setWeaponTether(slot, { kind: tetherKind, st: 0, dir, ext: 14 / view.scaleX, localAngle: ang - view.rotation, arc });
+          } else if (isPole) {
+            view.setWeaponTether(slot, { kind: 'pole', st: 0, dir, ext: (maxVisExt * 0.75) / view.scaleX, localAngle: ang - view.rotation, arc });
+          } else {
+            view.setWeaponTether(slot, null);
+          }
+        } else {
+          const st = (t - windup) / (1 - windup);
+          const ang = s.aim + (-arc + 2 * arc * Phaser.Math.Easing.Sine.InOut(st)) * dir;
+          const env = Math.min(1, st / 0.16, (1 - st) / 0.18);
+          const hitExt = s.reach * env * 0.86;
+          // 刚性长柄镰刀（pole）杆长恒定绕握把挥扫；铁链/鞭子/四节棍平滑展开再收回
+          const visExt = isPole ? maxVisExt * (0.78 + 0.22 * Math.sin(st * Math.PI)) : maxVisExt * env;
+          s.visualAim = ang;
+          view.setWeaponAim(slot, ang, 0, 0, s.aim);
+          view.setWeaponExtend(slot, tetherKind === 'whip' || tetherKind === 'sections' ? 0 : visExt / view.scaleX);
           view.setWeaponTether(slot, {
             kind: tetherKind,
             st,
             dir,
-            ext: ext / view.scaleX,
+            ext: visExt / view.scaleX,
             localAngle: ang - view.rotation,
             arc,
           });
+          const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
+          for (let k = 1; k <= steps; k++) {
+            const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
+            for (const f of [0.52, 1]) this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * hitExt * f, tipY + Math.sin(a) * hitExt * f, hitR, kb, a + Math.PI * 0.5 * dir);
+          }
+          s.lastAng = ang;
         }
-        // 修枝剪横扫中段补一记干脆剪合挤压
-        if (isPruner) {
-          const snap = Math.exp(-Math.pow((st - 0.5) / 0.14, 2));
-          view.setWeaponMotion(slot, snap > 0.05 ? { scaleX: 1 + 0.18 * snap, scaleY: 1 - 0.34 * snap } : null);
+      } else {
+        // 手持刀剑/小刀/斧/光刃/圆锯：握柄牢牢钉在爪尖（前探 ≤ 3~5px），纯靠手腕三段爆发挥砍，绝不脱手乱飞
+        const slashArc = arc + 0.28;
+        const wind = Math.max(windup, 0.16);
+        const maxArmLunge = isSaw ? 5 : 3;
+        if (t < wind) {
+          const wk = Phaser.Math.Easing.Quadratic.Out(t / wind);
+          const ang = s.aim - (slashArc + 0.2 * wk) * dir;
+          s.visualAim = ang;
+          view.setWeaponAim(slot, ang, 0, 0, s.aim);
+          view.setWeaponExtend(slot, (-2.5 * wk) / view.scaleX);
+          view.setWeaponMotion(slot, { scaleX: 1 - 0.05 * wk, scaleY: 1 + 0.05 * wk });
+        } else {
+          const st = (t - wind) / (1 - wind);
+          const slashPhase = Math.min(1, st / 0.68);
+          const swingEase = Phaser.Math.Easing.Cubic.InOut(slashPhase);
+          const ang = s.aim + (-slashArc + 2 * slashArc * swingEase) * dir;
+          const lungeEnv = st < 0.72 ? Math.sin((st / 0.72) * Math.PI) : 0;
+          const armExt = maxArmLunge * lungeEnv;
+          s.visualAim = ang;
+          view.setWeaponAim(slot, ang, 0, 0, s.aim);
+          view.setWeaponExtend(slot, armExt / view.scaleX);
+
+          const peakVel = slashPhase < 1 ? Math.sin(slashPhase * Math.PI) : 0;
+          if (isPruner) {
+            const snap = Math.exp(-Math.pow((slashPhase - 0.5) / 0.16, 2));
+            view.setWeaponMotion(slot, { scaleX: 1 + 0.28 * peakVel, scaleY: 1 - 0.34 * snap });
+          } else {
+            view.setWeaponMotion(slot, { scaleX: 1 + 0.38 * peakVel, scaleY: 1 + 0.12 * peakVel });
+          }
+
+          if (slashPhase < 1) {
+            const hitExt = s.reach * 0.88;
+            const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
+            for (let k = 1; k <= steps; k++) {
+              const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
+              for (const f of [0.45, 0.92]) {
+                this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * hitExt * f, tipY + Math.sin(a) * hitExt * f, hitR, kb, a + Math.PI * 0.5 * dir);
+              }
+            }
+          }
+          s.lastAng = ang;
         }
-        const steps = Math.max(1, Math.ceil(Math.abs(ang - s.lastAng) / 0.12));
-        for (let k = 1; k <= steps; k++) {
-          const a = s.lastAng + ((ang - s.lastAng) * k) / steps;
-          for (const f of [0.52, 1]) this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext * f, tipY + Math.sin(a) * ext * f, hitR, kb, a + Math.PI * 0.5 * dir);
-        }
-        s.lastAng = ang;
       }
     } else if (melee.style === 'bash') {
-      // 重锤/滚石/砖块/撬棍走“高举蓄力 -> 猛力下砸”立体砸地运动；盾牌/拳套走正前方蓄力重推/直轰
+      // 手持重锤/滚石/砖块/撬棍：握柄稳稳留在爪尖（前探 ≤ 6~8px），高举后仰再狠砸，绝不脱手飞出
       const isPushBash = s.def.id === 'spiky-shield' || s.def.id === 'power-fist' || s.def.id === 'cestus';
       const facingFlip = Math.cos(s.aim) < 0 ? -1 : 1;
-      view.setWeaponAim(slot, s.aim);
+      const maxArmExt = isPushBash ? 8 : 6;
+      s.visualAim = s.aim;
+      view.setWeaponAim(slot, s.aim, 0, 0, s.aim);
       if (t < windup) {
         const wk = t / windup;
-        view.setWeaponExtend(slot, (-6 * wk) / view.scaleX);
+        view.setWeaponExtend(slot, (-3 * wk) / view.scaleX);
         if (isPushBash) {
-          view.setWeaponMotion(slot, { scaleX: 1 - 0.12 * wk, scaleY: 1 + 0.1 * wk });
+          view.setWeaponMotion(slot, { scaleX: 1 - 0.12 * wk, scaleY: 1 + 0.12 * wk });
         } else {
-          // 抬锤蓄力：世界向上高举 + 向后仰倾，地面影子留在下方
-          view.setWeaponMotion(slot, { liftY: -16 * wk, tilt: -0.82 * wk * facingFlip });
+          view.setWeaponMotion(slot, { liftY: -11 * wk, tilt: -0.82 * wk * facingFlip });
         }
       } else {
         const st = (t - windup) / (1 - windup);
         const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
-        const ext = s.reach * 0.72 * Phaser.Math.Easing.Quadratic.Out(out);
-        view.setWeaponExtend(slot, ext / view.scaleX);
+        const armExt = maxArmExt * Phaser.Math.Easing.Quadratic.Out(out);
+        const hitExt = s.reach * 0.74 * Phaser.Math.Easing.Quadratic.Out(out);
+        view.setWeaponExtend(slot, armExt / view.scaleX);
         if (isPushBash) {
           const punch = Math.sin(Math.min(1, st / SWING_OUT) * Math.PI);
-          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * punch, scaleY: 1 - 0.14 * punch });
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.26 * punch, scaleY: 1 - 0.14 * punch });
         } else if (st < SWING_OUT) {
-          // 加速下砸：从高处俯冲压向地面
           const dk = Phaser.Math.Easing.Cubic.In(st / SWING_OUT);
-          const impact = st / SWING_OUT > 0.8 ? (st / SWING_OUT - 0.8) / 0.2 : 0;
+          const impact = st / SWING_OUT > 0.78 ? (st / SWING_OUT - 0.78) / 0.22 : 0;
           view.setWeaponMotion(slot, {
-            liftY: Phaser.Math.Linear(-16, 4, dk),
-            tilt: Phaser.Math.Linear(-0.82, 0.44, dk) * facingFlip,
-            scaleX: 1 + 0.18 * impact,
+            liftY: Phaser.Math.Linear(-11, 4, dk),
+            tilt: Phaser.Math.Linear(-0.82, 0.48, dk) * facingFlip,
+            scaleX: 1 + 0.22 * impact,
             scaleY: 1 - 0.18 * impact,
           });
         } else {
-          // 砸中地面后的短暂停顿回抬
           const rk = (st - SWING_OUT) / (1 - SWING_OUT);
           const ease = Phaser.Math.Easing.Quadratic.Out(rk);
           view.setWeaponMotion(slot, {
             liftY: Phaser.Math.Linear(4, 0, ease),
-            tilt: Phaser.Math.Linear(0.44, 0, ease) * facingFlip,
+            tilt: Phaser.Math.Linear(0.48, 0, ease) * facingFlip,
           });
         }
-        if (ext > s.lastExt) {
+        if (hitExt > s.lastExt) {
           const arc = melee.arc ?? 0.85;
           for (const aOff of [-arc * 0.6, 0, arc * 0.6]) {
             const a = s.aim + aOff;
-            this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * ext, tipY + Math.sin(a) * ext, hitR, kb, a);
+            this.strikeAt(s, tipX, tipY, tipX + Math.cos(a) * hitExt, tipY + Math.sin(a) * hitExt, hitR, kb, a);
           }
         }
-        s.lastExt = Math.max(s.lastExt, ext);
+        s.lastExt = Math.max(s.lastExt, hitExt);
       }
     } else {
       const tetherKind = tetherKindOf(s.def);
       const isBite = s.def.id === 'claw' || s.def.id === 'scissors';
       const isBuzz = s.def.id === 'chainsaw' || s.def.id === 'drill';
       const isPunch = s.def.id === 'fist' || s.def.id === 'flaming-knuckles' || s.def.id === 'hand';
-      view.setWeaponAim(slot, s.aim);
+      const isDagger = s.def.id === 'knife' || s.def.id === 'thief-dagger' || s.def.id === 'sharp-tooth' || s.def.id === 'lightning-shiv' || s.def.id === 'ghost-flint';
+      // 匕首/短刺贴身交替快刺；长柄枪杆沿爪尖握环滑刺（≤36px）；伸缩剪刀臂机械伸出（≤76px）；所有手持武器前探严格 ≤8~10px，绝不脱手乱飞
+      const jabTilt = isDagger ? 0.22 * s.sweepDir : 0;
+      const curAng = s.aim + jabTilt;
+      s.visualAim = curAng;
+      view.setWeaponAim(slot, curAng, 0, 0, s.aim);
+      const maxHandExt = isPunch ? 10 : isDagger ? 9 : 8;
+      const maxTetherExt = tetherKind === 'pole' ? Math.min(36, s.reach * 0.44) : Math.min(76, s.reach * 0.68);
       if (t < windup) {
         const wk = t / windup;
-        view.setWeaponExtend(slot, (-6.5 * wk) / view.scaleX);
-        view.setWeaponMotion(slot, isBite ? { scaleX: 1 - 0.1 * wk, scaleY: 1 + 0.22 * wk } : null);
-        if (tetherKind) view.setWeaponTether(slot, null);
+        view.setWeaponExtend(slot, (-3 * wk) / view.scaleX);
+        view.setWeaponMotion(slot, isBite ? { scaleX: 1 - 0.1 * wk, scaleY: 1 + 0.26 * wk } : null);
+        if (tetherKind === 'pole') {
+          view.setWeaponTether(slot, { kind: 'pole', st: 0, dir: 1, ext: (-3 * wk) / view.scaleX, localAngle: s.aim - view.rotation, arc: 0 });
+        } else if (tetherKind) {
+          view.setWeaponTether(slot, null);
+        }
       } else {
         const st = windup > 0 ? (t - windup) / (1 - windup) : t;
         const out = st < SWING_OUT ? st / SWING_OUT : 1 - (st - SWING_OUT) / (1 - SWING_OUT);
-        const ext = s.reach * Phaser.Math.Easing.Quadratic.Out(out);
-        // 腿尖在本地坐标系里，刺出距离要换算到本地（菜单里甲虫会放大）
-        view.setWeaponExtend(slot, ext / view.scaleX);
+        const easeOut = Phaser.Math.Easing.Quadratic.Out(out);
+        const hitExt = s.reach * easeOut;
+        const visualExt = (tetherKind ? maxTetherExt : maxHandExt) * easeOut;
+        view.setWeaponExtend(slot, visualExt / view.scaleX);
         if (tetherKind) {
           view.setWeaponTether(slot, {
             kind: tetherKind,
             st,
             dir: 1,
-            ext: ext / view.scaleX,
+            ext: visualExt / view.scaleX,
             localAngle: s.aim - view.rotation,
             arc: 0,
           });
         }
         if (isBite) {
-          // 大颚/双刃剪：伸到最远点时利落“咔嚓”咬合压扁再弹回
           const snap = Math.exp(-Math.pow((st - SWING_OUT) / 0.13, 2));
-          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * snap, scaleY: 1 - 0.42 * snap });
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.28 * snap, scaleY: 1 - 0.44 * snap });
         } else if (isBuzz) {
-          // 锯齿颚/钻角：伸出切割/钻进时带高频机械抖动
-          const buzz = out > 0.15 ? 2.4 * out : 0;
-          view.setWeaponMotion(slot, buzz > 0 ? { jitter: buzz, scaleX: 1 + 0.08 * out, scaleY: 1 - 0.05 * out } : null);
+          const buzz = out > 0.15 ? 2.0 * out : 0;
+          view.setWeaponMotion(slot, buzz > 0 ? { jitter: buzz, scaleX: 1 + 0.2 * out, scaleY: 1 - 0.06 * out } : null);
         } else if (isPunch) {
-          // 拳击系：直拳出拳拉伸感
           const jab = Math.exp(-Math.pow((st - SWING_OUT * 0.88) / 0.16, 2));
-          view.setWeaponMotion(slot, { scaleX: 1 + 0.22 * jab, scaleY: 1 - 0.14 * jab });
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.32 * jab, scaleY: 1 - 0.14 * jab });
+        } else if (isDagger) {
+          const flick = Math.sin(Math.min(1, st / SWING_OUT) * Math.PI);
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.28 * flick, tilt: -0.32 * s.sweepDir * (1 - Math.min(1, st / SWING_OUT)) });
+        } else if (!tetherKind) {
+          const poke = Math.sin(Math.min(1, st / SWING_OUT) * Math.PI);
+          view.setWeaponMotion(slot, { scaleX: 1 + 0.24 * poke, scaleY: 1 - 0.08 * poke });
         } else {
           view.setWeaponMotion(slot, null);
         }
-        if (ext > s.lastExt) {
+        if (hitExt > s.lastExt) {
           const dx = Math.cos(s.aim);
           const dy = Math.sin(s.aim);
-          const steps = Math.max(1, Math.ceil((ext - s.lastExt) / SWEEP_STEP));
+          const steps = Math.max(1, Math.ceil((hitExt - s.lastExt) / SWEEP_STEP));
           for (let k = 1; k <= steps; k++) {
-            const e = s.lastExt + ((ext - s.lastExt) * k) / steps;
+            const e = s.lastExt + ((hitExt - s.lastExt) * k) / steps;
             this.strikeAt(s, tipX, tipY, tipX + dx * e, tipY + dy * e, hitR, kb, s.aim);
           }
         }
-        s.lastExt = Math.max(s.lastExt, ext);
+        s.lastExt = Math.max(s.lastExt, hitExt);
       }
     }
     if (s.swing <= 0) {
@@ -902,7 +991,7 @@ export class WeaponSystem {
 
   /** 联机快照：读取各武器槽当前瞄准角 */
   slotAims(): number[] {
-    return this.slots.map((s) => Math.round(s.aim * 100) / 100);
+    return this.slots.map((s) => Math.round(s.visualAim * 100) / 100);
   }
 
   /** 联机快照：导出当前已放置的炮台/地雷 */

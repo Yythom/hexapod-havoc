@@ -8,10 +8,30 @@ import type { Stats } from './stats';
 /** 武器极限射程上限：保证上下左右任意方向都不超过屏幕可见边界（扣掉角色腿尖挂点偏移） */
 export const MAX_SCREEN_RANGE = Math.floor(GAME_HEIGHT / (2 * CAMERA_ZOOM)) - 38;
 
-/** 武器在当前属性下的实际射程（任何加成都不超过屏幕边界上限） */
+/** 长柄类近战（刚性长杆穿过手部握持，略长于手持短兵器） */
+const POLE_MELEE_IDS = new Set(['spear', 'jousting-lance', 'trident', 'scythe', 'hiking-pole', 'stick']);
+
+/** 软体/铁链/伸缩连结类远距近战（全程可见实体连杆连回爪尖） */
+const FLEX_TETHER_MELEE_IDS = new Set(['whip', 'flail', 'anchor', 'quarterstaff', 'dex-troyer']);
+
+export function isTetheredMelee(def: WeaponDef): boolean {
+  return def.kind === 'melee' && (POLE_MELEE_IDS.has(def.id) || FLEX_TETHER_MELEE_IDS.has(def.id));
+}
+
+/** 武器在当前属性下的实际射程（近战严格按真实贴身/连杆长度缩放，武器绝不脱手乱飞；远程保持全射程） */
 export function effectiveRange(def: WeaponDef, stats: Stats, tier = 0, slotBonus?: SlotBonus | null): number {
   const base = tierOf(def, tier).range + (slotBonus?.range ?? 0);
-  const bonus = def.kind === 'melee' ? stats.range * 0.5 : def.summon || def.device ? 0 : stats.range;
+  if (def.kind === 'melee') {
+    if (FLEX_TETHER_MELEE_IDS.has(def.id)) {
+      return Math.max(72, Math.min(138, Math.round(base * 0.46 + stats.range * 0.26)));
+    }
+    if (POLE_MELEE_IDS.has(def.id)) {
+      return Math.max(62, Math.min(118, Math.round(base * 0.42 + stats.range * 0.24)));
+    }
+    // 手持刀剑/斧锤/拳爪/短匕：握柄稳稳留在爪尖挥砍/下砸/刺击，射程贴合真实近身臂展（46~88px）
+    return Math.max(46, Math.min(88, Math.round(base * 0.4 + stats.range * 0.22)));
+  }
+  const bonus = def.summon || def.device ? 0 : stats.range;
   return Math.max(40, Math.min(MAX_SCREEN_RANGE, base + bonus));
 }
 
