@@ -1,0 +1,60 @@
+name: Build and Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Deploy dist to server via rsync
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_PORT}" ] || [ -z "${DEPLOY_SSH_KEY}" ]; then
+            echo "Missing required secrets: DEPLOY_HOST, DEPLOY_PORT, or DEPLOY_SSH_KEY" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT} -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+          rsync -rtz --delay-updates --delete-after \
+            -e "${SSH_CMD}" \
+            dist/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brotato/"
+
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "chown -R www-data:www-data /var/www/brotato && chmod -R a+rX /var/www/brotato"
