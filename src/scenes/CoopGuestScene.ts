@@ -88,7 +88,6 @@ export class CoopGuestScene extends Phaser.Scene {
   private unsubMsg: (() => void) | null = null;
   private unsubState: (() => void) | null = null;
   private unsubSettings: (() => void) | null = null;
-  private aimWorld = new Phaser.Math.Vector2();
 
   constructor() {
     super('CoopGuest');
@@ -327,15 +326,6 @@ export class CoopGuestScene extends Phaser.Scene {
 
   private sendInputNow(): void {
     const [ix, iy] = this.readInput();
-    const ptr = this.input.activePointer;
-    const manual = getSettings().manualAim || (!ptr.wasTouch && ptr.leftButtonDown() && !touchMove.active);
-    let aimX: number | undefined;
-    let aimY: number | undefined;
-    if (manual) {
-      this.cameras.main.getWorldPoint(ptr.x, ptr.y, this.aimWorld);
-      aimX = Math.round(this.aimWorld.x);
-      aimY = Math.round(this.aimWorld.y);
-    }
     coop.send({
       type: 'input',
       data: {
@@ -343,9 +333,6 @@ export class CoopGuestScene extends Phaser.Scene {
         ix: Math.round(ix * 100) / 100,
         iy: Math.round(iy * 100) / 100,
         dash: this.dashQueued,
-        aimX,
-        aimY,
-        manualAim: manual,
       },
     });
     this.dashQueued = false;

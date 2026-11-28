@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, HUD_SCALE } from '../config';
 import { touchMove } from '../core/input';
-import { getSettings } from '../core/settings';
 
 const DEADZONE = 0.12;
 /** 推到这个比例就算全速，手机上不用推到底 */
@@ -232,7 +231,7 @@ export class VirtualJoystick {
   private readonly onPointerDown = (ev: PointerEvent): void => {
     // 触屏设备统一由 TouchEvent 追踪（有 ev.touches 真值表可自愈）；仅无 TouchEvent 的环境回退到 PointerEvent
     if (ev.pointerType === 'touch' && 'ontouchstart' in window) return;
-    if (ev.pointerType === 'mouse' && (ev.button !== 0 || touchMove.keyboardActive || getSettings().manualAim)) return;
+    if (ev.pointerType === 'mouse' && (ev.button !== 0 || touchMove.keyboardActive)) return;
     if (!this.enabled) return;
     if (this.activeMode === 'touch') return;
     if (this.activeMode === 'pointer') {

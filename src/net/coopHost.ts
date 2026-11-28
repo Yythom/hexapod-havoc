@@ -84,7 +84,7 @@ export class CoopHostController {
   p1Revive = 0;
   p2Revive = 0;
 
-  private guestInput: GuestInputPayload = { seq: 0, ix: 0, iy: 0, dash: false, manualAim: false };
+  private guestInput: GuestInputPayload = { seq: 0, ix: 0, iy: 0, dash: false };
   private guestDashQueued = false;
   private p2Moving = false;
   private p2IdleTime = 0;
@@ -333,10 +333,6 @@ export class CoopHostController {
           : stats2;
       const idle = r2.character.perks.idlePenalty;
       const dmgMult = idle && this.p2IdleTime > idle.delay ? idle.mult : 1;
-      const aimPoint =
-        this.guestInput.manualAim && this.guestInput.aimX !== undefined && this.guestInput.aimY !== undefined
-          ? { x: this.guestInput.aimX, y: this.guestInput.aimY }
-          : null;
       this.weapons2.update(dt, {
         stats: combatStats,
         mods: r2.mods,
@@ -347,7 +343,6 @@ export class CoopHostController {
         workers: r2.workerCount,
         workerTier: r2.workerTier,
         workerHp: Math.round((12 + 4 * (run1.wave - 1)) * (1 + Math.max(0, stats2.armor) * 0.04)),
-        aimPoint,
         mantisCrit: p2.mantisCritTime > 0,
       });
 

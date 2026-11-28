@@ -459,6 +459,10 @@ export class EnemyManager {
         e.kx = (e.kx / kLen) * 780;
         e.ky = (e.ky / kLen) * 780;
       }
+      // 土豆兄弟风格受击接触点实心小碎屑（零发光、清晰确认命中）
+      const hitX = e.x - dirX * e.radius * 0.45;
+      const hitY = e.y - dirY * e.radius * 0.45;
+      this.fx.hitChips(hitX, hitY, dirX, dirY, e.def.boss || e.def.elite ? 0xffb878 : 0xe8d4a8, crit);
       this.fx.number(e.x, e.y - e.radius - 6, damage, crit ? 'crit' : 'normal');
       sfx.play(crit ? 'crit' : 'hit');
       this.onDamaged?.(e, damage, crit);

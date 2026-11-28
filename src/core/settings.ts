@@ -4,7 +4,7 @@ import { createCompatStorage, syncOnStorageEvent } from './storage';
 
 export type DamageNumberMode = 'all' | 'crit' | 'off';
 
-/** 玩家设置：音效音量、背景音乐、震屏、隐藏武器、伤害数字分级、瞄准模式、视角缩放。和进度存档分开存。 */
+/** 玩家设置：音效音量、背景音乐、震屏、隐藏武器、伤害数字分级、视角缩放。和进度存档分开存。 */
 export interface Settings {
   /** 0 表示关闭 */
   volume: number;
@@ -12,7 +12,6 @@ export interface Settings {
   shake: boolean;
   hideWeapons: boolean;
   damageNumbers: DamageNumberMode;
-  manualAim: boolean;
   /** 战斗视角缩放倍率（1 = 默认/最大视野，只能向上拉近放大） */
   cameraZoom: number;
 }
@@ -53,7 +52,6 @@ const DEFAULT_SETTINGS: Settings = {
   shake: true,
   hideWeapons: false,
   damageNumbers: 'all',
-  manualAim: false,
   cameraZoom: 1,
 };
 
@@ -67,7 +65,6 @@ function sanitizeSettings(raw: Partial<Settings> | undefined): Settings {
   if (raw.damageNumbers === 'all' || raw.damageNumbers === 'crit' || raw.damageNumbers === 'off') {
     s.damageNumbers = raw.damageNumbers;
   }
-  if (typeof raw.manualAim === 'boolean') s.manualAim = raw.manualAim;
   if (typeof raw.cameraZoom === 'number' && Number.isFinite(raw.cameraZoom)) {
     s.cameraZoom = Math.min(MAX_CAMERA_ZOOM, Math.max(MIN_CAMERA_ZOOM, raw.cameraZoom));
   }
@@ -81,7 +78,6 @@ function pickSettings(s: SettingsStoreState): Settings {
     shake: s.shake,
     hideWeapons: s.hideWeapons,
     damageNumbers: s.damageNumbers,
-    manualAim: s.manualAim,
     cameraZoom: s.cameraZoom,
   };
 }

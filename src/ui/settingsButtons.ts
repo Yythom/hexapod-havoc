@@ -14,7 +14,7 @@ import {
 } from '../core/settings';
 import { createButton } from './Button';
 
-/** 2×3 整齐设置按钮网格 + 视角缩放整行（主菜单可选附带存档导出/导入行）。点一下立即生效并保存。 */
+/** 整齐设置按钮网格（音效/音乐/震屏 + 隐藏武器/伤害数字 + 视角缩放整行，主菜单可选附带存档导出/导入行）。点一下立即生效并保存。 */
 export function addSettingsButtons(
   scene: Phaser.Scene,
   parent: Phaser.GameObjects.Container,
@@ -32,6 +32,9 @@ export function addSettingsButtons(
     const bh = 44;
     const stepX = 174;
     const fullW = stepX * 2 + bw;
+    const halfGap = 14;
+    const halfW = (fullW - halfGap) / 2;
+    const halfOff = (halfW + halfGap) / 2;
     const rowY0 = y;
     const rowY1 = y + 54;
     const rowY2 = y + 108;
@@ -71,36 +74,25 @@ export function addSettingsButtons(
       ),
       createButton(
         scene,
-        cx - stepX,
+        cx - halfOff,
         rowY1,
         `隐藏武器：${s.hideWeapons ? '开' : '关'}`,
         () => {
           updateSettings({ hideWeapons: !getSettings().hideWeapons });
           build();
         },
-        { width: bw, height: bh, fontSize: 17, primary: false },
+        { width: halfW, height: bh, fontSize: 17, primary: false },
       ),
       createButton(
         scene,
-        cx,
+        cx + halfOff,
         rowY1,
-        `数字：${damageNumbersLabel(s.damageNumbers)}`,
+        `伤害数字：${damageNumbersLabel(s.damageNumbers)}`,
         () => {
           updateSettings({ damageNumbers: nextDamageNumbers(getSettings().damageNumbers) });
           build();
         },
-        { width: bw, height: bh, fontSize: 17, primary: false },
-      ),
-      createButton(
-        scene,
-        cx + stepX,
-        rowY1,
-        `瞄准：${s.manualAim ? '鼠标' : '自动'}`,
-        () => {
-          updateSettings({ manualAim: !getSettings().manualAim });
-          build();
-        },
-        { width: bw, height: bh, fontSize: 17, primary: false },
+        { width: halfW, height: bh, fontSize: 17, primary: false },
       ),
       createButton(
         scene,

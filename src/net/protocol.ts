@@ -37,9 +37,6 @@ export interface GuestInputPayload {
   ix: number;
   iy: number;
   dash: boolean;
-  aimX?: number;
-  aimY?: number;
-  manualAim: boolean;
 }
 
 export interface SnapWeapon {

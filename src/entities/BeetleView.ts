@@ -110,6 +110,18 @@ const BODY_PLANS: Record<string, BodyPlan> = {
 export const SLOT_COUNT = 6;
 /** 武器槽最多 9 个（蜘蛛 8 个 + 第七条腿） */
 export const MAX_SLOTS = 9;
+/** 土豆兄弟风格世界稳态武器环（左3右3对称环绕，走位转向绝不跟着转陀螺乱甩） */
+const BROTATO_RING: readonly (readonly [number, number])[] = [
+  [30, -15], // 0: 右上
+  [-30, -15], // 1: 左上
+  [32, 13], // 2: 右下
+  [-32, 13], // 3: 左下
+  [0, -32], // 4: 正上
+  [0, 32], // 5: 正下
+  [37, -1], // 6: 右中（蜘蛛 / 额外槽）
+  [-37, -1], // 7: 左中
+  [0, 40], // 8: 下外
+];
 
 /** 鞭类/链锤/长柄/伸缩臂武器的实时物理连结状态（本地坐标系） */
 export interface WeaponTether {
@@ -154,6 +166,8 @@ export class BeetleView extends Phaser.GameObjects.Container {
   private readonly weaponKickMag: number[] = new Array(MAX_SLOTS).fill(6);
   /** 品质越高，悬浮在周身的武器略大一点 */
   private readonly weaponScale: number[] = new Array(MAX_SLOTS).fill(1);
+  /** 武器渲染逻辑倍率（近战兵器放大至 1.34~1.46× 让刀身/锤头清晰可读，告别迷你贴图在手上微缩） */
+  private readonly weaponSizeBoost: number[] = new Array(MAX_SLOTS).fill(1);
   /** 近战武器刺出去的距离 */
   private readonly weaponExtend: number[] = new Array(MAX_SLOTS).fill(0);
   /** 武器真实瞄准角（本地坐标系，独立于圆锯自转/重锤倾角） */
@@ -220,11 +234,12 @@ export class BeetleView extends Phaser.GameObjects.Container {
     }
   }
 
-  setWeapon(slot: number, texture: string | null, tier = 0, hiRes = false): void {
+  setWeapon(slot: number, texture: string | null, tier = 0, hiRes = false, sizeBoost = 1): void {
     let sprite = this.weaponSprites[slot];
     let shadow = this.weaponShadows[slot];
     const texScale = hiRes ? UI_WEAPON_RES : SPRITE_RES;
-    this.weaponScale[slot] = (1 + 0.08 * tier) / texScale;
+    this.weaponSizeBoost[slot] = sizeBoost;
+    this.weaponScale[slot] = (sizeBoost * (1 + 0.08 * tier)) / texScale;
     this.weaponExtend[slot] = 0;
     this.weaponOriginX[slot] = 0.5;
     this.weaponAimLocal[slot] = this.tipLocalAngle(slot);
@@ -295,11 +310,6 @@ export class BeetleView extends Phaser.GameObjects.Container {
     return this.plan.legs.length;
   }
 
-  private legAt(slot: number): LegDef {
-    const legs = this.plan.legs;
-    return slot < legs.length ? legs[slot] : this.plan.extra[Math.min(this.plan.extra.length - 1, slot - legs.length)];
-  }
-
   /** 近战攻击时武器沿瞄准方向刺出的距离（本地像素） */
   setWeaponExtend(slot: number, distance: number): void {
     this.weaponExtend[slot] = distance;
@@ -334,6 +344,19 @@ export class BeetleView extends Phaser.GameObjects.Container {
     return Math.atan2(ly, lx);
   }
 
+  /** 当前槽位武器从握柄枢轴到兵器尖端的真实世界长度（含品质缩放、体型倍率与当前帧动作拉伸） */
+  weaponForwardWorld(slot: number, scaleXMult = 1): number {
+    const localLen = 24 * (this.weaponScale[slot] * SPRITE_RES) * scaleXMult;
+    return (1 - this.weaponOriginX[slot]) * localLen * this.scaleX;
+  }
+
+  /** 武器更新动作后立即同步本帧精灵、伸展腿肢与连杆绘制，消除 1 帧视觉/判定延迟 */
+  refreshWeapons(): void {
+    for (let i = 0; i < MAX_SLOTS; i++) this.placeWeapon(i);
+    this.drawLegs();
+    this.drawTethers();
+  }
+
   /** amount：0 静止 ~ 1 全速行走 */
   animate(dt: number, amount: number): void {
     if (!Number.isFinite(amount)) amount = 0;
@@ -342,13 +365,13 @@ export class BeetleView extends Phaser.GameObjects.Container {
     this.walkPhase += dt * (4 + 14 * this.walkAmount);
     const breath = 1 + Math.sin(this.auraTime * 3.2) * 0.012 + Math.sin(this.walkPhase * 2) * 0.022 * this.walkAmount;
     this.shell.setScale(breath / SPRITE_RES);
-    this.drawLegs();
-    this.drawAura();
     for (let i = 0; i < MAX_SLOTS; i++) {
       if (this.weaponKick[i] > 0) this.weaponKick[i] = Math.max(0, this.weaponKick[i] - dt);
       if (this.weaponSpinRate[i] !== 0) this.weaponSpinAngle[i] += this.weaponSpinRate[i] * dt;
       this.placeWeapon(i);
     }
+    this.drawLegs();
+    this.drawAura();
     this.drawTethers();
   }
 
@@ -358,14 +381,11 @@ export class BeetleView extends Phaser.GameObjects.Container {
   }
 
   private tipLocal(slot: number): [number, number] {
-    const L = this.legAt(slot);
-    // 武器稳稳挂在对应腿爪尖端（仅微外扩 2.5px 避免与甲壳穿模），绝不漂浮远离身体乱飞
-    const tx = L.tip[0];
-    const ty = L.tip[1] * L.side;
-    const len = Math.hypot(tx, ty) || 1;
-    const extraRing = Math.max(0, slot - this.plan.legs.length) * 6;
-    const pad = 2.5 + extraRing;
-    return [tx + (tx / len) * pad, ty + (ty / len) * pad];
+    // 对齐土豆兄弟：武器按屏幕世界固定方位稳稳环绕角色（走位扭头时绝不跟着整圈甩飞）
+    const [wx, wy] = BROTATO_RING[Math.min(BROTATO_RING.length - 1, Math.max(0, slot))];
+    const c = Math.cos(-this.rotation);
+    const s = Math.sin(-this.rotation);
+    return [wx * c - wy * s, wx * s + wy * c];
   }
 
   private placeWeapon(slot: number): void {
@@ -421,7 +441,9 @@ export class BeetleView extends Phaser.GameObjects.Container {
     const reach = ext + recoil;
     const gx = bx + Math.cos(aim) * reach;
     const gy = by + Math.sin(aim) * reach;
-    sprite.setPosition(gx + liftLx + jx, gy + liftLy + jy);
+    const wx = gx + liftLx + jx;
+    const wy = gy + liftLy + jy;
+    sprite.setPosition(wx, wy);
     const tilt = motion?.tilt ?? 0;
     const spin = this.weaponSpinRate[slot] !== 0 ? this.weaponSpinAngle[slot] : 0;
     sprite.rotation = aim + tilt + spin;
@@ -435,7 +457,7 @@ export class BeetleView extends Phaser.GameObjects.Container {
     if (shadow) {
       const shOffY = 7;
       // 枢轴在握柄端时，投影沿刀身中段偏移，贴合刀体位置
-      const midOff = (0.5 - this.weaponOriginX[slot]) * 26 * (motion?.scaleX ?? 1);
+      const midOff = (0.5 - this.weaponOriginX[slot]) * 24 * this.weaponSizeBoost[slot] * (motion?.scaleX ?? 1);
       const visAng = aim + tilt;
       shadow.setPosition(gx + Math.cos(visAng) * midOff + shOffY * s, gy + Math.sin(visAng) * midOff + shOffY * c);
       shadow.setRotation(-this.rotation);

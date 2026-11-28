@@ -966,6 +966,35 @@ export class Effects {
     this.splats.push({ img, life: SPLAT_LIFE, maxLife: SPLAT_LIFE, baseAlpha });
   }
 
+  /** 土豆兄弟风格受击接触点卡通实心碎屑（无发光、定向短距崩出，一眼确认兵器/弹丸真的打到肉了） */
+  hitChips(x: number, y: number, dirX: number, dirY: number, color = 0xf2d8b4, crit = false): void {
+    const baseAng = Math.atan2(dirY, dirX);
+    const count = crit ? 6 : 4;
+    for (let i = 0; i < count; i++) {
+      const p = this.acquireParticle();
+      if (!p) return;
+      const spread = (Math.random() - 0.5) * 1.35;
+      const a = baseAng + spread;
+      const v = (crit ? 145 : 115) * (0.55 + Math.random() * 0.65);
+      p.vx = Math.cos(a) * v;
+      p.vy = Math.sin(a) * v;
+      p.maxLife = p.life = 0.15 + Math.random() * 0.09;
+      p.size = (crit && i < 2 ? 0.64 : 0.48) * (0.75 + Math.random() * 0.45);
+      p.streak = false;
+      p.glow = false;
+      const tint = crit && i < 2 ? 0xffe066 : i === 0 ? 0xfff4e0 : color;
+      p.img
+        .setTexture('dot')
+        .setBlendMode(Phaser.BlendModes.NORMAL)
+        .setPosition(x + (Math.random() - 0.5) * 3, y + (Math.random() - 0.5) * 3)
+        .setRotation(a)
+        .setTint(tint)
+        .setAlpha(0.95)
+        .setScale(p.size)
+        .setVisible(true);
+    }
+  }
+
   burst(x: number, y: number, color: number, count: number, speed = 150, size = 1, _glow = false): void {
     for (let i = 0; i < count; i++) {
       const p = this.acquireParticle();

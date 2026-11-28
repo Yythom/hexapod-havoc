@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { ensureBiomeGround } from '../art/biomeGrounds';
 import { bgm } from '../audio/bgm';
 import { sfx } from '../audio/sfx';
-import { CAMERA_ZOOM, DEPTH, IS_COARSE_POINTER, RENDER_SCALE, WORLD_HEIGHT, WORLD_MARGIN, WORLD_WIDTH } from '../config';
+import { CAMERA_ZOOM, DEPTH, RENDER_SCALE, WORLD_HEIGHT, WORLD_MARGIN, WORLD_WIDTH } from '../config';
 import { bus, EVT, listen } from '../core/bus';
 import { MAX_SCREEN_RANGE } from '../core/combat';
 import type { DailyMutatorId } from '../core/daily';
@@ -193,11 +193,8 @@ export class GameScene extends Phaser.Scene {
   /** 手柄按键沿触发状态（冲刺 / 暂停） */
   private padDashDown = false;
   private padPauseDown = false;
-  /** 手瞄 / 鼠标集火准星图形 */
-  private reticle!: Phaser.GameObjects.Graphics;
   /** 靠近战场四边时的边界预警线 */
   private boundaryG!: Phaser.GameObjects.Graphics;
-  private readonly aimWorld = new Phaser.Math.Vector2();
   /** 本波按怪种统计的击杀数（波末批量刷入图鉴） */
   private waveKillsById: Record<string, number> = {};
   /** 本局新解锁的角色 */
@@ -278,7 +275,6 @@ export class GameScene extends Phaser.Scene {
     const skin = this.run.setup.shellSkin ?? loadSave().shellSkin;
     this.player = new Player(this, WORLD_WIDTH / 2, WORLD_HEIGHT / 2, this.run.character.shell, skin);
     this.weapons = new WeaponSystem(this.player, this.projectiles, this.enemies, this.hazards, this.summons, this.resolver, this.fx);
-    this.reticle = this.add.graphics().setDepth(DEPTH.text - 2);
     this.boundaryG = this.add.graphics().setDepth(DEPTH.ground + 2);
 
     this.spawner.onEvent = (title, color) => bus.emit(EVT.WAVE_EVENT, title, color);
@@ -527,7 +523,6 @@ export class GameScene extends Phaser.Scene {
     const run = this.run;
 
     if (run.phase === 'dead' || run.phase === 'victory') {
-      this.reticle.clear();
       this.enemies.update(dt);
       this.tel.update(dt);
       this.fx.update(dt);
@@ -535,7 +530,6 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (run.phase === 'intermission') {
-      this.reticle.clear();
       return;
     }
 
@@ -613,8 +607,6 @@ export class GameScene extends Phaser.Scene {
                 attackSpeedPct: stats.attackSpeedPct + (run.mods.bloodRage > 0 ? missingTenths * 0.06 * run.mods.bloodRage : 0) + frenzyAspd,
               }
             : stats;
-        // 手瞄 / 按住鼠标左键集火（桌面端）
-        const aimPoint = this.resolveManualAim();
         this.weapons.update(dt, {
           stats: combatStats,
           mods: run.mods,
@@ -625,7 +617,6 @@ export class GameScene extends Phaser.Scene {
           workers: run.workerCount,
           workerTier: run.workerTier,
           workerHp: Math.round((12 + 4 * (run.wave - 1)) * (1 + Math.max(0, stats.armor) * 0.04)),
-          aimPoint,
           mantisCrit: this.player.mantisCritTime > 0,
         });
         const selfDps = run.weapons.reduce((a, w) => a + (WEAPONS[w.id]?.special?.selfDamagePerSec ?? 0), 0) + run.mods.selfDamagePerSec;
@@ -649,8 +640,6 @@ export class GameScene extends Phaser.Scene {
         }
         this.checkContact();
         this.updateItemTimers(dt);
-      } else {
-        this.reticle.clear();
       }
       const ch = this.coopHost;
       this.shots.update(
@@ -679,7 +668,6 @@ export class GameScene extends Phaser.Scene {
       this.updateOffscreenMarkers();
       this.checkUnlocks();
     } else {
-      this.reticle.clear();
       run.offscreenMarkers.length = 0;
     }
 
@@ -1644,41 +1632,6 @@ export class GameScene extends Phaser.Scene {
     drawEdge(Math.max(m, p.x - span), WORLD_HEIGHT - m, Math.min(WORLD_WIDTH - m, p.x + span), WORLD_HEIGHT - m, WORLD_HEIGHT - m - p.y);
   }
 
-  private resolveManualAim(): { x: number; y: number } | null {
-    const g = this.reticle;
-    g.clear();
-    if (IS_COARSE_POINTER || touchMove.active) return null;
-    const ptr = this.input.activePointer;
-    if (ptr.wasTouch) return null;
-    const active = getSettings().manualAim || ptr.leftButtonDown();
-    if (!active || (ptr.x === 0 && ptr.y === 0)) return null;
-    this.cameras.main.getWorldPoint(ptr.x, ptr.y, this.aimWorld);
-    const ax = Phaser.Math.Clamp(this.aimWorld.x, 12, WORLD_WIDTH - 12);
-    const ay = Phaser.Math.Clamp(this.aimWorld.y, 12, WORLD_HEIGHT - 12);
-    // 漫画风黑墨外轮廓准星（清晰不挡视线）
-    g.lineStyle(3.4, 0x050507, 0.85);
-    g.strokeCircle(ax, ay, 11);
-    g.lineStyle(1.8, 0xffd44c, 0.95);
-    g.strokeCircle(ax, ay, 11);
-    for (const [dx, dy] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ]) {
-      g.lineStyle(3.2, 0x050507, 0.85);
-      g.beginPath();
-      g.moveTo(ax + dx * 6, ay + dy * 6);
-      g.lineTo(ax + dx * 15, ay + dy * 15);
-      g.strokePath();
-      g.lineStyle(1.6, 0xfff8dc, 0.95);
-      g.beginPath();
-      g.moveTo(ax + dx * 6, ay + dy * 6);
-      g.lineTo(ax + dx * 15, ay + dy * 15);
-      g.strokePath();
-    }
-    return { x: ax, y: ay };
-  }
 
   /** 统计屏幕外的高价值目标（宝藏虫、精英、Boss、掉落宝箱），供 HUD 边缘方向指示箭头使用 */
   private updateOffscreenMarkers(): void {

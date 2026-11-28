@@ -18,18 +18,21 @@ export function isTetheredMelee(def: WeaponDef): boolean {
   return def.kind === 'melee' && (POLE_MELEE_IDS.has(def.id) || FLEX_TETHER_MELEE_IDS.has(def.id));
 }
 
-/** 武器在当前属性下的实际射程（近战严格按真实贴身/连杆长度缩放，武器绝不脱手乱飞；远程保持全射程） */
+/** 武器在当前属性下的实际射程（对齐土豆兄弟：近战吃约半额射程加成且严格 1:1 对齐真实兵器触碰距离，远程保持全射程） */
 export function effectiveRange(def: WeaponDef, stats: Stats, tier = 0, slotBonus?: SlotBonus | null): number {
   const base = tierOf(def, tier).range + (slotBonus?.range ?? 0);
   if (def.kind === 'melee') {
     if (FLEX_TETHER_MELEE_IDS.has(def.id)) {
-      return Math.max(72, Math.min(138, Math.round(base * 0.46 + stats.range * 0.26)));
+      // 虫鞭 / 流星锤 / 铁锚 / 四节棍 / 爆雷钳：真实连杆长度（74~128px）
+      return Math.max(74, Math.min(128, Math.round(base * 0.44 + stats.range * 0.28)));
     }
     if (POLE_MELEE_IDS.has(def.id)) {
-      return Math.max(62, Math.min(118, Math.round(base * 0.42 + stats.range * 0.24)));
+      // 长柄枪/戟/镰/杖/树枝：真实刚性长杆长度（66~102px）
+      return Math.max(66, Math.min(102, Math.round(base * 0.38 + stats.range * 0.24)));
     }
-    // 手持刀剑/斧锤/拳爪/短匕：握柄稳稳留在爪尖挥砍/下砸/刺击，射程贴合真实近身臂展（46~88px）
-    return Math.max(46, Math.min(88, Math.round(base * 0.4 + stats.range * 0.22)));
+    // 手持近战（刀剑/斧锤/盾/拳/爪/匕首）：土豆兄弟式清晰挥扫/直刺射程（50~78px），与实体兵器完全 1:1 触碰
+    const styleCap = def.melee?.style === 'sweep' ? 78 : def.melee?.style === 'bash' ? 74 : 72;
+    return Math.max(50, Math.min(styleCap, Math.round(base * 0.34 + stats.range * 0.2)));
   }
   const bonus = def.summon || def.device ? 0 : stats.range;
   return Math.max(40, Math.min(MAX_SCREEN_RANGE, base + bonus));
