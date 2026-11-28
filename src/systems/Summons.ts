@@ -5,7 +5,9 @@ import { MAX_SCREEN_RANGE } from '../core/combat';
 import { MAX_ENEMY_RADIUS, SPAWN_POP, type Enemy, type EnemyManager } from './EnemyManager';
 import type { Effects } from './Effects';
 import type { HitResolver, HitSource } from './HitResolver';
-import type { SnapSprite } from '../net/protocol';
+import type { SnapSummon } from '../net/protocol';
+
+let nextSummonUid = 1;
 
 /** 一组蚜虫（来自同一把蚜虫牧群），蚁后的工蚁也走这套 */
 export interface AphidGroup {
@@ -37,6 +39,7 @@ export interface MothGroup {
 }
 
 interface Moth {
+  uid: number;
   sprite: Phaser.GameObjects.Image;
   slot: number;
   x: number;
@@ -47,6 +50,7 @@ interface Moth {
 }
 
 interface Aphid {
+  uid: number;
   sprite: Phaser.GameObjects.Image;
   slot: number;
   x: number;
@@ -91,11 +95,12 @@ export class Summons {
     return n;
   }
 
-  snapshot(): SnapSprite[] {
-    const out: SnapSprite[] = [];
+  snapshot(): SnapSummon[] {
+    const out: SnapSummon[] = [];
     for (const a of this.list) {
       if (!a.alive) continue;
       out.push([
+        a.uid,
         a.sprite.texture.key,
         Math.round(a.x),
         Math.round(a.y),
@@ -105,6 +110,7 @@ export class Summons {
     }
     for (const m of this.moths) {
       out.push([
+        m.uid,
         m.sprite.texture.key,
         Math.round(m.x),
         Math.round(m.y),
@@ -204,6 +210,7 @@ export class Summons {
     while (this.moths.length > want.length) this.moths.pop()!.sprite.destroy();
     while (this.moths.length < want.length) {
       this.moths.push({
+        uid: nextSummonUid++,
         sprite: this.scene.add.image(px, py, 'moth').setDepth(DEPTH.player + 1).setScale(1 / SPRITE_RES),
         slot: -1,
         x: px,
@@ -262,6 +269,7 @@ export class Summons {
     for (const g of groups) {
       for (let n = have.get(g.slot) ?? 0; n < g.count; n++) {
         const a: Aphid = {
+          uid: nextSummonUid++,
           sprite: this.scene.add.image(px, py, texOf.get(g.slot) ?? 'aphid').setDepth(DEPTH.player - 1).setScale(1 / SPRITE_RES),
           slot: g.slot,
           x: px,

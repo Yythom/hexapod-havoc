@@ -310,6 +310,18 @@ export function cLine(ctx: Ctx, pts: number[], stroke: string, lineWidth: number
   ctx.stroke();
 }
 
+/** 兼容 iOS 14.5 / Safari 14 的圆角矩形路径（不依赖 CanvasRenderingContext2D.roundRect） */
+export function cRoundRectPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
 export function cRoundRect(
   ctx: Ctx,
   x: number,
@@ -321,14 +333,7 @@ export function cRoundRect(
   stroke?: string,
   lineWidth = 0,
 ): void {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
+  cRoundRectPath(ctx, x, y, w, h, r);
   if (fill) {
     ctx.fillStyle = fill;
     ctx.fill();

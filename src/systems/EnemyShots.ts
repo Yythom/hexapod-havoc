@@ -151,7 +151,14 @@ export class EnemyShots {
     const out: SnapShot[] = [];
     for (const s of this.list) {
       const k = s.kind === 'stinger' ? 1 : s.kind === 'orb' ? 2 : 0;
-      out.push([k, Math.round(s.x), Math.round(s.y), Math.round(s.angle * 100) / 100]);
+      out.push([
+        k,
+        Math.round(s.x),
+        Math.round(s.y),
+        Math.round(s.angle * 100) / 100,
+        Math.round(s.vx),
+        Math.round(s.vy),
+      ]);
     }
     return out;
   }

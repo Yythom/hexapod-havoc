@@ -70,6 +70,7 @@ export interface SnapPlayer {
   chests: number;
   kills: number;
   moving: boolean;
+  speed: number;
   weaponSlots: number;
   weapons: SnapWeapon[];
   aims: number[];
@@ -82,14 +83,17 @@ export interface SnapPlayer {
  */
 export type SnapEnemy = [number, string, number, number, number, number, number, number, number, number];
 
-/** [tex, x, y, rot, scale, alpha, tint] */
-export type SnapProj = [string, number, number, number, number, number, number];
+/** [tex, x, y, rot, scale, alpha, tint, vx, vy, spin] */
+export type SnapProj = [string, number, number, number, number, number, number, number, number, number];
 
-/** [kind: 0=silk 1=stinger 2=orb, x, y, angle] */
-export type SnapShot = [number, number, number, number];
+/** [kind: 0=silk 1=stinger 2=orb, x, y, angle, vx, vy] */
+export type SnapShot = [number, number, number, number, number, number];
 
-/** [kind: 0=nectar 1=chest 2=fruit 3=mushroom 4=frenzy, x, y, val] */
-export type SnapPickup = [number, number, number, number];
+/** [uid, kind: 0=nectar 1=chest 2=fruit 3=mushroom 4=frenzy, x, y, val] */
+export type SnapPickup = [number, number, number, number, number];
+
+/** [uid, tex, x, y, rot, scale] */
+export type SnapSummon = [number, string, number, number, number, number];
 
 /** [tex, x, y, rot, scale] */
 export type SnapSprite = [string, number, number, number, number];
@@ -133,7 +137,7 @@ export interface CombatSnapshotPayload {
   projs: SnapProj[];
   shots: SnapShot[];
   pickups: SnapPickup[];
-  summons: SnapSprite[];
+  summons: SnapSummon[];
   devices: SnapSprite[];
   hazards: SnapHazard[];
   arena: SnapArena;
@@ -158,6 +162,12 @@ export interface EnterIntermissionPayload {
   chests: number;
   bonus: Stats;
   weapons: OwnedWeapon[];
+  activeContract: ContractId | null;
+  nextWaveOneHp: boolean;
+  nextWaveBait: number;
+  nextWavePeacock: number;
+  mirrorCharges: number;
+  curseOfferBonus: boolean;
 }
 
 /** 客机逛完波间商店点「准备」后发回房主的完整构筑同步 */
@@ -296,4 +306,36 @@ export function applyGuestBuild(run: RunState, build: GuestBuildPayload): void {
   run.mirrorCharges = Math.max(0, Math.floor(Number(build.mirrorCharges) || 0));
   run.curseOfferBonus = !!build.curseOfferBonus;
   run.recomputeStats();
+}
+
+/** 客机侧接收房主波末结算，权威同步花蜜/升级/已消耗赌博状态并进入波间商店 */
+export function applyEnterIntermission(run: RunState, d: EnterIntermissionPayload): void {
+  run.wave = d.wave;
+  run.endless = d.endless;
+  run.won = d.won;
+  run.nectar = d.nectar;
+  run.totalNectar = d.totalNectar;
+  run.waveNectar = d.waveNectar;
+  run.waveKills = d.waveKills;
+  run.waveHarvest = d.waveHarvest;
+  run.waveInterest = d.waveInterest;
+  run.kills = d.kills;
+  run.level = d.level;
+  run.xp = d.xp;
+  run.pendingLevelUps = d.pendingLevelUps;
+  run.chests = d.chests;
+  run.bonus = { ...ZERO_STATS, ...d.bonus };
+  run.weapons = (d.weapons ?? []).filter((w) => !!WEAPONS[w.id]).map((w) => ({ ...w }));
+  run.activeContract = d.activeContract ?? null;
+  run.nextWaveOneHp = !!d.nextWaveOneHp;
+  run.nextWaveBait = Math.max(0, Math.floor(Number(d.nextWaveBait) || 0));
+  run.nextWavePeacock = Math.max(0, Math.floor(Number(d.nextWavePeacock) || 0));
+  run.mirrorCharges = Math.max(0, Math.floor(Number(d.mirrorCharges) || 0));
+  run.curseOfferBonus = !!d.curseOfferBonus;
+  run.coopMaxHp = null;
+  run.coopDowned = false;
+  run.coopRevivePct = 0;
+  run.recomputeStats();
+  run.resetIntermissionState();
+  run.phase = 'intermission';
 }

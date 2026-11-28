@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  applyEnterIntermission,
   applyGuestBuild,
   extractGuestBuild,
   generateRoomCode,
@@ -583,6 +584,47 @@ test('双人联机协议：房间码编解码、倒地 2.5s 救援进度与客�
   assert.equal(hostShadow.weapons[1].enchant, 'vamp');
   assert.equal(hostShadow.activeContract, 'elite_bounty');
   assert.equal(hostShadow.stats.luck, guestRun.stats.luck);
+
+  // 波末进入商店权威同步：清除已消耗的一次性下波赌博标记与战斗期 maxHp 覆盖
+  guestRun.coopMaxHp = 99;
+  assert.equal(guestRun.maxHp, 99);
+  guestRun.nextWaveOneHp = true;
+  guestRun.nextWaveBait = 2;
+  guestRun.nextWavePeacock = 1;
+  guestRun.curseOfferBonus = true;
+  applyEnterIntermission(guestRun, {
+    wave: 2,
+    endless: false,
+    won: false,
+    nectar: 210,
+    totalNectar: 660,
+    waveNectar: 82,
+    waveKills: 34,
+    waveHarvest: 12,
+    waveInterest: 4,
+    kills: 80,
+    level: 8,
+    xp: 15,
+    pendingLevelUps: 1,
+    chests: 1,
+    bonus: { ...guestRun.bonus, maxHp: 12 },
+    weapons: guestRun.weapons,
+    activeContract: null,
+    nextWaveOneHp: false,
+    nextWaveBait: 0,
+    nextWavePeacock: 0,
+    mirrorCharges: 1,
+    curseOfferBonus: false,
+  });
+  assert.equal(guestRun.coopMaxHp, null);
+  assert.equal(guestRun.activeContract, null);
+  assert.equal(guestRun.nextWaveOneHp, false);
+  assert.equal(guestRun.nextWaveBait, 0);
+  assert.equal(guestRun.nextWavePeacock, 0);
+  assert.equal(guestRun.mirrorCharges, 1);
+  assert.equal(guestRun.curseOfferBonus, false);
+  assert.equal(guestRun.bonus.maxHp, 12);
+  assert.equal(guestRun.phase, 'intermission');
 });
 
 console.log(`\nAll ${passed} invariant tests passed!`);

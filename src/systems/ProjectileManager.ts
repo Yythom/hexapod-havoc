@@ -423,6 +423,9 @@ export class ProjectileManager {
         Math.round(p.sprite.scaleX * 100) / 100,
         Math.round(p.sprite.alpha * 100) / 100,
         p.sprite.tintTopLeft ?? 0xffffff,
+        Math.round(p.dirX * p.speed),
+        Math.round(p.dirY * p.speed),
+        Math.round(p.spin * 10) / 10,
       ]);
     }
     return out;

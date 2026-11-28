@@ -282,7 +282,10 @@ class CoopSession {
     bc.onmessage = (ev) => {
       const payload = ev.data as { from?: string; msg?: CoopMessage } | undefined;
       if (!payload || payload.from === this.localClientId || !payload.msg) return;
-      if (this.state !== 'connected') {
+      if (
+        payload.msg.type !== 'leave' &&
+        (this.state === 'hosting' || (this.state === 'disconnected' && payload.msg.type === 'guest_profile'))
+      ) {
         this.setState('connected', '同机本地通道已连接');
         this.startPing();
       }
@@ -301,7 +304,7 @@ class CoopSession {
     bc.onmessage = (ev) => {
       const payload = ev.data as { from?: string; msg?: CoopMessage } | undefined;
       if (!payload || payload.from === this.localClientId || !payload.msg) return;
-      if (this.state !== 'connected') {
+      if (payload.msg.type !== 'leave' && this.state === 'connecting') {
         this.setState('connected', '同机本地通道已连接');
         this.startPing();
       }
@@ -327,7 +330,9 @@ class CoopSession {
     }
     if (msg.type === 'leave') {
       this.stopPing();
-      this.setState('disconnected', msg.reason ?? '队友已离开房间');
+      if (this.state !== 'disconnected') {
+        this.setState('disconnected', msg.reason ?? '队友已离开房间');
+      }
     }
     for (const fn of [...this.msgListeners]) fn(msg);
   }

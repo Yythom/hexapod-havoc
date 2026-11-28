@@ -12,6 +12,7 @@ import {
   cLine,
   cPoly,
   cRoundRect,
+  cRoundRectPath,
   cShellGrad,
   cSoftEllipse,
   type Ctx,
@@ -76,8 +77,7 @@ function mantis(ctx: Ctx): void {
   cCelShape(
     ctx,
     () => {
-      ctx.beginPath();
-      ctx.roundRect(30, 22.2, 19, 7.6, 3.8);
+      cRoundRectPath(ctx, 30, 22.2, 19, 7.6, 3.8);
     },
     '#74b840',
     '#3c6e1c',
@@ -142,8 +142,7 @@ function caterpillar(ctx: Ctx): void {
   cCelShape(
     ctx,
     () => {
-      ctx.beginPath();
-      ctx.roundRect(5, 15, 50, 22, 11);
+      cRoundRectPath(ctx, 5, 15, 50, 22, 11);
     },
     '#7ad028',
     '#3e7810',

@@ -5,7 +5,10 @@ import type { SnapPickup } from '../net/protocol';
 
 type PickupKind = 'nectar' | 'chest' | 'heal' | 'frenzy';
 
+let nextPickupUid = 1;
+
 interface Pickup {
+  uid: number;
   kind: PickupKind;
   sprite: Phaser.GameObjects.Image;
   x: number;
@@ -274,7 +277,7 @@ export class PickupManager {
               : d.sprite.texture.key === 'mushroom'
                 ? 3
                 : 2;
-      out.push([k, Math.round(d.x), Math.round(d.y), d.value]);
+      out.push([d.uid, k, Math.round(d.x), Math.round(d.y), d.value]);
     }
     return out;
   }
@@ -301,6 +304,7 @@ export class PickupManager {
     let d = this.pool.pop();
     if (!d) {
       d = {
+        uid: 0,
         kind,
         sprite: this.scene.add.image(0, 0, 'nectar'),
         x: 0,
@@ -315,6 +319,7 @@ export class PickupManager {
       };
     }
     const a = Math.random() * Math.PI * 2;
+    d.uid = nextPickupUid++;
     d.kind = kind;
     d.x = x;
     d.y = y;

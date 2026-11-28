@@ -63,6 +63,8 @@ export class CoopLobbyScene extends Phaser.Scene {
     this.elapsed = 0;
     this.statusMsg = '';
     this.infoToast = '';
+    coop.match = null;
+    coop.resetWaveReady();
 
     const save = loadSave();
     const startChar = CHARACTERS[save.last.character] ? save.last.character : CHARACTER_ORDER[0];
@@ -233,6 +235,16 @@ export class CoopLobbyScene extends Phaser.Scene {
     } else if (msg.type === 'lobby_state' && coop.role === 'guest') {
       this.remoteLobby = msg.data;
       coop.lobby = msg.data;
+      const g = msg.data.guest;
+      if (
+        !g ||
+        g.character !== this.myProfile.character ||
+        g.weapon !== this.myProfile.weapon ||
+        g.shellSkin !== this.myProfile.shellSkin ||
+        g.ready !== this.myProfile.ready
+      ) {
+        this.syncGuestProfile();
+      }
       this.render();
     } else if (msg.type === 'start_match' && coop.role === 'guest') {
       coop.match = msg.data;

@@ -14,6 +14,7 @@ import { coop } from './coop';
 import {
   applyGuestBuild,
   extractGuestBuild,
+  isLocalRoomCode,
   REVIVE_RADIUS,
   REVIVE_TIME,
   stepReviveProgress,
@@ -42,7 +43,8 @@ const INVULN_TIME = 0.5;
 const TOUCH_PICKUP = 10;
 const HEAL_AMOUNT = 3;
 const HARVEST_GROWTH = 0.03;
-const SNAP_INTERVAL = 0.05; // 20Hz 状态快照
+const SNAP_INTERVAL_ONLINE = 1 / 30; // 联机 30Hz 状态快照
+const SNAP_INTERVAL_LOCAL = 1 / 60; // 同机双标签 60Hz 满频同步
 
 export interface CoopHostDeps {
   scene: Phaser.Scene;
@@ -63,6 +65,7 @@ export interface CoopHostDeps {
   onBothReady: () => void;
   onStartEndless: () => void;
   onFinishRun: () => void;
+  onReturnLobby: () => void;
 }
 
 /**
@@ -135,6 +138,18 @@ export class CoopHostController {
         if (def.kind === 'melee') this.run2.meleeKills++;
         this.run2.kills++;
         this.run2.waveKills++;
+        const comb = this.run2.itemCount('honeycomb');
+        if (comb > 0 && Math.random() < 0.08 * comb) this.healP2(2);
+      },
+      onHitEnemy: (e, crit) => {
+        const r2 = this.run2;
+        if (deps.run1.phase !== 'combat' || this.p2Downed) return;
+        if (r2.hp < r2.maxHp && Math.random() < r2.stats.lifesteal) this.healP2(1, 'lifesteal', e.x, e.y);
+        const silk = r2.itemCount('widowsilk');
+        if (crit && silk > 0 && e.active) {
+          deps.enemies.applyPoison(e, 2 * silk, poisonPerStack(r2.stats, r2.mods), POISON_DURATION + r2.mods.poisonDuration);
+          deps.fx.poisonBubbles(e.x, e.y, 2);
+        }
       },
       onFireHit: (x, y, dps) => deps.arena.igniteAt(x, y, dps),
     };
@@ -374,10 +389,11 @@ export class CoopHostController {
     this.drawCoopOverlays(player1, p2);
     this.syncHudState();
 
-    // 5. 20Hz 快照推送
+    // 5. 高频状态快照推送（在线 30Hz / 同机双标签 60Hz）
+    const snapInterval = isLocalRoomCode(coop.roomCode) ? SNAP_INTERVAL_LOCAL : SNAP_INTERVAL_ONLINE;
     this.snapAcc += dt;
-    if (this.snapAcc >= SNAP_INTERVAL) {
-      this.snapAcc %= SNAP_INTERVAL;
+    if (this.snapAcc >= snapInterval) {
+      this.snapAcc %= snapInterval;
       this.sendSnapshot(p1Moving);
     }
   }
@@ -427,9 +443,10 @@ export class CoopHostController {
 
   /** 死亡过渡期间继续向客机推送快照，防止客机画面定格 */
   tickDeadSnapshot(dt: number): void {
+    const snapInterval = isLocalRoomCode(coop.roomCode) ? SNAP_INTERVAL_LOCAL : SNAP_INTERVAL_ONLINE;
     this.snapAcc += dt;
-    if (this.snapAcc >= SNAP_INTERVAL) {
-      this.snapAcc %= SNAP_INTERVAL;
+    if (this.snapAcc >= snapInterval) {
+      this.snapAcc %= snapInterval;
       this.syncHudState();
       this.sendSnapshot(false);
     }
@@ -630,6 +647,12 @@ export class CoopHostController {
       chests: r2.chests,
       bonus: { ...r2.bonus },
       weapons: r2.weapons.map((w) => ({ ...w })),
+      activeContract: r2.activeContract,
+      nextWaveOneHp: r2.nextWaveOneHp,
+      nextWaveBait: r2.nextWaveBait,
+      nextWavePeacock: r2.nextWavePeacock,
+      mirrorCharges: r2.mirrorCharges,
+      curseOfferBonus: r2.curseOfferBonus,
     };
     coop.send({ type: 'enter_intermission', data: payload });
   }
@@ -688,6 +711,8 @@ export class CoopHostController {
       this.deps.onStartEndless();
     } else if (msg.type === 'finish_run') {
       this.deps.onFinishRun();
+    } else if (msg.type === 'return_lobby') {
+      this.deps.onReturnLobby();
     }
   }
 
@@ -952,6 +977,12 @@ export class CoopHostController {
       chests: run.chests,
       kills: run.kills,
       moving,
+      speed: Math.round(
+        moveSpeed(run.stats) *
+          (p.slowTime > 0 ? 0.7 : 1) *
+          (p.hasteTime > 0 ? 1.3 : 1) *
+          (p.frenzyTime > 0 ? 1.15 : 1),
+      ),
       weaponSlots: run.weaponSlots,
       weapons: run.weapons.map((w) => ({ id: w.id, tier: w.tier, cursed: w.cursed, enchant: w.enchant })),
       aims: weapons.slotAims(),

@@ -168,11 +168,13 @@ export class UIScene extends Phaser.Scene {
     const onOrientation = () => {
       if (portrait.matches && !coop.isCoopMatch) this.pause();
     };
-    portrait.addEventListener('change', onOrientation);
+    if (portrait.addEventListener) portrait.addEventListener('change', onOrientation);
+    else portrait.addListener(onOrientation);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(Phaser.Core.Events.BLUR, autoPause);
       this.game.events.off(Phaser.Core.Events.HIDDEN, autoPause);
-      portrait.removeEventListener('change', onOrientation);
+      if (portrait.removeEventListener) portrait.removeEventListener('change', onOrientation);
+      else portrait.removeListener(onOrientation);
     });
 
     if (this.run.phase === 'combat') {
@@ -933,6 +935,40 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- 暂停 ----------
 
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  showCoopDisconnected(reason = '与房主的联机已断开'): void {
+    this.paused = true;
+    bgm.setPaused(true);
+    this.openModal(
+      '联机已断开',
+      268,
+      (c, top) => {
+        c.add(
+          this.add
+            .text(W / 2, top + 124, reason, {
+              fontFamily: FONT_FAMILY,
+              fontSize: '18px',
+              fontStyle: 'bold',
+              color: '#ff9c94',
+            })
+            .setOrigin(0.5),
+        );
+        c.add(
+          createButton(this, W / 2, top + 206, '返回主菜单', () => this.toMenu(), {
+            width: 240,
+            height: 54,
+            fontSize: 20,
+          }),
+        );
+      },
+      () => this.toMenu(),
+      500,
+    );
+  }
+
   private canPause(): boolean {
     return this.run.phase === 'combat' || this.run.phase === 'cleanup';
   }
@@ -1058,15 +1094,22 @@ export class UIScene extends Phaser.Scene {
   }
 
   private toCoopLobby(): void {
+    this.paused = false;
     bgm.setPaused(false);
+    if (coop.isCoopMatch && coop.state === 'connected') {
+      coop.send({ type: 'return_lobby' });
+    }
+    if (this.scene.isActive('Intermission')) this.scene.stop('Intermission');
     this.scene.stop('Game');
     this.scene.stop('CoopGuest');
     this.scene.start('CoopLobby');
   }
 
   private toMenu(): void {
+    this.paused = false;
     bgm.setPaused(false);
     if (coop.isCoopMatch) coop.disconnect();
+    if (this.scene.isActive('Intermission')) this.scene.stop('Intermission');
     this.scene.stop('Game');
     this.scene.stop('CoopGuest');
     this.scene.start('Menu');

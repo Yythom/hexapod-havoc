@@ -23,8 +23,10 @@ export interface CombatHost {
   heal(n: number, fromX?: number, fromY?: number, kind?: 'lifesteal' | 'other'): void;
   /** 额外掉落花蜜（金龟子钳） */
   dropBonusNectar(x: number, y: number, n: number): void;
-  /** 武器击杀了一只怪（近战击杀统计） */
+  /** 武器击杀了一只怪（近战击杀统计 / 蜂巢碎片等） */
   onWeaponKill(def: WeaponDef): void;
+  /** 武器命中敌人回调（吸取属性、黑寡妇丝等按攻击者独立结算） */
+  onHitEnemy?(e: Enemy, crit: boolean): void;
   /** 暴击触发额外火花弹（暴击火花道具） */
   onCritSpark?(x: number, y: number, count: number): void;
   /** 极短微顿帧反馈（重击/爆炸/精英击杀） */
@@ -97,6 +99,7 @@ export class HitResolver {
       src.owned.totalDamage = (src.owned.totalDamage ?? 0) + dealt;
     }
     const killed = this.enemies.hit(e, damage, crit, dirX, dirY, knockback, 'normal', def.kind === 'melee');
+    this.host.onHitEnemy?.(e, crit);
     if (killed && (e.def.elite || e.def.boss)) {
       this.host.onHitstop?.(e.def.boss ? 0.07 : 0.042);
     }

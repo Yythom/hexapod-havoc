@@ -155,7 +155,7 @@ export class IntermissionScene extends Phaser.Scene {
     kb.on('keydown-FOUR', () => pickSlot(3));
     kb.on('keydown-ESC', () => this.closePopup());
     if (coop.isCoopMatch) {
-      const unsub = coop.onMessage((msg) => {
+      const unsubMsg = coop.onMessage((msg) => {
         if (msg.type === 'host_ready') {
           coop.hostReady = msg.ready;
           if (this.scene.isActive() && this.page === 'shop') this.render();
@@ -164,7 +164,15 @@ export class IntermissionScene extends Phaser.Scene {
           if (this.scene.isActive() && this.page === 'shop') this.render();
         }
       });
-      this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsub);
+      const unsubState = coop.onState((st) => {
+        if (st === 'disconnected' && this.scene.isActive() && this.page === 'shop') {
+          this.render();
+        }
+      });
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        unsubMsg();
+        unsubState();
+      });
     }
     this.nextPage();
     fadeInScene(this);
@@ -574,15 +582,20 @@ export class IntermissionScene extends Phaser.Scene {
     const bw = PHONE ? 220 : RIGHT_W;
     const rerollLabel = cost === 0 ? (PHONE ? '免费刷新' : '免费刷新 [R]') : PHONE ? `刷新  ${cost}` : `刷新 [R]  ${cost}`;
     const isCoop = coop.isCoopMatch;
+    const coopDisconnected = isCoop && coop.state === 'disconnected';
     const myReady = coop.role === 'host' ? coop.hostReady : coop.guestReady;
     const allyReady = coop.role === 'host' ? coop.guestReady : coop.hostReady;
-    const nextWaveLabel = isCoop
-      ? myReady
-        ? '✓ 已准备（点取消）'
-        : `准备 ▶ 第 ${run.wave + 1} 波`
-      : run.endless
-        ? `无尽 ▶ 第 ${run.wave + 1} 波`
-        : `出发 ▶ 第 ${run.wave + 1} 波`;
+    const nextWaveLabel = coopDisconnected
+      ? coop.role === 'host'
+        ? `单人继续 ▶ 第 ${run.wave + 1} 波`
+        : '返回主菜单'
+      : isCoop
+        ? myReady
+          ? '✓ 已准备（点取消）'
+          : `准备 ▶ 第 ${run.wave + 1} 波`
+        : run.endless
+          ? `无尽 ▶ 第 ${run.wave + 1} 波`
+          : `出发 ▶ 第 ${run.wave + 1} 波`;
 
     if (isCoop) {
       root.add(
@@ -590,10 +603,10 @@ export class IntermissionScene extends Phaser.Scene {
           this,
           rx,
           PHONE ? 536 : 552,
-          allyReady ? '✓ 队友已准备就绪' : '◌ 队友选购中…',
+          coopDisconnected ? '⚠ 队友已断开连接' : allyReady ? '✓ 队友已准备就绪' : '◌ 队友选购中…',
           COLOR.panelDeep,
-          allyReady ? 0x5de862 : COLOR.gold,
-          allyReady ? '#a4ffaa' : COLOR.goldText,
+          coopDisconnected ? 0xff5d57 : allyReady ? 0x5de862 : COLOR.gold,
+          coopDisconnected ? '#ff9c94' : allyReady ? '#a4ffaa' : COLOR.goldText,
           12.5,
           12,
           24,
@@ -766,6 +779,7 @@ export class IntermissionScene extends Phaser.Scene {
     const before = this.run.weapons.map((w) => `${w.id}:${w.tier}`);
     const beforeMirror = this.run.mirrorCharges;
     if (!buyOffer(this.run, index)) return;
+    this.invalidateCoopReady();
     if (o.kind === 'weapon') {
       this.changedSlot = this.run.weapons.findIndex((w, idx) => before[idx] !== `${w.id}:${w.tier}`);
       const bought = this.run.weapons[this.changedSlot];
@@ -799,6 +813,7 @@ export class IntermissionScene extends Phaser.Scene {
     if (run.nectar < cost) return;
     run.nectar -= cost;
     run.shopRerolls++;
+    this.invalidateCoopReady();
     sfx.play('reroll');
     refreshOffers(run, run.rng('shop', run.wave * 100 + run.shopRerolls));
     this.animateOffers = true;
@@ -897,6 +912,7 @@ export class IntermissionScene extends Phaser.Scene {
       }
       const quickMerge = () => {
         if (!mergeWeapons(run, j)) return;
+        this.invalidateCoopReady();
         this.changedSlot = Math.min(j, run.weapons.length - 1);
         const merged = run.weapons[this.changedSlot];
         if (merged) recordWeaponSeen(merged.id, merged.tier);
@@ -1062,10 +1078,35 @@ export class IntermissionScene extends Phaser.Scene {
     });
   }
 
+  /** 联机商店中若已点准备但又修改了构筑，自动取消准备避免向房主同步旧构筑 */
+  private invalidateCoopReady(): void {
+    if (!coop.isCoopMatch || coop.state !== 'connected') return;
+    if (coop.role === 'host' && coop.hostReady) {
+      coop.hostReady = false;
+      coop.send({ type: 'host_ready', ready: false });
+    } else if (coop.role === 'guest' && coop.guestReady) {
+      coop.guestReady = false;
+      coop.send({ type: 'guest_ready', ready: false });
+    }
+  }
+
   private finish(): void {
     if (!coop.isCoopMatch) {
       bus.emit(EVT.NEXT_WAVE);
       this.scene.stop();
+      return;
+    }
+    if (coop.state === 'disconnected') {
+      if (coop.role === 'host') {
+        coop.disconnect(false);
+        bus.emit(EVT.NEXT_WAVE);
+        this.scene.stop();
+      } else {
+        coop.disconnect(false);
+        this.scene.stop('CoopGuest');
+        this.scene.stop('UI');
+        this.scene.start('Menu');
+      }
       return;
     }
     if (coop.role === 'host') {
@@ -1228,6 +1269,7 @@ export class IntermissionScene extends Phaser.Scene {
             '◀ 左移槽位',
             () => {
               if (run.swapWeapons(j, j - 1)) {
+                this.invalidateCoopReady();
                 this.changedSlot = j - 1;
                 sfx.play('click');
                 this.render();
@@ -1245,6 +1287,7 @@ export class IntermissionScene extends Phaser.Scene {
             '右移槽位 ▶',
             () => {
               if (run.swapWeapons(j, j + 1)) {
+                this.invalidateCoopReady();
                 this.changedSlot = j + 1;
                 sfx.play('click');
                 this.render();
@@ -1288,7 +1331,8 @@ export class IntermissionScene extends Phaser.Scene {
           by,
           mergeLabel,
           () => {
-            mergeWeapons(run, j);
+            if (!mergeWeapons(run, j)) return;
+            this.invalidateCoopReady();
             this.changedSlot = Math.min(j, run.weapons.length - 1);
             const merged = run.weapons[this.changedSlot];
             if (merged) recordWeaponSeen(merged.id, merged.tier);
@@ -1306,6 +1350,7 @@ export class IntermissionScene extends Phaser.Scene {
           canSell ? `卖出 +${value}` : '最后一把',
           () => {
             sellWeapon(run, j);
+            this.invalidateCoopReady();
             sfx.play('buy');
             this.render();
           },
@@ -1364,6 +1409,7 @@ export class IntermissionScene extends Phaser.Scene {
               `${enc.name}`,
               () => {
                 if (enchantWeapon(run, wIdx, eid)) {
+                  this.invalidateCoopReady();
                   sfx.play('merge');
                   this.toast(`✦ ${WEAPONS[run.weapons[wIdx].id].name} 已获得${enc.name}！`);
                   this.render();
@@ -1393,6 +1439,7 @@ export class IntermissionScene extends Phaser.Scene {
           const z = this.tapZone(sx - 29, sy - 29, 58, 58, () => {
             const res = smeltItem(run, id, run.rng('smelt', run.wave));
             if (res) {
+              this.invalidateCoopReady();
               sfx.play('merge');
               this.toast(`熔炼 ${def.name}：+${res.refund} 花蜜 · ${STAT_META[res.stat].label} ${formatStatDelta(res.stat, res.amount)}`);
               this.render();

@@ -222,6 +222,8 @@ export class RunState {
   coopDowned = false;
   /** 双人联机：自己被救起的读条进度（0~1） */
   coopRevivePct = 0;
+  /** 双人联机客机侧：战斗中以房主快照的 maxHp 为准，避免古树年轮/蝉晚成等波初成长造成显示偏差 */
+  coopMaxHp: number | null = null;
   /** 主动冲刺充能进度（0~1，1 表示当前充能格已满） */
   dashRatio = 1;
   /** 当前可用冲刺次数 & 最大充能次数 */
@@ -268,6 +270,7 @@ export class RunState {
   }
 
   get maxHp(): number {
+    if (this.coopMaxHp !== null) return Math.max(1, Math.round(this.coopMaxHp));
     if (this.hasMutator('glass_soul')) return 1;
     return Math.max(1, Math.round(this.stats.maxHp));
   }

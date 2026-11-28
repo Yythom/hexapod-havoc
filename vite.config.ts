@@ -53,6 +53,8 @@ export default defineConfig({
   base: './',
   plugins: [pwaSwPlugin()],
   build: {
+    target: ['es2020', 'safari14'],
+    cssTarget: ['safari14'],
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {

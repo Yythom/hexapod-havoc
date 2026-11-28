@@ -308,6 +308,12 @@ export class GameScene extends Phaser.Scene {
         },
         onStartEndless: () => bus.emit(EVT.CONTINUE_ENDLESS),
         onFinishRun: () => bus.emit(EVT.FINISH_RUN),
+        onReturnLobby: () => {
+          bgm.setPaused(false);
+          if (this.scene.isActive('Intermission')) this.scene.stop('Intermission');
+          this.scene.stop('UI');
+          this.scene.start('CoopLobby');
+        },
       });
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
         this.coopHost?.destroy();
@@ -419,7 +425,9 @@ export class GameScene extends Phaser.Scene {
     };
     this.enemies.host = host;
     this.enemies.onKilled = (e) => this.onEnemyKilled(e);
-    this.enemies.onDamaged = (e, _dmg, crit) => this.onEnemyDamaged(e, crit);
+    this.enemies.onDamaged = (e, _dmg, crit) => {
+      if (!this.coopHost) this.onEnemyDamaged(e, crit);
+    };
     this.enemies.onPoisonDamage = (d) => {
       this.run.toxinDamage += d;
     };
@@ -438,6 +446,13 @@ export class GameScene extends Phaser.Scene {
       dropBonusNectar: (x, y, n) => this.pickups.dropNectar(x, y, n),
       onWeaponKill: (def) => {
         if (def.kind === 'melee') this.run.meleeKills++;
+        if (this.coopHost) {
+          const comb = this.run.itemCount('honeycomb');
+          if (comb > 0 && Math.random() < 0.08 * comb) this.heal(2);
+        }
+      },
+      onHitEnemy: (e, crit) => {
+        if (this.coopHost) this.onEnemyDamaged(e, crit);
       },
       onCritSpark: (x, y, count) => this.fireSeekingSparks(x, y, count, 10 + 0.5 * this.run.stats.ranged),
       onHitstop: (sec) => this.triggerHitstop(sec),
@@ -817,6 +832,13 @@ export class GameScene extends Phaser.Scene {
 
   private startWave(n: number): void {
     const run = this.run;
+    if (this.coopHost && !coop.isHost) {
+      this.coopHost.destroy();
+      this.coopHost = null;
+      run.coopTeammate = null;
+      run.coopDowned = false;
+      run.coopRevivePct = 0;
+    }
     run.wave = n;
     if (n > run.maxWaves) run.endless = true;
     run.resetIntermissionState();
@@ -876,7 +898,7 @@ export class GameScene extends Phaser.Scene {
         run.totalNectar += piggyBonus;
       }
     }
-    const baitWaves = run.nextWaveBait;
+    const baitWaves = run.nextWaveBait + (this.coopHost?.run2.nextWaveBait ?? 0);
     run.nextWaveBait = 0;
     this.selfDamageAcc = 0;
     this.glassShieldTimer = 12;
@@ -919,11 +941,15 @@ export class GameScene extends Phaser.Scene {
     }
     this.weapons.sync(run.weapons, run.weaponSlots);
     this.arena.startWave(run.activeWeather, run.biome, arenaRng);
-    const spawnBonus = run.mods.spawnRatePct + (contract === 'swarm_harvest' ? 0.4 : 0) + (this.coopHost ? 0.35 : 0);
+    const p2Contract = this.coopHost?.run2.activeContract ?? null;
+    const spawnBonus =
+      run.mods.spawnRatePct +
+      (contract === 'swarm_harvest' || p2Contract === 'swarm_harvest' ? 0.4 : 0) +
+      (this.coopHost ? 0.35 : 0);
     this.coopHost?.startWave(n);
     this.spawner.startWave(def, n, run.difficulty, spawnBonus, run.hasMutator('treasure'), {
       boomParty: run.hasMutator('boom_party'),
-      extraElite: contract === 'elite_bounty',
+      extraElite: contract === 'elite_bounty' || p2Contract === 'elite_bounty',
       dewIntervalMult: run.biome.dewIntervalMult,
       rng: waveRng,
     });
@@ -1284,9 +1310,11 @@ export class GameScene extends Phaser.Scene {
       this.addNectar(1);
       this.fx.burst(e.x, e.y, 0xffd44c, 4, 110, 0.75);
     }
-    // 蜂巢碎片：击杀时概率回血
-    const comb = run.itemCount('honeycomb');
-    if (comb > 0 && Math.random() < 0.08 * comb) this.heal(2);
+    // 蜂巢碎片：击杀时概率回血（双人联机按各自武器击杀在 HitResolver.onWeaponKill 独立结算）
+    if (!this.coopHost) {
+      const comb = run.itemCount('honeycomb');
+      if (comb > 0 && Math.random() < 0.08 * comb) this.heal(2);
+    }
     // 腺体 6 件套：带毒敌人死后留下毒云
     if (run.mods.poisonNova > 0 && e.poison > 0) {
       this.hazards.addCloud(e.x, e.y, 62, 2.5, 2 + run.stats.toxin, poisonPerStack(run.stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
@@ -1316,7 +1344,7 @@ export class GameScene extends Phaser.Scene {
     if (run.hp < run.maxHp && Math.random() < run.stats.lifesteal) this.heal(1, 'lifesteal', e.x, e.y);
     // 黑寡妇丝：暴击时叠毒
     const silk = run.itemCount('widowsilk');
-    if (crit && silk > 0) {
+    if (crit && silk > 0 && e.active) {
       this.enemies.applyPoison(e, 2 * silk, poisonPerStack(run.stats, run.mods), POISON_DURATION + run.mods.poisonDuration);
       this.fx.poisonBubbles(e.x, e.y, 2);
     }
@@ -1631,7 +1659,6 @@ export class GameScene extends Phaser.Scene {
     drawEdge(Math.max(m, p.x - span), m, Math.min(WORLD_WIDTH - m, p.x + span), m, p.y - m);
     drawEdge(Math.max(m, p.x - span), WORLD_HEIGHT - m, Math.min(WORLD_WIDTH - m, p.x + span), WORLD_HEIGHT - m, WORLD_HEIGHT - m - p.y);
   }
-
 
   /** 统计屏幕外的高价值目标（宝藏虫、精英、Boss、掉落宝箱），供 HUD 边缘方向指示箭头使用 */
   private updateOffscreenMarkers(): void {
